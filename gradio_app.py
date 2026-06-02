@@ -18,6 +18,7 @@ from typing import List, Dict, Optional, Tuple, Any
 from src.core.orchestrator import Orchestrator, OrchestratorState
 from src.core.personalized_db import PersonalizedDB, ProjectStatus
 from src.core.writing_mode import WritingMode, get_mode_profile
+from src.config.api_config import APIConfigManager, SUPPORTED_PROVIDERS
 from src.utils.url_importer import URLDocumentImporter
 
 STEPS = [
@@ -51,6 +52,7 @@ class GradioApp:
     def __init__(self):
         self.orchestrator = Orchestrator()
         self.pdb = PersonalizedDB()
+        self.api_manager = APIConfigManager()
         self.current_user_id: Optional[str] = None
         self.current_project_id: Optional[str] = None
         self.brief = None
@@ -378,6 +380,40 @@ class GradioApp:
             return "请先创建用户", session
         return self.pdb.get_memory_summary(self.current_project_id), session
 
+    # ═══ API 配置 ═══
+
+    def load_api_config(self) -> Tuple[str, str, str, str, float, int, bool, str]:
+        c = self.api_manager.config
+        return c.provider, c.api_base, c.api_key, c.model, c.temperature, c.max_tokens, c.enable, ""
+
+    def apply_provider(self, provider: str) -> Tuple[str, str, str, str, float, int, bool, str]:
+        self.api_manager.apply_provider_template(provider)
+        c = self.api_manager.config
+        return c.provider, c.api_base, c.api_key, c.model, c.temperature, c.max_tokens, c.enable, f"已加载 {SUPPORTED_PROVIDERS.get(provider, provider)} 默认配置"
+
+    def save_api_config(self, provider: str, api_base: str, api_key: str, model: str, temperature: float, max_tokens: int, enable: bool) -> Tuple[str, str]:
+        self.api_manager.update(
+            provider=provider, api_base=api_base, api_key=api_key,
+            model=model, temperature=temperature, max_tokens=max_tokens, enable=enable
+        )
+        self.api_manager.save()
+        status = "✅ 配置已保存" if enable else "⚠️ 配置已保存但未启用"
+        return status, ""
+
+    def test_api_connection(self) -> str:
+        result = self.api_manager.test_connection()
+        if result["success"]:
+            return f"✅ {result['message']}"
+        return f"❌ {result['message']}"
+
+    def get_config_status(self) -> str:
+        c = self.api_manager.config
+        if c.enable and c.api_key and c.api_base:
+            return f"✅ 已启用 | {SUPPORTED_PROVIDERS.get(c.provider, c.provider)} | {c.model} | {c.api_base}"
+        elif c.api_base:
+            return f"⚠️ 已配置但未启用 | {SUPPORTED_PROVIDERS.get(c.provider, c.provider)} | {c.model}"
+        return "❌ 未配置 LLM API，当前使用本地占位文本生成"
+
 
 def create_ui() -> gr.Blocks:
     app = GradioApp()
@@ -394,7 +430,7 @@ def create_ui() -> gr.Blocks:
                 step_user = gr.Group(visible=True)
                 with step_user:
                     gr.Markdown("### 第1步：创建或选择用户")
-                    user_name = gr.Textbox(label="用户名", placeholder="输入你的姓名或昵称")
+                    user_name = gr.Textbox(label="用户名", placeholder="输入你的姓名或昵称", show_copy_button=False)
                     with gr.Row():
                         user_btn = gr.Button("确认", variant="primary")
                     user_msg = gr.Markdown("")
@@ -474,30 +510,23 @@ def create_ui() -> gr.Blocks:
                     with gr.Row():
                         done_restart = gr.Button("重新开始", variant="secondary")
 
-                # ─── 可见性更新函数 ───
-                def update_vis(progress: str, session: dict):
-                    vis = app._visibility(session)
-                    return {
-                        progress_bar: progress,
-                        step_user: vis[0],
-                        step_proj: vis[1],
-                        step_routing: vis[2],
-                        step_questions: vis[3],
-                        step_plan: vis[4],
-                        step_draft: vis[5],
-                        step_review: vis[6],
-                        step_done: vis[7],
-                    }
-
                 # ─── 用户确认 ───
                 def user_confirm_fn(name: str, session: dict):
-                    progress, msg, new_session = app.create_or_select_user(name, session)
-                    return {
-                        progress_bar: progress,
-                        user_msg: gr.Markdown(msg),
-                        **update_vis(progress, new_session),
-                        session_state: new_session,
-                    }
+                    if not name or not name.strip():
+                        return (
+                            build_progress_bar("1. 用户"),
+                            "请输入用户名",
+                            True, False, False, False, False, False, False, False,
+                            session,
+                        )
+                    progress, msg, new_session = app.create_or_select_user(name.strip(), session)
+                    vis = app._visibility(new_session)
+                    return (
+                        progress,
+                        str(msg) if msg else "",
+                        vis[0], vis[1], vis[2], vis[3], vis[4], vis[5], vis[6], vis[7],
+                        new_session,
+                    )
 
                 user_btn.click(
                     fn=user_confirm_fn,
@@ -508,12 +537,13 @@ def create_ui() -> gr.Blocks:
                 # ─── 项目创建 ───
                 def proj_create_fn(name: str, desc: str, session: dict):
                     progress, _, choices, new_session = app.create_project(name, desc, session)
-                    return {
-                        progress_bar: progress,
-                        routing_display: gr.Markdown(f"选择最接近你当前情况的场景：\n\n{choices}"),
-                        **update_vis(progress, new_session),
-                        session_state: new_session,
-                    }
+                    vis = app._visibility(new_session)
+                    return (
+                        progress,
+                        f"选择最接近你当前情况的场景：\n\n{choices}",
+                        vis[0], vis[1], vis[2], vis[3], vis[4], vis[5], vis[6], vis[7],
+                        new_session,
+                    )
 
                 proj_btn.click(
                     fn=proj_create_fn,
@@ -525,27 +555,20 @@ def create_ui() -> gr.Blocks:
                     s = app._get_state(session)
                     s["step"] = "2. 项目"
                     progress = build_progress_bar("2. 项目")
-                    return {
-                        progress_bar: progress,
-                        **update_vis(progress, session),
-                        session_state: session,
-                    }
+                    vis = app._visibility(session)
+                    return (progress, vis[0], vis[1], vis[2], vis[3], vis[4], vis[5], vis[6], vis[7], session)
                 proj_back.click(fn=proj_back_fn, inputs=[session_state],
                     outputs=[progress_bar, step_user, step_proj, step_routing, step_questions, step_plan, step_draft, step_review, step_done, session_state])
 
                 # ─── 路由选择 ───
                 def routing_fn(choice: str, session: dict):
                     progress, msg, q, teach, new_session = app.submit_routing(choice, session)
-                    return {
-                        progress_bar: progress,
-                        routing_msg: gr.Markdown(msg),
-                        question_text: gr.Markdown(q),
-                        teaching_text: gr.Markdown(teach),
-                        q_msg: gr.Markdown(""),
-                        q_prev: gr.Markdown(""),
-                        **update_vis(progress, new_session),
-                        session_state: new_session,
-                    }
+                    vis = app._visibility(new_session)
+                    return (
+                        progress, msg, q, teach, "", "",
+                        vis[0], vis[1], vis[2], vis[3], vis[4], vis[5], vis[6], vis[7],
+                        new_session,
+                    )
 
                 routing_btn.click(
                     fn=routing_fn,
@@ -557,23 +580,20 @@ def create_ui() -> gr.Blocks:
                     s = app._get_state(session)
                     s["step"] = "3. 场景"
                     progress = build_progress_bar("3. 场景")
-                    return {progress_bar: progress, **update_vis(progress, session), session_state: session}
+                    vis = app._visibility(session)
+                    return (progress, vis[0], vis[1], vis[2], vis[3], vis[4], vis[5], vis[6], vis[7], session)
                 routing_back.click(fn=routing_back_fn, inputs=[session_state],
                     outputs=[progress_bar, step_user, step_proj, step_routing, step_questions, step_plan, step_draft, step_review, step_done, session_state])
 
                 # ─── 问卷提交 ───
                 def question_fn(answer: str, session: dict):
                     progress, msg, q, teach, plan, prev, new_session = app.submit_answer(answer, session)
-                    return {
-                        progress_bar: progress,
-                        q_msg: gr.Markdown(msg),
-                        question_text: gr.Markdown(q),
-                        teaching_text: gr.Markdown(teach),
-                        plan_output: plan or gr.Textbox(),
-                        q_prev: gr.Markdown(prev),
-                        **update_vis(progress, new_session),
-                        session_state: new_session,
-                    }
+                    vis = app._visibility(new_session)
+                    return (
+                        progress, msg, q, teach, plan or "", prev,
+                        vis[0], vis[1], vis[2], vis[3], vis[4], vis[5], vis[6], vis[7],
+                        new_session,
+                    )
 
                 q_submit.click(
                     fn=question_fn,
@@ -598,13 +618,8 @@ def create_ui() -> gr.Blocks:
                 # ─── 方案确认 → 初稿 ───
                 def plan_to_draft_fn(session: dict):
                     progress, msg, draft, new_session = app.generate_draft(session)
-                    return {
-                        progress_bar: progress,
-                        draft_output: draft,
-                        draft_msg: gr.Markdown(msg),
-                        **update_vis(progress, new_session),
-                        session_state: new_session,
-                    }
+                    vis = app._visibility(new_session)
+                    return (progress, draft, msg, vis[0], vis[1], vis[2], vis[3], vis[4], vis[5], vis[6], vis[7], new_session)
 
                 plan_btn.click(fn=plan_to_draft_fn, inputs=[session_state],
                     outputs=[progress_bar, draft_output, draft_msg, step_user, step_proj, step_routing, step_questions, step_plan, step_draft, step_review, step_done, session_state])
@@ -613,20 +628,16 @@ def create_ui() -> gr.Blocks:
                     s = app._get_state(session)
                     s["step"] = "5. 方案"
                     progress = build_progress_bar("5. 方案")
-                    return {progress_bar: progress, **update_vis(progress, session), session_state: session}
+                    vis = app._visibility(session)
+                    return (progress, vis[0], vis[1], vis[2], vis[3], vis[4], vis[5], vis[6], vis[7], session)
                 plan_back.click(fn=plan_back_fn, inputs=[session_state],
                     outputs=[progress_bar, step_user, step_proj, step_routing, step_questions, step_plan, step_draft, step_review, step_done, session_state])
 
                 # ─── 初稿 → 审查 ───
                 def draft_to_review_fn(session: dict):
                     progress, msg, review, new_session = app.run_review(session)
-                    return {
-                        progress_bar: progress,
-                        review_output: review,
-                        review_msg: gr.Markdown(msg),
-                        **update_vis(progress, new_session),
-                        session_state: new_session,
-                    }
+                    vis = app._visibility(new_session)
+                    return (progress, review, msg, vis[0], vis[1], vis[2], vis[3], vis[4], vis[5], vis[6], vis[7], new_session)
 
                 draft_btn.click(fn=draft_to_review_fn, inputs=[session_state],
                     outputs=[progress_bar, review_output, review_msg, step_user, step_proj, step_routing, step_questions, step_plan, step_draft, step_review, step_done, session_state])
@@ -635,19 +646,16 @@ def create_ui() -> gr.Blocks:
                     s = app._get_state(session)
                     s["step"] = "6. 初稿"
                     progress = build_progress_bar("6. 初稿")
-                    return {progress_bar: progress, **update_vis(progress, session), session_state: session}
+                    vis = app._visibility(session)
+                    return (progress, vis[0], vis[1], vis[2], vis[3], vis[4], vis[5], vis[6], vis[7], session)
                 draft_back.click(fn=draft_back_fn, inputs=[session_state],
                     outputs=[progress_bar, step_user, step_proj, step_routing, step_questions, step_plan, step_draft, step_review, step_done, session_state])
 
                 # ─── 审查 → 完成 ───
                 def review_to_done_fn(session: dict):
                     progress, final, new_session = app.finalize(session)
-                    return {
-                        progress_bar: progress,
-                        final_output: final,
-                        **update_vis(progress, new_session),
-                        session_state: new_session,
-                    }
+                    vis = app._visibility(new_session)
+                    return (progress, final, vis[0], vis[1], vis[2], vis[3], vis[4], vis[5], vis[6], vis[7], new_session)
 
                 review_final.click(fn=review_to_done_fn, inputs=[session_state],
                     outputs=[progress_bar, final_output, step_user, step_proj, step_routing, step_questions, step_plan, step_draft, step_review, step_done, session_state])
@@ -656,7 +664,8 @@ def create_ui() -> gr.Blocks:
                     s = app._get_state(session)
                     s["step"] = "7. 审查"
                     progress = build_progress_bar("7. 审查")
-                    return {progress_bar: progress, **update_vis(progress, session), session_state: session}
+                    vis = app._visibility(session)
+                    return (progress, vis[0], vis[1], vis[2], vis[3], vis[4], vis[5], vis[6], vis[7], session)
                 review_back.click(fn=review_back_fn, inputs=[session_state],
                     outputs=[progress_bar, step_user, step_proj, step_routing, step_questions, step_plan, step_draft, step_review, step_done, session_state])
 
@@ -668,11 +677,8 @@ def create_ui() -> gr.Blocks:
                 # ─── 重新开始 ───
                 def restart_fn(session: dict):
                     progress, new_session = app.restart(session)
-                    return {
-                        progress_bar: progress,
-                        **update_vis(progress, new_session),
-                        session_state: new_session,
-                    }
+                    vis = app._visibility(new_session)
+                    return (progress, vis[0], vis[1], vis[2], vis[3], vis[4], vis[5], vis[6], vis[7], new_session)
 
                 done_restart.click(fn=restart_fn, inputs=[session_state],
                     outputs=[progress_bar, step_user, step_proj, step_routing, step_questions, step_plan, step_draft, step_review, step_done, session_state])
@@ -707,26 +713,90 @@ def create_ui() -> gr.Blocks:
 
                 def url_fn(url: str, session: dict):
                     result, status, new_session = app.import_url(url, session)
-                    return {url_output: result, url_status: gr.Markdown(status), session_state: new_session}
+                    return result, status, new_session
 
                 url_btn.click(fn=url_fn, inputs=[url_input, session_state],
                     outputs=[url_output, url_status, session_state])
 
                 def urls_fn(text: str, session: dict):
                     result, status, new_session = app.import_urls_batch(text, session)
-                    return {urls_output: result, urls_status: gr.Markdown(status), session_state: new_session}
+                    return result, status, new_session
 
                 urls_btn.click(fn=urls_fn, inputs=[urls_batch, session_state],
                     outputs=[urls_output, urls_status, session_state])
 
                 def url_proj_fn(url: str, proj: str, session: dict):
                     status, new_session = app.add_url_to_project(url, proj, session)
-                    return {add_status: gr.Markdown(status), session_state: new_session}
+                    return status, new_session
 
                 url_to_proj_btn.click(fn=url_proj_fn, inputs=[url_input, proj_for_url, session_state],
                     outputs=[add_status, session_state])
 
-            # ═══ Tab 3: 项目 ═══
+            # ═══ Tab 3: API 配置 ═══
+            with gr.Tab("API配置"):
+                gr.Markdown("### LLM API 配置")
+                gr.Markdown("配置大语言模型 API，启用后系统将使用真实 AI 生成公文，而非本地占位文本。")
+
+                api_status_bar = gr.Markdown(app.get_config_status())
+
+                gr.Markdown("---")
+                gr.Markdown("### 快速选择提供商")
+                gr.Markdown("选择一个常用 LLM 提供商，自动填入默认配置（API Key 需手动填写）。")
+
+                provider_select = gr.Dropdown(
+                    choices=list(SUPPORTED_PROVIDERS.items()),
+                    value=app.api_manager.config.provider,
+                    label="选择提供商",
+                )
+                with gr.Row():
+                    provider_btn = gr.Button("加载默认配置", variant="secondary")
+                    provider_msg = gr.Markdown("")
+
+                gr.Markdown("---")
+                gr.Markdown("### 详细配置")
+
+                api_base = gr.Textbox(label="API Base URL", placeholder="https://api.openai.com/v1")
+                api_key = gr.Textbox(label="API Key", placeholder="sk-...", type="password")
+                model = gr.Textbox(label="模型名称", placeholder="gpt-4o")
+
+                with gr.Row():
+                    temperature = gr.Slider(0, 2, value=0.7, step=0.1, label="Temperature (创造性)")
+                    max_tokens = gr.Slider(1000, 32000, value=8000, step=1000, label="Max Tokens (最大输出)")
+
+                enable_api = gr.Checkbox(label="启用此 API（生成时使用）", value=False)
+
+                with gr.Row():
+                    api_save_btn = gr.Button("保存配置", variant="primary")
+                    api_test_btn = gr.Button("测试连接", variant="secondary")
+
+                api_save_msg = gr.Markdown("")
+                api_test_msg = gr.Markdown("")
+
+                # API 事件绑定
+                def load_api_fn():
+                    p, base, key, m, t, mt, e, msg = app.load_api_config()
+                    return p, base, key, m, t, mt, e
+
+                def apply_provider_fn(provider: str):
+                    p, base, key, m, t, mt, e, msg = app.apply_provider(provider)
+                    return p, base, key, m, t, mt, e, msg
+
+                def save_api_fn(provider: str, base: str, key: str, m: str, t: float, mt: int, e: bool):
+                    status, msg = app.save_api_config(provider, base, key, m, t, mt, e)
+                    return status, app.get_config_status()
+
+                def test_api_fn():
+                    result = app.test_api_connection()
+                    return result
+
+                demo.load(fn=load_api_fn, outputs=[provider_select, api_base, api_key, model, temperature, max_tokens, enable_api])
+                provider_btn.click(fn=apply_provider_fn, inputs=[provider_select],
+                    outputs=[provider_select, api_base, api_key, model, temperature, max_tokens, enable_api, provider_msg])
+                api_save_btn.click(fn=save_api_fn, inputs=[provider_select, api_base, api_key, model, temperature, max_tokens, enable_api],
+                    outputs=[api_save_msg, api_status_bar])
+                api_test_btn.click(fn=test_api_fn, outputs=[api_test_msg])
+
+            # ═══ Tab 4: 项目 ═══
             with gr.Tab("项目"):
                 gr.Markdown("### 项目管理与记忆摘要")
 
@@ -740,13 +810,13 @@ def create_ui() -> gr.Blocks:
 
                 def list_fn(session: dict):
                     result, new_session = app.list_projects(session)
-                    return {projects_list: result, session_state: new_session}
+                    return result, new_session
 
                 list_btn.click(fn=list_fn, inputs=[session_state], outputs=[projects_list, session_state])
 
                 def mem_fn(session: dict):
                     result, new_session = app.get_memory_summary(session)
-                    return {memory_output: result, session_state: new_session}
+                    return result, new_session
 
                 memory_btn.click(fn=mem_fn, inputs=[session_state], outputs=[memory_output, session_state])
 

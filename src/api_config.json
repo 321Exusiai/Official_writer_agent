@@ -1,0 +1,10 @@
+{
+  "provider": "DeepSeek",
+  "api_base": "http://127.0.0.1:8907/v1",
+  "api_key": "sk-SFgbEXcNF-OdvW8ZCSAcaQ",
+  "model": "deepseek-four",
+  "temperature": 0.7,
+  "max_tokens": 8000,
+  "timeout": 60,
+  "enable": true
+}
