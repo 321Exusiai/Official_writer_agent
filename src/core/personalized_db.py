@@ -321,6 +321,77 @@ class PersonalizedDB:
         project.updated_at = datetime.now().isoformat()
         return article
 
+    def add_url_reference(self, project_id: str, url: str, title: str = "", content: str = "",
+                          source_site: str = "", style_notes: str = "",
+                          auto_fetch: bool = True) -> ReferenceArticle:
+        """
+        从 URL 添加参考文章到项目
+
+        Args:
+            project_id: 项目 ID
+            url: 目标 URL
+            title: 标题（留空则自动提取）
+            content: 内容（留空则自动抓取）
+            source_site: 来源网站
+            style_notes: 风格备注
+            auto_fetch: 是否自动抓取（当 title/content 为空时）
+
+        Returns:
+            ReferenceArticle 对象
+        """
+        from src.utils.url_importer import URLDocumentImporter
+
+        project = self.get_project(project_id)
+        if not project:
+            raise ValueError(f"项目 {project_id} 不存在")
+
+        article_title = title
+        article_content = content
+
+        if auto_fetch and (not title or not content):
+            try:
+                importer = URLDocumentImporter()
+                doc = importer.import_from_url(url)
+                article_title = article_title or doc.title
+                article_content = article_content or doc.content
+                source_site = source_site or doc.source_site
+                style_notes = style_notes or "\n".join(doc.style_patterns)
+            except Exception as e:
+                style_notes = f"自动抓取失败：{str(e)}"
+
+        article = ReferenceArticle(
+            id=f"ref_{uuid.uuid4().hex[:8]}",
+            title=article_title or "未知标题",
+            content=article_content or "",
+            upload_time=datetime.now().isoformat(),
+            style_notes=style_notes,
+        )
+
+        project.style_requirements.append(article)
+        project.updated_at = datetime.now().isoformat()
+        return article
+
+    def add_batch_urls(self, project_id: str, urls: List[str], delay: float = 1.0) -> List[ReferenceArticle]:
+        """
+        批量从 URL 添加参考文章
+
+        Args:
+            project_id: 项目 ID
+            urls: URL 列表
+            delay: 请求间隔（秒）
+
+        Returns:
+            ReferenceArticle 列表
+        """
+        articles = []
+        for url in urls:
+            article = self.add_url_reference(project_id, url, auto_fetch=True)
+            articles.append(article)
+            if delay > 0:
+                import time
+                time.sleep(delay)
+        return articles
+
     def extract_patterns_from_article(self, article: ReferenceArticle) -> List[str]:
         """从用户上传的参考文章中提取风格模式"""
         patterns = []
