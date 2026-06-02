@@ -433,7 +433,7 @@ def create_ui() -> gr.Blocks:
                     user_name = gr.Textbox(label="用户名", placeholder="输入你的姓名或昵称", show_copy_button=False)
                     with gr.Row():
                         user_btn = gr.Button("确认", variant="primary")
-                    user_msg = gr.Markdown("")
+                    user_msg = gr.Markdown()
 
                 # 步骤2: 项目
                 step_proj = gr.Group(visible=False)
@@ -444,7 +444,7 @@ def create_ui() -> gr.Blocks:
                     with gr.Row():
                         proj_back = gr.Button("← 返回")
                         proj_btn = gr.Button("创建并继续", variant="primary")
-                    proj_msg = gr.Markdown("")
+                    proj_msg = gr.Markdown()
 
                 # 步骤3: 场景
                 step_routing = gr.Group(visible=False)
@@ -455,22 +455,22 @@ def create_ui() -> gr.Blocks:
                     with gr.Row():
                         routing_back = gr.Button("← 返回")
                         routing_btn = gr.Button("确认选择", variant="primary")
-                    routing_msg = gr.Markdown("")
+                    routing_msg = gr.Markdown()
 
                 # 步骤4: 问卷
                 step_questions = gr.Group(visible=False)
                 with step_questions:
                     gr.Markdown("### 第4步：回答专属问题")
-                    question_text = gr.Markdown("")
-                    teaching_text = gr.Markdown("")
+                    question_text = gr.Markdown()
+                    teaching_text = gr.Markdown()
                     answer_input = gr.Textbox(label="你的回答", lines=3, placeholder="输入答案，或使用下方按钮回退/跳过/完成")
                     with gr.Row():
                         q_back = gr.Button("← 回退")
                         q_skip = gr.Button("跳过")
                         q_submit = gr.Button("提交", variant="primary")
                         q_finish = gr.Button("完成问卷", variant="stop")
-                    q_msg = gr.Markdown("")
-                    q_prev = gr.Markdown("")
+                    q_msg = gr.Markdown()
+                    q_prev = gr.Markdown()
 
                 # 步骤5: 方案
                 step_plan = gr.Group(visible=False)
@@ -489,7 +489,7 @@ def create_ui() -> gr.Blocks:
                     with gr.Row():
                         draft_back = gr.Button("← 返回")
                         draft_btn = gr.Button("执行审查", variant="primary")
-                    draft_msg = gr.Markdown("")
+                    draft_msg = gr.Markdown()
 
                 # 步骤7: 审查
                 step_review = gr.Group(visible=False)
@@ -500,7 +500,7 @@ def create_ui() -> gr.Blocks:
                         review_back = gr.Button("← 返回")
                         review_btn = gr.Button("重新审查", variant="secondary")
                         review_final = gr.Button("完成并导出", variant="primary")
-                    review_msg = gr.Markdown("")
+                    review_msg = gr.Markdown()
 
                 # 步骤8: 完成
                 step_done = gr.Group(visible=False)
@@ -693,7 +693,7 @@ def create_ui() -> gr.Blocks:
                         url_input = gr.Textbox(label="URL", placeholder="https://example.com/article")
                         url_btn = gr.Button("导入", variant="primary")
                     with gr.Column():
-                        url_status = gr.Markdown("")
+                        url_status = gr.Markdown()
 
                 url_output = gr.Textbox(label="文档详情", lines=15, interactive=False)
 
@@ -701,7 +701,7 @@ def create_ui() -> gr.Blocks:
                 gr.Markdown("### 批量导入")
                 urls_batch = gr.Textbox(label="URL列表（每行一个）", lines=4, placeholder="https://...\nhttps://...")
                 urls_btn = gr.Button("批量导入")
-                urls_status = gr.Markdown("")
+                urls_status = gr.Markdown()
                 urls_output = gr.Textbox(label="批量结果", lines=10, interactive=False)
 
                 gr.Markdown("---")
@@ -709,7 +709,7 @@ def create_ui() -> gr.Blocks:
                 with gr.Row():
                     proj_for_url = gr.Textbox(label="目标项目名称", scale=2)
                     url_to_proj_btn = gr.Button("添加", variant="primary", scale=1)
-                add_status = gr.Markdown("")
+                add_status = gr.Markdown()
 
                 def url_fn(url: str, session: dict):
                     result, status, new_session = app.import_url(url, session)
@@ -750,7 +750,7 @@ def create_ui() -> gr.Blocks:
                 )
                 with gr.Row():
                     provider_btn = gr.Button("加载默认配置", variant="secondary")
-                    provider_msg = gr.Markdown("")
+                    provider_msg = gr.Markdown()
 
                 gr.Markdown("---")
                 gr.Markdown("### 详细配置")
@@ -769,8 +769,8 @@ def create_ui() -> gr.Blocks:
                     api_save_btn = gr.Button("保存配置", variant="primary")
                     api_test_btn = gr.Button("测试连接", variant="secondary")
 
-                api_save_msg = gr.Markdown("")
-                api_test_msg = gr.Markdown("")
+                api_save_msg = gr.Markdown()
+                api_test_msg = gr.Markdown()
 
                 # API 事件绑定
                 def load_api_fn():
