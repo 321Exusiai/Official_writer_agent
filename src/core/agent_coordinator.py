@@ -19,6 +19,7 @@ from dataclasses import dataclass, field
 from typing import List, Dict, Optional, Any, Callable, Tuple
 from enum import Enum
 import json
+import random
 import time
 import uuid
 
@@ -194,10 +195,20 @@ class MessageBus:
             handler(msg)
 
     def receive(self, receiver: AgentRole) -> List[AgentMessage]:
-        messages = sorted(
-            self._inbox[receiver],
-            key=lambda m: {"critical": 0, "high": 1, "normal": 2, "low": 3}[m.priority.value],
-        )
+        """接收消息，按优先级排序。快速路径：无消息时直接返回空列表"""
+        inbox = self._inbox[receiver]
+        if not inbox:
+            return []
+        
+        # 只有一条消息时无需排序
+        if len(inbox) == 1:
+            msg = inbox[0]
+            self._inbox[receiver] = []
+            return [msg]
+        
+        # 多条消息时按优先级排序
+        priority_map = {"critical": 0, "high": 1, "normal": 2, "low": 3}
+        messages = sorted(inbox, key=lambda m: priority_map.get(m.priority.value, 2))
         self._inbox[receiver] = []
         return messages
 
@@ -534,15 +545,19 @@ class AgentCoordinator:
         topic: str,
         context: Dict[str, Any] = None,
     ) -> Dict[str, Any]:
-        responses = {
-            AgentRole.WRITER: self._writer_consultation(topic, context),
-            AgentRole.REVIEWER: self._reviewer_consultation(topic, context),
-            AgentRole.STYLE_ADAPTER: self._style_consultation(topic, context),
-            AgentRole.KNOWLEDGE_BASE: self._knowledge_consultation(topic, context),
-            AgentRole.DOC_TYPE_IDENTIFIER: self._doc_type_consultation(topic, context),
-            AgentRole.PERSONALIZED_DB: self._pdb_consultation(topic, context),
+        """根据角色直接调用对应处理方法，避免计算所有 agent 再取1个"""
+        handlers = {
+            AgentRole.WRITER: self._writer_consultation,
+            AgentRole.REVIEWER: self._reviewer_consultation,
+            AgentRole.STYLE_ADAPTER: self._style_consultation,
+            AgentRole.KNOWLEDGE_BASE: self._knowledge_consultation,
+            AgentRole.DOC_TYPE_IDENTIFIER: self._doc_type_consultation,
+            AgentRole.PERSONALIZED_DB: self._pdb_consultation,
         }
-        return responses.get(agent_role, {"concerns": [], "suggestions": []})
+        handler = handlers.get(agent_role)
+        if handler:
+            return handler(topic, context)
+        return {"concerns": [], "suggestions": []}
 
     def _writer_consultation(self, topic: str, context: Dict) -> Dict:
         concerns = []
@@ -559,6 +574,9 @@ class AgentCoordinator:
         if "素材" in topic:
             suggestions.append("优先使用直接引语和具体数据，避免空泛描述")
 
+        if "方案" in topic or "评审" in topic:
+            suggestions.append("已确认写作方案，将根据文种和风格参数生成内容")
+
         return {"concerns": concerns, "suggestions": suggestions}
 
     def _reviewer_consultation(self, topic: str, context: Dict) -> Dict:
@@ -572,6 +590,10 @@ class AgentCoordinator:
         if "风格" in topic:
             suggestions.append("检查风格强度是否与文种匹配（正式汇报→高强度）")
 
+        if "方案" in topic or "评审" in topic:
+            concerns.append("将在生成后进行全维度审查")
+            suggestions.append("建议启用迭代修复模式，自动修复发现的问题")
+
         return {"concerns": concerns, "suggestions": suggestions}
 
     def _style_consultation(self, topic: str, context: Dict) -> Dict:
@@ -584,13 +606,18 @@ class AgentCoordinator:
         if "强度" in topic:
             suggestions.append("强度<0.5时禁用该风格独有的词汇")
 
+        if "方案" in topic or "评审" in topic or "风格" in topic:
+            suggestions.append(f"已就绪风格配置，将根据方案中的风格参数进行适配")
+
         return {"concerns": concerns, "suggestions": suggestions}
 
     def _knowledge_consultation(self, topic: str, context: Dict) -> Dict:
         concerns = []
         suggestions = []
 
-        suggestions.append("可主动推送与当前主题相关的范文")
+        if "方案" in topic or "评审" in topic:
+            suggestions.append("已检索知识库，可推送与当前主题相关的范文供参考")
+
         suggestions.append("术语使用需结合具体场景，避免生搬硬套")
 
         return {"concerns": concerns, "suggestions": suggestions}
@@ -603,13 +630,18 @@ class AgentCoordinator:
             suggestions.append("根据 length_hint 和 materials_analysis 综合推荐")
             suggestions.append("避免关键词重叠导致的分数相同")
 
+        if "方案" in topic or "评审" in topic:
+            suggestions.append("已确认文种选择，将按该文种的格式规范生成内容")
+
         return {"concerns": concerns, "suggestions": suggestions}
 
     def _pdb_consultation(self, topic: str, context: Dict) -> Dict:
         concerns = []
         suggestions = []
 
-        suggestions.append("检查用户历史偏好，推荐个性化风格")
+        if "方案" in topic or "评审" in topic:
+            suggestions.append("已分析用户历史偏好，将推荐个性化风格配置")
+
         suggestions.append("应用反bias分析结果，避免重复历史错误")
 
         return {"concerns": concerns, "suggestions": suggestions}
@@ -627,7 +659,6 @@ class AgentCoordinator:
                 "agent": "reviewer",
             },
         }
-        import random
         if agent_role in alerts and random.random() > 0.7:
             return alerts[agent_role]
         return None

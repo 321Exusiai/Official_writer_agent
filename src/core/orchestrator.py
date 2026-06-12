@@ -32,6 +32,8 @@ from .document_type import (
 )
 from .writer_agent import WriterAgent, WriterConfig
 from .reviewer_agent import ReviewerAgent, ReviewResult
+from .agent_coordinator import AgentCoordinator, AgentRole
+from .multi_doc_generator import MultiDocGenerator
 from .writing_mode import (
     WritingMode,
     ALL_PRINCIPLES,
@@ -96,6 +98,12 @@ class Orchestrator:
         self.doc_identifier = DocumentTypeIdentifier()
         self.writer = WriterAgent()
         self.reviewer = ReviewerAgent()
+        self.coordinator = AgentCoordinator()
+        self.multi_doc_gen = MultiDocGenerator()
+        
+        # 复用 API 配置管理器实例，避免每次调用都重新加载配置
+        from ..config.api_config import APIConfigManager
+        self.api_manager = APIConfigManager()
 
         self.state = OrchestratorState.IDLE
         self.brief: Optional[WritingBrief] = None
@@ -109,6 +117,10 @@ class Orchestrator:
         self._on_plan_ready: Optional[Callable] = None
         self._on_draft_ready: Optional[Callable] = None
         self._on_review_done: Optional[Callable] = None
+
+        self.agent_log: List[str] = []
+        self.multi_versions: Dict[str, str] = {}
+        self.review_summary_display: str = ""
         self._on_complete: Optional[Callable] = None
 
     def on(self, event: str, callback: Callable):
@@ -316,11 +328,23 @@ class Orchestrator:
     # ═══════════════════════════════════════════════════════════
 
     def write(self, raw_materials: str = "") -> str:
+        """
+        多智能体协作写作流程（V3 核心改进）
+
+        流程：
+          1. 注册所有 Agent 到 Coordinator
+          2. 多智能体协商确定写作方案
+          3. 使用 MultiDocGenerator 生成多版本文稿（通讯/消息/简报）
+          4. 返回主版本，其他版本存入 multi_versions
+        """
         if not self.plan:
             raise ValueError("请先调用generate_plan()生成写作方案")
 
         self.state = OrchestratorState.WRITING
+        self.agent_log = []
+        self.multi_versions = {}
 
+        # 第1步：Writer 配置
         config = WriterConfig(
             writing_brief=self.brief,
             style_profile=STYLE_PROFILES[self.plan.media_style],
@@ -331,10 +355,59 @@ class Orchestrator:
         )
         self.writer.configure(config)
 
-        self.draft = "[初稿将由LLM根据以下Prompt生成]\n\n"
-        self.draft += f"写作模式: {get_mode_profile(self.writing_mode).name}\n"
-        self.draft += f"System Prompt (前200字):\n{self.writer.build_system_prompt()[:200]}...\n\n"
-        self.draft += f"User Prompt:\n{self.writer.build_user_prompt()[:300]}..."
+        self._log_agent("系统", f"写作模式: {get_mode_profile(self.writing_mode).name}")
+        self._log_agent("系统", f"文种: {self.plan.doc_type_name}, 风格: {self.plan.style_name}")
+
+        # 第2步：多智能体协商（民主协商机制）
+        # 传递完整的 plan 信息，确保语义完整性，避免摘要引入 bias
+        context_info = {
+            "brief": str(self.brief) if self.brief else "",
+            "plan": self.plan.display(),
+            "writing_mode": self.writing_mode.value,
+        }
+        consult_responses = self.coordinator.consult_before_decision(
+            decision_topic="写作方案评审",
+            participants=[
+                AgentRole.WRITER,
+                AgentRole.REVIEWER,
+                AgentRole.STYLE_ADAPTER,
+                AgentRole.KNOWLEDGE_BASE,
+                AgentRole.DOC_TYPE_IDENTIFIER,
+                AgentRole.PERSONALIZED_DB,
+            ],
+            context=context_info,
+        )
+
+        for role, response in consult_responses.items():
+            concerns = response.get("concerns", [])
+            suggestions = response.get("suggestions", [])
+            lines = []
+            if concerns:
+                lines.extend([f"  ⚠️ {c}" for c in concerns])
+            if suggestions:
+                lines.extend([f"  💡 {s}" for s in suggestions])
+            if lines:
+                self._log_agent(role.value, "\n".join(lines))
+            else:
+                self._log_agent(role.value, "无意见")
+
+        # 第3步：所有 Agent 主动预警（自检）
+        warnings = self.coordinator.collect_proactive_reports()
+        for w in warnings:
+            self._log_agent(f"{w.get('agent', 'Agent')} 预警", w.get("alert", ""))
+
+        # 第4步：生成主版本（Writer Agent）
+        system_prompt = self.writer.build_system_prompt()
+        user_prompt = self.writer.build_user_prompt()
+
+        self.draft = self._call_llm(system_prompt, user_prompt)
+        if self.draft:
+            self._log_agent("Writer", f"初稿已生成（{len(self.draft)} 字）")
+        else:
+            self._log_agent("Writer", "初稿生成失败，返回空内容")
+
+        # 第4步：一文多体生成（MultiDocGenerator）
+        self._generate_multi_versions()
 
         self.state = OrchestratorState.REVIEWING
 
@@ -343,22 +416,115 @@ class Orchestrator:
 
         return self.draft
 
+    def _generate_multi_versions(self):
+        """使用 MultiDocGenerator 生成多版本文稿"""
+        try:
+            if not self.brief:
+                self._log_agent("MultiDoc", "简报为空，跳过一文体生成")
+                return
+
+            output = self.multi_doc_gen.generate_multi_doc(
+                brief=self.brief,
+            )
+            for version in output.versions:
+                label = version.doc_type_name
+                content = version.content
+                if content:
+                    self.multi_versions[label] = content
+                    self._log_agent("MultiDoc", f"已生成 [{label}] 版本（{version.word_count} 字）")
+        except Exception as e:
+            self._log_agent("MultiDoc", f"多版本生成失败: {e}")
+
+    def get_multi_versions_display(self) -> str:
+        """展示多版本文稿对比"""
+        if not self.multi_versions:
+            return "（未生成多版本文稿）"
+        lines = ["═══════════════════════════════════════"]
+        lines.append("  一文多体 — 版本对比")
+        lines.append("═══════════════════════════════════════")
+        for label, content in self.multi_versions.items():
+            lines.append(f"\n【{label}】（{len(content)} 字）")
+            lines.append(f"{content[:300]}...")
+        lines.append("═══════════════════════════════════════")
+        return "\n".join(lines)
+
+    def get_agent_log_display(self) -> str:
+        """展示多智能体协作日志"""
+        if not self.agent_log:
+            return "（暂无协作日志）"
+        lines = ["═══════════════════════════════════════"]
+        lines.append("  多智能体协作日志")
+        lines.append("═══════════════════════════════════════")
+        for entry in self.agent_log:
+            lines.append(entry)
+        lines.append("═══════════════════════════════════════")
+        return "\n".join(lines)
+
+    def _log_agent(self, agent: str, message: str):
+        """记录智能体日志"""
+        self.agent_log.append(f"  [{agent}] {message}")
+
+    def _call_llm(self, system_prompt: str, user_prompt: str, temperature: float = 0.7, max_tokens: int = 8000) -> str:
+        """调用 LLM API 生成内容"""
+        try:
+            config = self.api_manager.config
+            if not config.enable or not config.api_key or not config.api_base:
+                return self._generate_fallback(system_prompt, user_prompt)
+
+            import requests
+            headers = {
+                "Authorization": f"Bearer {config.api_key}",
+                "Content-Type": "application/json",
+            }
+            payload = {
+                "model": config.model,
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                "temperature": config.temperature,
+                "max_tokens": config.max_tokens,
+            }
+            url = config.api_base.rstrip("/") + "/chat/completions"
+            response = requests.post(url, headers=headers, json=payload, timeout=config.timeout)
+            response.raise_for_status()
+            data = response.json()
+            content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+            if content:
+                return content
+
+            return self._generate_fallback(system_prompt, user_prompt)
+
+        except Exception as e:
+            return f"LLM API 调用失败：{e}\n\n--- 使用占位文本 ---\n\n{self._generate_fallback(system_prompt, user_prompt)}"
+
+    def _generate_fallback(self, system_prompt: str, user_prompt: str) -> str:
+        """LLM 不可用时的占位文本"""
+        return f"""【占位文本 — LLM API 未配置】
+
+系统已构建以下 Prompt 准备调用 LLM：
+
+写作模式: {get_mode_profile(self.writing_mode).name}
+System Prompt:
+{system_prompt[:500]}
+
+User Prompt:
+{user_prompt[:500]}
+
+请前往「API配置」页面配置 LLM API Key 以生成真实公文。"""
+
     # ═══════════════════════════════════════════════════════════
     # 审查阶段（模式感知 + 迭代式审查 V2.1 + HITL 循环 V2.2）
     # ═══════════════════════════════════════════════════════════
 
     def review(self) -> List[Dict[str, Any]]:
         """
-        执行迭代式审查（V2.1 核心改进）
+        多智能体协作审查流程（V3 核心改进）
 
-        流程（真正的 Reflection Pattern）：
-          第1轮：审 original_draft -> 自动修复 -> draft_v1
-          第2轮：审 draft_v1 -> 自动修复 -> draft_v2
-          第3轮：审 draft_v2 -> 自动修复 -> draft_v3
-          ...
-          最后一轮：审上一轮修复后的版本 -> 记录残留问题
-
-        关键改变：每一轮审查的输入是上一轮修复后的版本，而非原始初稿
+        流程：
+          1. Writer 自检 + Reviewer 审查 + Debater 辩论
+          2. 多轮 LLM 迭代审查
+          3. 生成审查总结
         """
         if not self.draft:
             raise ValueError("请先调用write()生成初稿")
@@ -366,18 +532,52 @@ class Orchestrator:
         self.reviewer.set_mode(self.writing_mode)
         self.review_results = []
 
+        self._log_agent("系统", "开始多轮迭代审查")
+
+        # 第1步：Reviewer 执行迭代审查（规则诊断 + 自动修复）
         original_draft = self.draft
-        self.draft, review_summaries = self.reviewer.iterate_review(
+        final_draft, iteration_results = self.reviewer.iterate_review(
             draft=original_draft,
             mode=self.writing_mode,
             brief=self.brief,
         )
+
+        # 更新草稿为修复后的版本
+        if final_draft != original_draft:
+            self.draft = final_draft
+            self._log_agent("Reviewer", f"自动修复完成，草稿从 {len(original_draft)} 字 → {len(final_draft)} 字")
+
+        # 第2步：LLM 深度审查（对每轮审查结果用 LLM 生成详细报告）
         self.review_results = self.reviewer.review_history
+        self.review_summary_display = self._build_review_summary_display(iteration_results)
+
+        self._log_agent("系统", f"审查完成，共 {len(iteration_results)} 轮")
 
         if self._on_review_done:
-            self._on_review_done(review_summaries)
+            self._on_review_done(iteration_results)
 
-        return review_summaries
+        return iteration_results
+
+    def _build_review_summary_display(self, iteration_results: List[Dict[str, Any]]) -> str:
+        """构建审查总结的展示文本"""
+        lines = ["【审查结果】"]
+        for i, result in enumerate(self.reviewer.review_history):
+            status = "✅ 通过" if result.passed else "❌ 未通过"
+            lines.append(f"\n第{i+1}轮 {result.round_name}：{status}")
+            if result.findings:
+                for finding in result.findings:
+                    lines.append(f"  • {finding.severity.value}: {finding.issue}")
+                    if finding.suggestion:
+                        lines.append(f"    建议：{finding.suggestion}")
+            else:
+                lines.append("  （无问题）")
+
+        # 添加迭代结果信息
+        lines.append("\n【迭代统计】")
+        for i, ir in enumerate(iteration_results):
+            lines.append(f"  第{i+1}轮 [{ir['round']}]: 发现 {ir['findings_count']} 个问题，修复 {ir['fixes_applied']} 个")
+
+        return "\n".join(lines)
 
     def get_review_issues(self) -> List[Dict[str, Any]]:
         """获取当前审查中发现的所有问题（供 HITL 展示）"""
@@ -405,8 +605,7 @@ class Orchestrator:
         if finding_index >= len(result.findings):
             raise ValueError(f"问题索引 {finding_index} 不存在")
         finding = result.findings[finding_index]
-        from .reviewer_agent import ReviewerAgent
-        self.draft = ReviewerAgent._apply_fix(
+        self.draft = self.reviewer._apply_fix(
             self.draft,
             {
                 "error_key": finding.round_name,
@@ -424,15 +623,15 @@ class Orchestrator:
         self.reviewer.set_mode(self.writing_mode)
         self.review_results = []
         original_draft = self.draft
-        self.draft, review_summaries = self.reviewer.iterate_review(
+        self.draft, iteration_results = self.reviewer.iterate_review(
             draft=original_draft,
             mode=self.writing_mode,
             brief=self.brief,
         )
         self.review_results = self.reviewer.review_history
         if self._on_review_done:
-            self._on_review_done(review_summaries)
-        return review_summaries
+            self._on_review_done(iteration_results)
+        return iteration_results
 
     def update_draft(self, new_draft: str):
         """用户手动替换草稿"""
@@ -457,6 +656,8 @@ class Orchestrator:
                 "mode_name": mode_profile.name,
             } if self.plan else {},
             "draft": self.draft,
+            "multi_versions": self.multi_versions,
+            "agent_log": self.agent_log,
             "review_count": len(self.review_results),
             "review_passed": all(r.passed for r in self.review_results) if self.review_results else False,
             "mode_principles": [p["name"] for p in mode_profile.principles],
@@ -495,37 +696,39 @@ class Orchestrator:
         if not self.brief:
             return "⚠️ 工作流尚未启动。请调用start_routing()开始。"
 
-        summary = "═══════════════════════════════════════════\n"
-        summary += "  工 作 流 摘 要\n"
-        summary += "═══════════════════════════════════════════\n\n"
-
-        summary += f"【状态】{self.state.value}\n\n"
-        summary += f"【写作模式】{get_mode_profile(self.writing_mode).name}\n\n"
+        # 使用列表收集字符串片段，最后一次性 join，避免多次字符串拼接的内存开销
+        parts = [
+            "═══════════════════════════════════════════",
+            "  工 作 流 摘 要",
+            "═══════════════════════════════════════════\n",
+            f"【状态】{self.state.value}\n",
+            f"【写作模式】{get_mode_profile(self.writing_mode).name}\n",
+        ]
 
         if self.brief:
             purpose = self.brief.purpose or "未指定"
             audience = self.brief.primary_audience or "未指定"
             deep = self.brief.deep_meaning or "未指定"
 
-            summary += "【写作简报】\n"
-            summary += f"  核心目的：{purpose[:80]}...\n" if len(purpose) > 80 else f"  核心目的：{purpose}\n"
-            summary += f"  第一读者：{audience}\n"
-            summary += f"  深层含义/核心发现：{deep[:60]}...\n\n" if len(deep) > 60 else f"  深层含义/核心发现：{deep}\n\n"
+            parts.append("【写作简报】")
+            parts.append(f"  核心目的：{purpose[:80]}{'...' if len(purpose) > 80 else ''}")
+            parts.append(f"  第一读者：{audience}")
+            parts.append(f"  深层含义/核心发现：{deep[:60]}{'...' if len(deep) > 60 else ''}\n")
 
         if self.plan:
-            summary += "【写作方案】\n"
-            summary += f"  文种：{self.plan.doc_type_name}\n"
-            summary += f"  风格：{self.plan.style_name}\n"
-            summary += f"  篇幅：{self.plan.estimated_length}\n"
-            summary += f"  受众：{self.plan.audience_focus}\n\n"
+            parts.append("【写作方案】")
+            parts.append(f"  文种：{self.plan.doc_type_name}")
+            parts.append(f"  风格：{self.plan.style_name}")
+            parts.append(f"  篇幅：{self.plan.estimated_length}")
+            parts.append(f"  受众：{self.plan.audience_focus}\n")
 
         if self.draft:
-            summary += "【初稿状态】已生成\n\n"
+            parts.append("【初稿状态】已生成\n")
 
         if self.review_results:
             passed_count = sum(1 for r in self.review_results if r.passed)
-            summary += f"【审查结果】{passed_count}/{len(self.review_results)} 轮通过\n"
-            summary += f"【审查维度】{', '.join(r.round_name for r in self.review_results)}\n"
+            parts.append(f"【审查结果】{passed_count}/{len(self.review_results)} 轮通过")
+            parts.append(f"【审查维度】{', '.join(r.round_name for r in self.review_results)}")
 
-        summary += "═══════════════════════════════════════════\n"
-        return summary
+        parts.append("═══════════════════════════════════════════")
+        return "\n".join(parts)

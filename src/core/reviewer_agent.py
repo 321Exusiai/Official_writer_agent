@@ -576,17 +576,18 @@ class ReviewerAgent:
         dimensions = self.get_dimensions()
         results = []
 
+        # 提取到循环外，避免每轮重复计算
+        auto_findings = self.diagnose_errors(draft)
+
+        subject_check = None
+        if mode == WritingMode.STRATEGIC_NARRATIVE:
+            subject_check = self.check_subject_ratio(draft)
+
+        format_check = None
+        if mode == WritingMode.ADMINISTRATIVE:
+            format_check = self.check_format_compliance(draft)
+
         for i, dim in enumerate(dimensions):
-            auto_findings = self.diagnose_errors(draft)
-
-            subject_check = None
-            if mode == WritingMode.STRATEGIC_NARRATIVE:
-                subject_check = self.check_subject_ratio(draft)
-
-            format_check = None
-            if mode == WritingMode.ADMINISTRATIVE:
-                format_check = self.check_format_compliance(draft)
-
             results.append({
                 "round": dim["name"],
                 "weight": dim["weight"],
@@ -753,6 +754,10 @@ class ReviewerAgent:
             )
             self.review_history.append(round_result)
 
+            # 每轮都构建 prompt，因为每轮的草稿内容不同（经过自动修复）
+            # 这些 prompt 可用于后续 LLM 调用或展示
+            review_prompt = self.build_review_prompt(current_draft, i, brief)
+
             iteration_results.append({
                 "round": dim["name"],
                 "weight": dim["weight"],
@@ -761,7 +766,7 @@ class ReviewerAgent:
                 "change_log": change_log,
                 "subject_check": subject_check,
                 "format_check": format_check,
-                "review_prompt": self.build_review_prompt(current_draft, i, brief),
+                "review_prompt": review_prompt,
                 "passed": round_result.passed,
             })
 
@@ -774,9 +779,8 @@ class ReviewerAgent:
 
 
 def _remove_pattern(text: str, pattern: str) -> str:
-    result = text.replace(pattern, "")
-    result = text.replace(pattern, "")
-    return result
+    """移除文本中的指定模式"""
+    return text.replace(pattern, "")
 
 
 def _rewrite_passive_to_active(text: str, trigger_word: str) -> str:

@@ -19,45 +19,46 @@
 """
 
 import hashlib
-import functools
 from typing import Any, Dict, Optional, Callable
+from collections import OrderedDict
 
 
 class PromptCache:
     """
     轻量级内存缓存，用于缓存 prompt 构建结果。
-    使用 dict + 手动淘汰策略，不引入外部依赖。
+    使用 OrderedDict 实现 LRU 淘汰策略，性能优化：
+    - get/set 操作均为 O(1)
+    - 避免 list.remove() 的 O(n) 开销
     """
 
     def __init__(self, maxsize: int = 128):
-        self._cache: Dict[str, str] = {}
+        self._cache: OrderedDict[str, str] = OrderedDict()
         self._maxsize = maxsize
-        self._access_order: list = []
 
     def get(self, key: str) -> Optional[str]:
         if key in self._cache:
-            self._access_order.remove(key)
-            self._access_order.append(key)
+            # 移动到末尾表示最近使用
+            self._cache.move_to_end(key)
             return self._cache[key]
         return None
 
     def set(self, key: str, value: str):
         if key in self._cache:
-            self._access_order.remove(key)
-        elif len(self._cache) >= self._maxsize:
-            oldest = self._access_order.pop(0)
-            del self._cache[oldest]
-        self._cache[key] = value
-        self._access_order.append(key)
+            # 更新现有键，移动到末尾
+            self._cache.move_to_end(key)
+            self._cache[key] = value
+        else:
+            # 新增键
+            if len(self._cache) >= self._maxsize:
+                # 淘汰最久未使用的（第一个）
+                self._cache.popitem(last=False)
+            self._cache[key] = value
 
     def invalidate(self, key: str = None):
         if key:
             self._cache.pop(key, None)
-            if key in self._access_order:
-                self._access_order.remove(key)
         else:
             self._cache.clear()
-            self._access_order.clear()
 
     @property
     def size(self) -> int:
