@@ -313,19 +313,21 @@ class AgentCoordinator:
         decision_topic: str,
         participants: List[AgentRole],
         context: Dict[str, Any] = None,
+        llm_call: Callable = None,
     ) -> Dict[AgentRole, Dict[str, Any]]:
         """
         决策前民主协商
 
         流程：
         1. Orchestrator 发出协商议题
-        2. 各参与 Agent 发表意见（JSON 格式，高维语义压缩）
+        2. 各参与 Agent 发表意见（优先使用 LLM 生成，规则匹配兜底）
         3. Orchestrator 汇总意见，做出最终决策
 
         Args:
             decision_topic: 协商议题
             participants: 参与协商的 Agent
-            context: 协商背景信息
+            context: 协商背景信息（包含 plan、brief、writing_mode 等）
+            llm_call: LLM 调用函数 (system_prompt, user_prompt) -> str，None 时使用规则匹配
 
         Returns:
             各 Agent 的反馈意见
@@ -352,7 +354,11 @@ class AgentCoordinator:
             )
             self.bus.send(request)
 
-            response = self._simulate_agent_response(agent_role, decision_topic, context)
+            # 优先使用 LLM 生成意见，规则匹配作为兜底
+            if llm_call:
+                response = self._llm_agent_response(agent_role, decision_topic, context or {}, llm_call)
+            else:
+                response = self._simulate_agent_response(agent_role, decision_topic, context)
             responses[agent_role] = response
 
             response_msg = AgentMessage.create(
@@ -537,7 +543,100 @@ class AgentCoordinator:
 
         return decision
 
-    # ═══ 内部模拟方法 ═══
+    # ═══ LLM 调用内部方法 ═══
+
+    def _llm_agent_response(
+        self,
+        agent_role: AgentRole,
+        topic: str,
+        context: Dict[str, Any],
+        llm_call: Callable,
+    ) -> Dict[str, Any]:
+        """使用 LLM 生成 Agent 的协商意见（V2 核心改进）"""
+        role_profiles = {
+            AgentRole.WRITER: "你是一名资深公文撰写者（Writer Agent），10年体制内写作经验。你的职责是确保文章内容饱满、表达有力、逻辑清晰。",
+            AgentRole.REVIEWER: "你是一名严格的公文审查者（Reviewer Agent），精通公文质量标准。你的职责是发现文章中的问题、错误和潜在风险。",
+            AgentRole.STYLE_ADAPTER: "你是一名文体风格专家（Style Adapter Agent），精通14种媒体风格和36种修辞技法。你的职责是确保文章风格与媒体调性匹配。",
+            AgentRole.KNOWLEDGE_BASE: "你是一名知识库管理员（Knowledge Base Agent），掌握大量标杆范文和公文写作规范。你的职责是推送相关范文和术语。",
+            AgentRole.DOC_TYPE_IDENTIFIER: "你是一名文种辨析专家（Document Type Agent），精通16类公文文种的格式规范。你的职责是确保文种选择正确且格式合规。",
+            AgentRole.PERSONALIZED_DB: "你是一名用户画像分析师（Personalized DB Agent），了解用户的历史写作偏好。你的职责是提供个性化建议，避免重复历史错误。",
+        }
+
+        plan_info = context.get("plan", "")
+        brief_info = context.get("brief", "")
+        writing_mode = context.get("writing_mode", "")
+
+        system_prompt = role_profiles.get(agent_role, "你是一名公文写作专家。")
+        system_prompt += "\n\n请用JSON格式输出你的意见，只输出JSON，不要有其他内容。"
+
+        user_prompt = f"""请就以下议题发表你的专业意见。
+
+**协商议题**：{topic}
+
+**写作模式**：{writing_mode}
+**写作方案**：
+{plan_info[:1500]}
+
+**写作简报**：
+{brief_info[:1000]}
+
+请用以下JSON格式回复：
+{{
+    "concerns": ["你关注的问题或风险点（至少1-3条，尽量具体）"],
+    "suggestions": ["你的修改建议或改进方案（至少1-3条，尽量具体）"]
+}}
+
+如果你没有发现任何问题，concerns 可以返回空数组，但 suggestions 必须有至少1条建设性建议。
+如果你认为方案没有问题，请明确说明为什么方案是合理的。"""
+
+        try:
+            raw = llm_call(system_prompt, user_prompt)
+            return self._parse_llm_json_response(raw, agent_role)
+        except Exception:
+            # LLM 调用失败时回退到规则匹配
+            return self._simulate_agent_response(agent_role, topic, context)
+
+    def _parse_llm_json_response(self, raw: str, agent_role: AgentRole) -> Dict[str, Any]:
+        """安全解析 LLM 返回的 JSON，处理各种格式异常"""
+        # 尝试提取 JSON 块
+        json_str = raw.strip()
+        if "```json" in json_str:
+            json_str = json_str.split("```json")[1].split("```")[0].strip()
+        elif "```" in json_str:
+            json_str = json_str.split("```")[1].split("```")[0].strip()
+
+        try:
+            data = json.loads(json_str)
+            return {
+                "concerns": data.get("concerns", []),
+                "suggestions": data.get("suggestions", []),
+            }
+        except json.JSONDecodeError:
+            # JSON 解析失败，从文本中提取
+            concerns = []
+            suggestions = []
+            lines = raw.split("\n")
+            in_concerns = False
+            in_suggestions = False
+            for line in lines:
+                line = line.strip().strip('"').strip("'").strip(",")
+                if "concerns" in line.lower() and ":" in line:
+                    in_concerns = True
+                    in_suggestions = False
+                    continue
+                if "suggestions" in line.lower() and ":" in line:
+                    in_suggestions = True
+                    in_concerns = False
+                    continue
+                if line.startswith("- ") or line.startswith("* "):
+                    item = line[2:].strip().strip('"').strip("'")
+                    if in_concerns and item:
+                        concerns.append(item)
+                    elif in_suggestions and item:
+                        suggestions.append(item)
+            return {"concerns": concerns, "suggestions": suggestions}
+
+    # ═══ 内部模拟方法（规则匹配兜底）═══
 
     def _simulate_agent_response(
         self,

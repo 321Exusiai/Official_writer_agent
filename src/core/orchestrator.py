@@ -376,6 +376,7 @@ class Orchestrator:
                 AgentRole.PERSONALIZED_DB,
             ],
             context=context_info,
+            llm_call=self._call_llm,
         )
 
         for role, response in consult_responses.items():
@@ -425,6 +426,7 @@ class Orchestrator:
 
             output = self.multi_doc_gen.generate_multi_doc(
                 brief=self.brief,
+                llm_call=self._call_llm,
             )
             for version in output.versions:
                 label = version.doc_type_name

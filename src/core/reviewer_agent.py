@@ -17,6 +17,7 @@
 from dataclasses import dataclass, field
 from typing import Any, List, Dict, Optional, Tuple
 from enum import Enum
+import re
 
 from .writing_mode import (
     WritingMode,
@@ -538,28 +539,167 @@ class ReviewerAgent:
             ),
         }
 
-    def check_format_compliance(self, text: str) -> List[Dict[str, str]]:
+    # ═══════════════════════════════════════════════════════════════
+    # 格式合规检查规则集 —— 覆盖全部 16 种公文文种
+    # 基于《党政机关公文格式》(GB/T 9704-2012)
+    # ═══════════════════════════════════════════════════════════════
+
+    FORMAT_RULES = [
+        # ── 标题规范 ──
+        {
+            "key": "title_length",
+            "check": lambda t: len(t.split("\n")[0]) > 50 if t else False,
+            "diagnosis": "标题过长（超过50字），不符合公文标题简洁要求",
+            "prescription": "标题控制在50字以内。格式为'发文机关+关于+事由+的+文种'。",
+            "severity": "major",
+            "scope": "all",
+        },
+        {
+            "key": "title_no_wen_zhong",
+            "check": lambda t: any(kw in (t.split("\n")[0] if t else "") for kw in ["通知", "请示", "批复", "函", "纪要", "通报", "报告", "决定", "公告", "通告", "议案", "命令", "意见", "决议", "公报"]),
+            "diagnosis": "标题可能缺少文种词",
+            "prescription": "公文标题必须表明文种（如通知、请示、批等）。格式为'发文机关+关于XX事项的通知/请示/批复'。",
+            "severity": "critical",
+            "scope": "administrative",
+        },
+        # ── 发文机关 ──
+        {
+            "key": "missing_issuing_authority",
+            "check": lambda t: t and not any(t.split("\n")[0].startswith(p) for p in ["关于"]) and "关于" not in (t.split("\n")[0] if t else ""),
+            "diagnosis": "标题可能缺少发文机关",
+            "prescription": "正式公文标题应为'XX单位关于XX事项的XX'格式。",
+            "severity": "major",
+            "scope": "administrative",
+        },
+        # ── 发文字号 ──
+        {
+            "key": "missing_document_number",
+            "check": lambda t: t and "〔" not in t[:200] and "[" not in t[:200],
+            "diagnosis": "可能缺少发文字号（如XX〔2024〕X号）",
+            "prescription": "正式公文应在标题下方标注发文字号。格式：机关代字〔年份〕序号。",
+            "severity": "minor",
+            "scope": "administrative",
+        },
+        # ── 主送机关 ──
+        {
+            "key": "missing_main_recipient",
+            "check": lambda t: t and "：" not in t[:300],
+            "diagnosis": "可能缺少主送机关",
+            "prescription": "公文正文前应有主送机关，格式为'XX单位：'单独一行。",
+            "severity": "minor",
+            "scope": "administrative",
+        },
+        # ── 结尾用语（按文种分类） ──
+        {
+            "key": "request_no_approval",
+            "check": lambda t: t and "请示" in t[:50] and "妥否" not in t[-150:] and "当否" not in t[-150:] and "请批示" not in t[-150:],
+            "diagnosis": "请示结尾缺少'妥否，请批示'或'当否，请批复'",
+            "prescription": "请示结尾必须使用'妥否，请批示''以上请示妥否，请批示'或'当否，请批复'。",
+            "severity": "critical",
+            "scope": "administrative",
+        },
+        {
+            "key": "reply_no_ci_fu",
+            "check": lambda t: t and "批复" in t[:50] and "此复" not in t[-100:],
+            "diagnosis": "批复结尾缺少'此复'",
+            "prescription": "批复结尾必须使用'此复'。",
+            "severity": "critical",
+            "scope": "administrative",
+        },
+        {
+            "key": "report_has_request",
+            "check": lambda t: t and "报告" in t[:50] and "请批示" in t[-200:],
+            "diagnosis": "报告中夹带了请示事项",
+            "prescription": "报告不得夹带请示事项。如需请示，应单独行文。",
+            "severity": "critical",
+            "scope": "administrative",
+        },
+        {
+            "key": "letter_no_closing",
+            "check": lambda t: t and ("函" in t[:50] or "函" in (t.split("\n")[0] if t else "")) and "函告" not in t[-100:] and "为盼" not in t[-100:],
+            "diagnosis": "函的结尾可能缺少'特此函告'或'请予支持为盼'",
+            "prescription": "去函以'特此函告''请予支持为盼'结尾；复函以'特此函复'结尾。",
+            "severity": "major",
+            "scope": "administrative",
+        },
+        {
+            "key": "meeting_minutes_no_bottom",
+            "check": lambda t: t and "纪要" in t[:50] and "出席" not in t[-300:] and "列席" not in t[-300:],
+            "diagnosis": "会议纪可能缺少出席/列席人员名单",
+            "prescription": "会议纪需在末尾标注出席、列席人员。可附'出席：XX''列席：XX''请假：XX'。",
+            "severity": "minor",
+            "scope": "administrative",
+        },
+        # ── 结构规范 ──
+        {
+            "key": "news_brief_no_inverted_pyramid",
+            "check": lambda t: t and "消息" in t[:30] and len(t.split("\n\n")[0]) < 50,
+            "diagnosis": "消息导语过于简短，可能缺少5W1H要素",
+            "prescription": "消息导语应在50字以内包含：时间、地点、主体、事件、目的/意义。",
+            "severity": "major",
+            "scope": "informational",
+        },
+        # ── 通用格式问题 ──
+        {
+            "key": "signature_after_content",
+            "check": lambda t: t and "（此页无正文）" in t,
+            "diagnosis": "使用了'此页无正文'说明（应避免通过调整行距解决）",
+            "prescription": "尽量避免'此页无正文'情况。如确实需要，应调整版心到下一页起排。",
+            "severity": "minor",
+            "scope": "all",
+        },
+        {
+            "key": "date_format_wrong",
+            "check": lambda t: t and bool(re.search(r'\d{4}[/-]\d{1,2}[/-]\d{1,2}', t)),
+            "diagnosis": "日期格式不符合公文规范（应使用'2024年12月25日'格式）",
+            "prescription": "公文日期格式：'2024年12月25日'，不使用数字格式或斜线格式。",
+            "severity": "major",
+            "scope": "all",
+        },
+    ]
+
+    def check_format_compliance(
+        self, text: str, doc_type_hint: str = ""
+    ) -> List[Dict[str, str]]:
         """
         格式合规性检查（所有模式通用）
-        基于《党政机关公文格式》(GB/T 9704-2012)
+
+        基于《党政机关公文格式》(GB/T 9704-2012) 和新闻写作规范
+        覆盖标题、发文字号、结尾用语、日期格式等全维度
+
+        Args:
+            text: 待检查文本
+            doc_type_hint: 文种提示（如"通知""请示"等），用于触发特定文种的检查规则
+
+        Returns:
+            发现的问题列表
         """
         findings = []
+        mode_value = self.mode.value if self.mode else "all"
 
-        if "请示" in text[:50] and "妥否" not in text[-100:]:
-            findings.append({
-                "error_key": "missing_closing_formula",
-                "diagnosis": "请示结尾可能缺少'妥否，请批示'",
-                "prescription": "请示结尾必须使用'妥否，请批示'或'以上请示妥否，请批示'",
-                "severity": "critical",
-            })
+        for rule in self.FORMAT_RULES:
+            scope = rule["scope"]
 
-        if "通知" in text[:50] and "特此通知" not in text[-100:]:
-            findings.append({
-                "error_key": "missing_closing_formula",
-                "diagnosis": "通知结尾可能缺少'特此通知'",
-                "prescription": "通知一般以'特此通知'结尾",
-                "severity": "major",
-            })
+            # 范围筛选
+            if scope == "strategic_narrative" and mode_value not in ("strategic_narrative",):
+                continue
+            if scope == "administrative" and mode_value not in ("administrative",):
+                continue
+            if scope == "informational" and mode_value not in ("informational",):
+                continue
+            if scope == "objective" and mode_value not in ("objective_report",):
+                continue
+
+            try:
+                if rule["check"](text):
+                    findings.append({
+                        "error_key": rule["key"],
+                        "diagnosis": rule["diagnosis"],
+                        "prescription": rule["prescription"],
+                        "severity": rule["severity"],
+                    })
+            except Exception:
+                continue
 
         return findings
 

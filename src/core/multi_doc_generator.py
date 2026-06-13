@@ -8,7 +8,7 @@ V2.3 新增：
 """
 
 from dataclasses import dataclass, field
-from typing import List, Dict, Optional, Any, Tuple
+from typing import Callable, List, Dict, Optional, Any, Tuple
 
 from .document_type import DocumentType, DocTypeProfile
 from ..questionnaire.questionnaire import WritingBrief
@@ -118,6 +118,7 @@ class MultiDocGenerator:
         self,
         brief: WritingBrief,
         target_doc_types: Optional[List[DocumentType]] = None,
+        llm_call: Callable = None,
     ) -> MultiDocOutput:
         """
         基于同一份 WritingBrief 生成多个文种版本
@@ -125,6 +126,7 @@ class MultiDocGenerator:
         Args:
             brief: 写作简报
             target_doc_types: 目标文种列表（不指定则自动推荐）
+            llm_call: LLM 调用函数 (system_prompt, user_prompt) -> str，None 时生成占位文本
 
         Returns:
             MultiDocOutput 含所有文种版本
@@ -146,10 +148,12 @@ class MultiDocGenerator:
         for i, dt in enumerate(ordered):
             profile = self._get_doc_profile(dt)
             if i == 0:
-                version = self._generate_full_version(brief, dt, profile)
+                version = self._generate_full_version(brief, dt, profile, llm_call)
             else:
+                # 传入已生成的完整版本内容用于提取
+                full_content = output.versions[0].content if output.versions else ""
                 version = self._generate_derived_version(
-                    brief, dt, profile, ordered[0], consistency_data
+                    brief, dt, profile, ordered[0], consistency_data, llm_call, full_content
                 )
 
             self._extract_consistency_data(version.content, consistency_data)
@@ -189,22 +193,38 @@ class MultiDocGenerator:
         brief: WritingBrief,
         doc_type: DocumentType,
         profile: DocTypeProfile,
+        llm_call: Callable = None,
     ) -> DocVersion:
-        """生成完整版本（最长的那篇）"""
+        """生成完整版本（最长的那篇）—— 使用 LLM 或占位文本"""
         prompt = self._build_generation_prompt(brief, profile)
 
-        content = (
-            f"[{profile.name_cn} - 完整版本]\n"
-            f"篇幅：{profile.typical_length_range[0]}-{profile.typical_length_range[1]}字\n"
-            f"结构：{profile.structure_mode}\n\n"
-            f"（此处由LLM根据以下prompt生成全文：{prompt[:200]}...）"
-        )
+        if llm_call:
+            system_prompt = f"你是一名资深公文撰稿人，请根据以下要求撰写一篇{profile.name_cn}。直接输出文章正文，不要加解释和说明。"
+            try:
+                content = llm_call(system_prompt, prompt)
+                word_count = len(content)
+            except Exception:
+                content = (
+                    f"[{profile.name_cn} - 完整版本]\n"
+                    f"篇幅：{profile.typical_length_range[0]}-{profile.typical_length_range[1]}字\n"
+                    f"结构：{profile.structure_mode}\n\n"
+                    f"（此处由LLM生成全文：LLM调用失败，使用占位文本）"
+                )
+                word_count = profile.typical_length_range[1]
+        else:
+            content = (
+                f"[{profile.name_cn} - 完整版本]\n"
+                f"篇幅：{profile.typical_length_range[0]}-{profile.typical_length_range[1]}字\n"
+                f"结构：{profile.structure_mode}\n\n"
+                f"（此处由LLM生成全文：\n{prompt[:300]}...）"
+            )
+            word_count = profile.typical_length_range[1]
 
         return DocVersion(
             doc_type=doc_type,
             doc_type_name=profile.name_cn,
             content=content,
-            word_count=profile.typical_length_range[1],
+            word_count=word_count,
             style=self._infer_style(brief),
             generation_order=0,
         )
@@ -216,18 +236,39 @@ class MultiDocGenerator:
         profile: DocTypeProfile,
         source_doc_type: DocumentType,
         consistency_data: Dict[str, List[str]],
+        llm_call: Callable = None,
+        source_content: str = "",
     ) -> DocVersion:
-        """从长版本中提取生成短版本"""
-        extraction_prompt = self.EXTRACTION_PROMPTS.get(doc_type, "")
+        """从长版本中提取生成短版本 —— 使用 LLM 或占位文本"""
+        source_profile = self._get_doc_profile(source_doc_type)
+        extraction_template = self.EXTRACTION_PROMPTS.get(doc_type, "")
+
+        # 将完整版本内容注入提取 prompt
+        full_extraction_prompt = extraction_template.replace("{full_text}", source_content) if source_content else extraction_template
+
+        if llm_call:
+            system_prompt = f"你是一名公文编辑，请从详细报道中提取核心内容改写成{profile.name_cn}。直接输出正文，不要加解释。"
+            try:
+                content = llm_call(system_prompt, full_extraction_prompt)
+                word_count = len(content)
+            except Exception:
+                content = (
+                    f"[{profile.name_cn} - 从{source_profile.name_cn}提取失败]\n"
+                    f"（待LLM提取，prompt长度：{len(full_extraction_prompt)}字符）"
+                )
+                word_count = profile.typical_length_range[0]
+        else:
+            content = (
+                f"[{profile.name_cn} - 从{source_profile.name_cn}提取]\n"
+                f"（待LLM提取，prompt长度：{len(full_extraction_prompt)}字符）"
+            )
+            word_count = profile.typical_length_range[0]
 
         return DocVersion(
             doc_type=doc_type,
             doc_type_name=profile.name_cn,
-            content=(
-                f"[{profile.name_cn} - 从{source_doc_type.value}提取]\n"
-                f"（提取prompt：{extraction_prompt[:150]}...）"
-            ),
-            word_count=profile.typical_length_range[0],
+            content=content,
+            word_count=word_count,
             style=self._infer_style(brief),
             generation_order=1,
             extracted_from=source_doc_type.value,
