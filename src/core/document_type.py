@@ -21,6 +21,17 @@ class DocumentType(Enum):
     SIDELIGHT = "sidelight"
     RESEARCH_REPORT = "research_report"
     BULLETIN = "bulletin"
+    CIRCULAR = "circular"
+    REQUEST = "request"
+    NOTIFICATION = "notification"
+    REPLY = "reply"
+    LETTER = "letter"
+    MEETING_MINUTES = "meeting_minutes"
+    ANNOUNCEMENT = "announcement"
+    DECISION = "decision"
+    REPORT = "report"
+    OPINION = "opinion"
+    MOTION = "motion"
 
 
 @dataclass

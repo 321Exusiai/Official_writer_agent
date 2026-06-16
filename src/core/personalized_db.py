@@ -272,6 +272,19 @@ class PersonalizedDB:
             project.status = status
             project.updated_at = datetime.now().isoformat()
 
+    def delete_project(self, project_id: str) -> bool:
+        """删除项目"""
+        user = self.get_current_user()
+        if not user:
+            raise ValueError("请先创建或选择用户")
+        
+        for i, proj in enumerate(user.projects):
+            if proj.id == project_id:
+                user.projects.pop(i)
+                user.last_active = datetime.now().isoformat()
+                return True
+        return False
+
     # ═══ 问卷结果管理 ═══
 
     def save_questionnaire_results(self, project_id: str, results: QuestionnaireResults):
