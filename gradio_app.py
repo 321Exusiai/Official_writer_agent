@@ -746,6 +746,17 @@ class GradioApp:
             return f"✅ 已删除「{removed.title}」"
         return f"文档序号 {doc_index+1} 无效"
 
+    def edit_topic_doc(self, topic_name: str, doc_index: int, new_content: str) -> str:
+        """编辑主题中文档的内容"""
+        topic_name = topic_name.strip()
+        if topic_name not in self.url_topics:
+            return f"未找到主题「{topic_name}」"
+        docs = self.url_topics[topic_name]
+        if 0 <= doc_index < len(docs):
+            docs[doc_index].content = new_content.strip()
+            return f"✅ 已更新「{docs[doc_index].title}」的内容"
+        return f"文档序号 {doc_index+1} 无效"
+
     def add_url_to_project_by_topic(self, topic_name: str, proj_name: str, session: dict) -> Tuple[str, dict]:
         """将主题中所有文档添加到项目"""
         if not self.current_user_id:
@@ -834,6 +845,81 @@ class GradioApp:
             return f"✅ 已删除项目「{proj_name}」", session
         except Exception as e:
             return f"❌ 删除失败：{e}", session
+
+    def edit_project(self, proj_name: str, new_name: str, new_desc: str, session: dict) -> Tuple[str, dict]:
+        """编辑项目名称和描述"""
+        if not self.current_user_id:
+            return "请先创建用户", session
+        projects = self.pdb.list_projects()
+        target = next((p for p in projects if p.name == proj_name.strip()), None)
+        if not target:
+            return f"未找到项目「{proj_name}」", session
+        try:
+            self.pdb.edit_project(target.id, name=new_name.strip() or "", description=new_desc)
+            return f"✅ 已更新项目「{new_name or proj_name}」", session
+        except Exception as e:
+            return f"❌ 编辑失败：{e}", session
+
+    def get_user_profile_display(self, session: dict) -> Tuple[str, dict]:
+        """可视化用户画像"""
+        if not self.current_user_id:
+            return "请先创建用户", session
+        user = self.pdb.get_current_user()
+        if not user:
+            return "无用户数据", session
+
+        lines = ["### 👤 用户画像", ""]
+        lines.append(f"**用户名**：{user.name}")
+        lines.append(f"**用户ID**：{user.id}")
+        lines.append(f"**创建时间**：{user.created_at}")
+        lines.append(f"**最近活跃**：{user.last_active}")
+        lines.append("")
+
+        if user.preferences:
+            prefs = user.preferences
+            lines.append("#### 📊 写作偏好")
+            if prefs.preferred_writing_modes:
+                lines.append(f"- 常用写作模式：{', '.join(prefs.preferred_writing_modes)}")
+            if prefs.preferred_doc_types:
+                lines.append(f"- 常用文种：{', '.join(prefs.preferred_doc_types)}")
+            if prefs.preferred_styles:
+                lines.append(f"- 常用风格：{', '.join(prefs.preferred_styles)}")
+            if prefs.common_themes:
+                lines.append(f"- 常见主题：{', '.join(prefs.common_themes)}")
+            if prefs.forbidden_patterns:
+                lines.append(f"- 禁用模式：{', '.join(prefs.forbidden_patterns)}")
+            lines.append(f"- 典型篇幅：{prefs.typical_length_range[0]}-{prefs.typical_length_range[1]}字")
+            lines.append("")
+
+        lines.append(f"#### 📁 项目统计")
+        lines.append(f"- 项目总数：{len(user.projects)}")
+        status_counts = {}
+        for p in user.projects:
+            s = p.status.value
+            status_counts[s] = status_counts.get(s, 0) + 1
+        for s, c in status_counts.items():
+            icon = {"draft": "📝", "in_progress": "🔄", "completed": "✅", "archived": "📦"}.get(s, "📄")
+            lines.append(f"  {icon} {s}：{c} 个")
+        lines.append("")
+
+        if user.common_strengths:
+            lines.append(f"#### 💪 常见优势")
+            for s in user.common_strengths:
+                lines.append(f"- {s}")
+            lines.append("")
+
+        if user.common_weaknesses:
+            lines.append(f"#### ⚠️ 常见短板")
+            for w in user.common_weaknesses:
+                lines.append(f"- {w}")
+            lines.append("")
+
+        if user.memory_notes:
+            lines.append(f"#### 📝 记忆笔记")
+            lines.append(user.memory_notes[:500])
+            lines.append("")
+
+        return "\n".join(lines), session
 
     def get_memory_summary(self, session: dict) -> Tuple[str, dict]:
         """用户记忆摘要（可查看/编辑）"""
@@ -1234,6 +1320,16 @@ def create_ui() -> gr.Blocks:
                     url_to_proj_btn = gr.Button("添加", variant="primary", scale=1)
                 add_status = gr.Markdown()
 
+                gr.Markdown("---")
+                gr.Markdown("### ✏️ 编辑文档内容")
+                with gr.Row():
+                    edit_topic_name = gr.Textbox(label="主题名称", placeholder="输入主题名", scale=2)
+                    edit_doc_index = gr.Number(label="文档序号（从0开始）", value=0, precision=0, scale=1)
+                edit_doc_content = gr.Textbox(label="文档内容", lines=10, placeholder="在此编辑文档内容...")
+                with gr.Row():
+                    edit_doc_btn = gr.Button("💾 保存编辑", variant="primary", scale=1)
+                edit_doc_msg = gr.Markdown()
+
                 # 事件绑定
                 url_btn.click(
                     fn=lambda u, t, s: app.import_url_to_topic(u, t, s),
@@ -1263,6 +1359,11 @@ def create_ui() -> gr.Blocks:
                     fn=lambda t, p, s: app.add_url_to_project_by_topic(t, p, s),
                     inputs=[topic_for_proj, proj_for_url, session_state],
                     outputs=[add_status, session_state]
+                )
+                edit_doc_btn.click(
+                    fn=lambda t, i, c: app.edit_topic_doc(t, i, c),
+                    inputs=[edit_topic_name, edit_doc_index, edit_doc_content],
+                    outputs=[edit_doc_msg]
                 )
 
             # ═══════════════════════════════════════════════════════
@@ -1425,11 +1526,27 @@ def create_ui() -> gr.Blocks:
                 proj_detail_output = gr.Markdown()
 
                 gr.Markdown("---")
+                gr.Markdown("### ✏️ 编辑项目")
+                with gr.Row():
+                    proj_edit_name = gr.Textbox(label="原项目名称", placeholder="要编辑的项目名", scale=2)
+                    proj_edit_new_name = gr.Textbox(label="新名称（留空不变）", placeholder="新项目名称...", scale=2)
+                    proj_edit_new_desc = gr.Textbox(label="新描述（留空不变）", placeholder="新描述...", scale=3)
+                with gr.Row():
+                    proj_edit_btn = gr.Button("保存修改", variant="primary", scale=1)
+                proj_edit_msg = gr.Markdown()
+
+                gr.Markdown("---")
                 gr.Markdown("### 🗑️ 删除项目")
                 with gr.Row():
                     proj_delete_name = gr.Textbox(label="要删除的项目名", scale=3)
                     proj_delete_btn = gr.Button("删除项目", variant="stop", scale=1)
                 proj_delete_msg = gr.Markdown()
+
+                gr.Markdown("---")
+                gr.Markdown("### 👤 用户画像")
+                user_profile_display = gr.Markdown("点击刷新查看用户画像")
+                with gr.Row():
+                    profile_btn = gr.Button("🔄 刷新用户画像", variant="primary")
 
                 gr.Markdown("---")
                 gr.Markdown("### 📝 用户记忆管理")
@@ -1456,10 +1573,20 @@ def create_ui() -> gr.Blocks:
                     inputs=[proj_detail_name, session_state],
                     outputs=[proj_detail_output, session_state]
                 )
+                proj_edit_btn.click(
+                    fn=lambda name, new_name, new_desc, s: app.edit_project(name, new_name, new_desc, s),
+                    inputs=[proj_edit_name, proj_edit_new_name, proj_edit_new_desc, session_state],
+                    outputs=[proj_edit_msg, session_state]
+                )
                 proj_delete_btn.click(
                     fn=lambda name, s: app.delete_project(name, s),
                     inputs=[proj_delete_name, session_state],
                     outputs=[proj_delete_msg, session_state]
+                )
+                profile_btn.click(
+                    fn=lambda s: app.get_user_profile_display(s),
+                    inputs=[session_state],
+                    outputs=[user_profile_display, session_state]
                 )
                 memory_add_btn.click(
                     fn=lambda note, s: app.add_memory_note(note, s),

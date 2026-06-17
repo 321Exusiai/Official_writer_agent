@@ -285,6 +285,23 @@ class PersonalizedDB:
                 return True
         return False
 
+    def edit_project(self, project_id: str, name: str = "", description: str = "",
+                     status: Optional[ProjectStatus] = None, tags: Optional[List[str]] = None) -> bool:
+        """编辑项目信息"""
+        project = self.get_project(project_id)
+        if not project:
+            return False
+        if name:
+            project.name = name
+        if description is not None:
+            project.description = description
+        if status:
+            project.status = status
+        if tags is not None:
+            project.tags = tags
+        project.updated_at = datetime.now().isoformat()
+        return True
+
     # ═══ 问卷结果管理 ═══
 
     def save_questionnaire_results(self, project_id: str, results: QuestionnaireResults):
