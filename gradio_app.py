@@ -1031,72 +1031,12 @@ def build_ui() -> gr.Blocks:
         overflow: hidden;
         z-index: 1; /* Establishes stacking context */
         background-color: var(--color-sky-deep) !important;
-        
-        /* Glass line/particle overlay natively on container */
-        background-image: 
-            repeating-linear-gradient(
-                -45deg,
-                rgba(255,255,255,0.015) 0px,
-                rgba(255,255,255,0.015) 1px,
-                rgba(0,0,0,0.02) 1px,
-                rgba(0,0,0,0.02) 2.5px
-            ) !important;
+        background-image: url('data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%220%200%201000%201000%22%20preserveAspectRatio%3D%22xMidYMid%20slice%22%3E%0A%20%20%3Cdefs%3E%0A%20%20%20%20%3Cfilter%20id%3D%22blurLg%22%3E%3CfeGaussianBlur%20stdDeviation%3D%2280%22%20/%3E%3C/filter%3E%0A%20%20%20%20%3Cfilter%20id%3D%22blurMd%22%3E%3CfeGaussianBlur%20stdDeviation%3D%2240%22%20/%3E%3C/filter%3E%0A%20%20%20%20%3Cfilter%20id%3D%22blurSm%22%3E%3CfeGaussianBlur%20stdDeviation%3D%2210%22%20/%3E%3C/filter%3E%0A%20%20%20%20%0A%20%20%20%20%3CradialGradient%20id%3D%22swirlLight%22%20cx%3D%2250%25%22%20cy%3D%2250%25%22%20r%3D%2250%25%22%3E%0A%20%20%20%20%20%20%3Cstop%20offset%3D%220%25%22%20stop-color%3D%22%234F7EA4%22%20stop-opacity%3D%220.8%22%20/%3E%0A%20%20%20%20%20%20%3Cstop%20offset%3D%22100%25%22%20stop-color%3D%22%231C3765%22%20stop-opacity%3D%220%22%20/%3E%0A%20%20%20%20%3C/radialGradient%3E%0A%20%20%20%20%0A%20%20%20%20%3CradialGradient%20id%3D%22swirlMid%22%20cx%3D%2250%25%22%20cy%3D%2250%25%22%20r%3D%2250%25%22%3E%0A%20%20%20%20%20%20%3Cstop%20offset%3D%220%25%22%20stop-color%3D%22%23648BA8%22%20stop-opacity%3D%220.7%22%20/%3E%0A%20%20%20%20%20%20%3Cstop%20offset%3D%22100%25%22%20stop-color%3D%22%2328406F%22%20stop-opacity%3D%220%22%20/%3E%0A%20%20%20%20%3C/radialGradient%3E%0A%20%20%20%20%0A%20%20%20%20%3CradialGradient%20id%3D%22swirlDark%22%20cx%3D%2250%25%22%20cy%3D%2250%25%22%20r%3D%2250%25%22%3E%0A%20%20%20%20%20%20%3Cstop%20offset%3D%220%25%22%20stop-color%3D%22%23283C25%22%20stop-opacity%3D%220.6%22%20/%3E%0A%20%20%20%20%20%20%3Cstop%20offset%3D%22100%25%22%20stop-color%3D%22%230D1917%22%20stop-opacity%3D%220%22%20/%3E%0A%20%20%20%20%3C/radialGradient%3E%0A%0A%20%20%20%20%3CradialGradient%20id%3D%22starHalo%22%20cx%3D%2250%25%22%20cy%3D%2250%25%22%20r%3D%2250%25%22%3E%0A%20%20%20%20%20%20%3Cstop%20offset%3D%220%25%22%20stop-color%3D%22%23DFCB5C%22%20stop-opacity%3D%220.95%22%20/%3E%0A%20%20%20%20%20%20%3Cstop%20offset%3D%2220%25%22%20stop-color%3D%22%23DFCB5C%22%20stop-opacity%3D%220.6%22%20/%3E%0A%20%20%20%20%20%20%3Cstop%20offset%3D%2250%25%22%20stop-color%3D%22%231C3765%22%20stop-opacity%3D%220.3%22%20/%3E%0A%20%20%20%20%20%20%3Cstop%20offset%3D%22100%25%22%20stop-color%3D%22%231C3765%22%20stop-opacity%3D%220%22%20/%3E%0A%20%20%20%20%3C/radialGradient%3E%0A%20%20%20%20%0A%20%20%20%20%3CradialGradient%20id%3D%22moonHalo%22%20cx%3D%2250%25%22%20cy%3D%2250%25%22%20r%3D%2250%25%22%3E%0A%20%20%20%20%20%20%3Cstop%20offset%3D%220%25%22%20stop-color%3D%22%23E7D674%22%20stop-opacity%3D%221%22%20/%3E%0A%20%20%20%20%20%20%3Cstop%20offset%3D%2215%25%22%20stop-color%3D%22%23DFCB5C%22%20stop-opacity%3D%220.8%22%20/%3E%0A%20%20%20%20%20%20%3Cstop%20offset%3D%2240%25%22%20stop-color%3D%22%23648BA8%22%20stop-opacity%3D%220.4%22%20/%3E%0A%20%20%20%20%20%20%3Cstop%20offset%3D%22100%25%22%20stop-color%3D%22%231C3765%22%20stop-opacity%3D%220%22%20/%3E%0A%20%20%20%20%3C/radialGradient%3E%0A%20%20%3C/defs%3E%0A%0A%20%20%3Crect%20width%3D%22100%25%22%20height%3D%22100%25%22%20fill%3D%22%230D162B%22%20/%3E%0A%0A%20%20%3C%21--%20Flowing%20Swirls%20--%3E%0A%20%20%3Cg%3E%0A%20%20%20%20%3CanimateTransform%20attributeName%3D%22transform%22%20type%3D%22rotate%22%20from%3D%220%20300%20300%22%20to%3D%22360%20300%20300%22%20dur%3D%2245s%22%20repeatCount%3D%22indefinite%22%20/%3E%0A%20%20%20%20%3Cellipse%20cx%3D%22300%22%20cy%3D%22300%22%20rx%3D%22450%22%20ry%3D%22200%22%20fill%3D%22url%28%23swirlLight%29%22%20filter%3D%22url%28%23blurLg%29%22%20transform%3D%22rotate%2830%20300%20300%29%22%20/%3E%0A%20%20%20%20%3Cellipse%20cx%3D%22300%22%20cy%3D%22300%22%20rx%3D%22300%22%20ry%3D%22150%22%20fill%3D%22url%28%23swirlMid%29%22%20filter%3D%22url%28%23blurMd%29%22%20transform%3D%22rotate%28-20%20300%20300%29%22%20/%3E%0A%20%20%3C/g%3E%0A%0A%20%20%3Cg%3E%0A%20%20%20%20%3CanimateTransform%20attributeName%3D%22transform%22%20type%3D%22rotate%22%20from%3D%22360%20750%20400%22%20to%3D%220%20750%20400%22%20dur%3D%2260s%22%20repeatCount%3D%22indefinite%22%20/%3E%0A%20%20%20%20%3Cellipse%20cx%3D%22750%22%20cy%3D%22400%22%20rx%3D%22500%22%20ry%3D%22250%22%20fill%3D%22url%28%23swirlMid%29%22%20filter%3D%22url%28%23blurLg%29%22%20transform%3D%22rotate%28-45%20750%20400%29%22%20/%3E%0A%20%20%20%20%3Cellipse%20cx%3D%22750%22%20cy%3D%22400%22%20rx%3D%22200%22%20ry%3D%22400%22%20fill%3D%22url%28%23swirlLight%29%22%20filter%3D%22url%28%23blurMd%29%22%20transform%3D%22rotate%2815%20750%20400%29%22%20/%3E%0A%20%20%3C/g%3E%0A%0A%20%20%3Cg%3E%0A%20%20%20%20%3CanimateTransform%20attributeName%3D%22transform%22%20type%3D%22rotate%22%20from%3D%220%20400%20800%22%20to%3D%22360%20400%20800%22%20dur%3D%2250s%22%20repeatCount%3D%22indefinite%22%20/%3E%0A%20%20%20%20%3Cellipse%20cx%3D%22400%22%20cy%3D%22800%22%20rx%3D%22400%22%20ry%3D%22250%22%20fill%3D%22url%28%23swirlDark%29%22%20filter%3D%22url%28%23blurLg%29%22%20transform%3D%22rotate%2860%20400%20800%29%22%20/%3E%0A%20%20%3C/g%3E%0A%0A%20%20%3C%21--%20The%20Moon%20--%3E%0A%20%20%3Cg%3E%0A%20%20%20%20%3CanimateTransform%20attributeName%3D%22transform%22%20type%3D%22rotate%22%20from%3D%220%20850%20200%22%20to%3D%22360%20850%20200%22%20dur%3D%2230s%22%20repeatCount%3D%22indefinite%22%20/%3E%0A%20%20%20%20%3Ccircle%20cx%3D%22850%22%20cy%3D%22200%22%20r%3D%22180%22%20fill%3D%22url%28%23moonHalo%29%22%20filter%3D%22url%28%23blurSm%29%22%20/%3E%0A%20%20%20%20%3C%21--%20inner%20swirl%20inside%20moon%20--%3E%0A%20%20%20%20%3Cellipse%20cx%3D%22850%22%20cy%3D%22200%22%20rx%3D%22140%22%20ry%3D%2270%22%20fill%3D%22url%28%23swirlLight%29%22%20opacity%3D%220.3%22%20filter%3D%22url%28%23blurSm%29%22%20transform%3D%22rotate%2845%20850%20200%29%22%20/%3E%0A%20%20%3C/g%3E%0A%0A%20%20%3C%21--%20Stars%20--%3E%0A%20%20%3Cg%3E%0A%20%20%20%20%3CanimateTransform%20attributeName%3D%22transform%22%20type%3D%22rotate%22%20from%3D%22360%20200%20150%22%20to%3D%220%20200%20150%22%20dur%3D%2225s%22%20repeatCount%3D%22indefinite%22%20/%3E%0A%20%20%20%20%3Ccircle%20cx%3D%22200%22%20cy%3D%22150%22%20r%3D%22120%22%20fill%3D%22url%28%23starHalo%29%22%20filter%3D%22url%28%23blurSm%29%22%20/%3E%0A%20%20%20%20%3Cellipse%20cx%3D%22200%22%20cy%3D%22150%22%20rx%3D%2290%22%20ry%3D%2240%22%20fill%3D%22url%28%23swirlLight%29%22%20opacity%3D%220.4%22%20filter%3D%22url%28%23blurSm%29%22%20transform%3D%22rotate%28-30%20200%20150%29%22%20/%3E%0A%20%20%3C/g%3E%0A%0A%20%20%3Cg%3E%0A%20%20%20%20%3CanimateTransform%20attributeName%3D%22transform%22%20type%3D%22rotate%22%20from%3D%220%20150%20550%22%20to%3D%22360%20150%20550%22%20dur%3D%2222s%22%20repeatCount%3D%22indefinite%22%20/%3E%0A%20%20%20%20%3Ccircle%20cx%3D%22150%22%20cy%3D%22550%22%20r%3D%22100%22%20fill%3D%22url%28%23starHalo%29%22%20filter%3D%22url%28%23blurSm%29%22%20/%3E%0A%20%20%3C/g%3E%0A%0A%20%20%3Cg%3E%0A%20%20%20%20%3CanimateTransform%20attributeName%3D%22transform%22%20type%3D%22rotate%22%20from%3D%22360%20500%20450%22%20to%3D%220%20500%20450%22%20dur%3D%2235s%22%20repeatCount%3D%22indefinite%22%20/%3E%0A%20%20%20%20%3Ccircle%20cx%3D%22500%22%20cy%3D%22450%22%20r%3D%2280%22%20fill%3D%22url%28%23starHalo%29%22%20filter%3D%22url%28%23blurSm%29%22%20opacity%3D%220.8%22%20/%3E%0A%20%20%3C/g%3E%0A%0A%20%20%3Cg%3E%0A%20%20%20%20%3CanimateTransform%20attributeName%3D%22transform%22%20type%3D%22rotate%22%20from%3D%220%20750%20750%22%20to%3D%22360%20750%20750%22%20dur%3D%2228s%22%20repeatCount%3D%22indefinite%22%20/%3E%0A%20%20%20%20%3Ccircle%20cx%3D%22750%22%20cy%3D%22750%22%20r%3D%22110%22%20fill%3D%22url%28%23starHalo%29%22%20filter%3D%22url%28%23blurSm%29%22%20/%3E%0A%20%20%20%20%3Cellipse%20cx%3D%22750%22%20cy%3D%22750%22%20rx%3D%2280%22%20ry%3D%2230%22%20fill%3D%22url%28%23swirlLight%29%22%20opacity%3D%220.3%22%20filter%3D%22url%28%23blurSm%29%22%20transform%3D%22rotate%2870%20750%20750%29%22%20/%3E%0A%20%20%3C/g%3E%0A%3C/svg%3E') !important;
+        background-size: cover !important;
+        background-position: center !important;
         
         font-family: "Inter", "Noto Sans SC", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif !important;
         color: var(--color-ink) !important;
-    }
-
-    /* Fluid Swirling Blobs Layer 1 */
-    .gradio-container::before {
-        content: "";
-        position: absolute;
-        width: 250vw;
-        height: 250vh;
-        top: -75vh;
-        left: -75vw;
-        z-index: -2; /* Above background color, below content */
-        background: 
-            radial-gradient(circle at 30% 30%, rgba(79, 126, 164, 0.8) 0%, transparent 50%),
-            radial-gradient(circle at 70% 70%, rgba(223, 203, 92, 0.45) 0%, transparent 45%),
-            radial-gradient(circle at 70% 30%, rgba(40, 60, 37, 0.7) 0%, transparent 50%),
-            radial-gradient(circle at 30% 70%, rgba(100, 139, 168, 0.6) 0%, transparent 50%);
-        filter: blur(100px) saturate(140%);
-        animation: fluid-rotate-1 25s cubic-bezier(0.4, 0, 0.2, 1) infinite;
-        pointer-events: none;
-    }
-
-    /* Fluid Swirling Blobs Layer 2 */
-    .gradio-container::after {
-        content: "";
-        position: absolute;
-        width: 250vw;
-        height: 250vh;
-        top: -75vh;
-        left: -75vw;
-        z-index: -1;
-        background: 
-            radial-gradient(circle at 50% 20%, rgba(227, 216, 150, 0.4) 0%, transparent 40%),
-            radial-gradient(circle at 20% 50%, rgba(28, 55, 101, 0.9) 0%, transparent 45%),
-            radial-gradient(circle at 80% 80%, rgba(79, 126, 164, 0.5) 0%, transparent 45%);
-        filter: blur(80px) saturate(160%);
-        animation: fluid-rotate-2 30s cubic-bezier(0.25, 0.1, 0.25, 1) infinite reverse;
-        pointer-events: none;
-        mix-blend-mode: color-dodge;
-        opacity: 0.6;
-    }
-    
-    @keyframes fluid-rotate-1 {
-        0% { transform: rotate(0deg) scale(1) translate(0%, 0%); }
-        33% { transform: rotate(120deg) scale(1.1) translate(4%, 6%); }
-        66% { transform: rotate(240deg) scale(0.9) translate(-4%, 2%); }
-        100% { transform: rotate(360deg) scale(1) translate(0%, 0%); }
-    }
-
-    @keyframes fluid-rotate-2 {
-        0% { transform: rotate(0deg) scale(1.1) translate(0%, 0%); }
-        33% { transform: rotate(120deg) scale(0.9) translate(-2%, -3%); }
-        66% { transform: rotate(240deg) scale(1.2) translate(3%, -4%); }
-        100% { transform: rotate(360deg) scale(1.1) translate(0%, 0%); }
     }
 
     .gradio-container p, .gradio-container span, .gradio-container label,
