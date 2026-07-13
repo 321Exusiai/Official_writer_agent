@@ -46,10 +46,7 @@ CHAR_MAP = {
     # '\u2026': '...',  # 默认保留，按需开启
 }
 
-# 当文本需要放入 Python 双引号字符串时，替换内部的 ASCII 双引号
-ASCII_QUOTE_REPLACEMENT = '\u300c'  # 「
-
-# 成对替换：奇数位置的 " → 「, 偶数位置的 " → 」
+# 成对替换：奇数位置的 " -> 「, 偶数位置的 " -> 」
 LEFT_ANGLE = '\u300c'
 RIGHT_ANGLE = '\u300d'
 

@@ -17,6 +17,7 @@ if sys.platform == 'win32':
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from src.core.orchestrator import Orchestrator, OrchestratorState
 from src.questionnaire.questionnaire import (
     Questionnaire, WritingBrief, QuestionnairePhase,
 )
@@ -30,7 +31,6 @@ from src.core.writer_agent import WriterAgent, WriterConfig
 from src.core.reviewer_agent import (
     ReviewerAgent, ReviewResult, ALL_ERROR_DBS, OBJECTIVE_ERROR_DB,
 )
-from src.core.orchestrator import Orchestrator, OrchestratorState
 from src.core.writing_mode import (
     WritingMode, ALL_PRINCIPLES, DECISION_TREE,
     get_mode_profile, get_review_dimensions, get_mode_questions,

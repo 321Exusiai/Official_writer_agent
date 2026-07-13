@@ -460,7 +460,7 @@ PRINCIPLES_STRATEGIC_NARRATIVE = WritingPrinciples(
 
             "name": "赋能性原则",
 
-            "description": '每段行程必须回扣培养理念或战略部署。为每个板块设置"战略锚点"——点明"为什么是这里"。',
+            "description": '行程描写应注意与培养理念或战略部署形成内在呼应。为核心板块设置"战略锚点"——点明"为什么是这里"。',
 
             "check": "这段行程如果删掉战略锚点句，还能读得通吗？",
 
@@ -625,7 +625,7 @@ PRINCIPLES_OBJECTIVE_REPORT = WritingPrinciples(
 
             "name": "结论可验证性",
 
-            "description": "所有结论必须有数据或案例支撑。对策建议必须可操作、可验证、可追溯。",
+            "description": "建议关键结论附带数据或案例支撑以提升说服力。对策建议应尽量可操作、可验证、可追溯。",
 
             "check": "如果我是一个完全不了解情况的人，看完这篇文章能判断结论是否可信吗？",
 
@@ -1655,7 +1655,7 @@ MODE_QUESTIONS: Dict[WritingMode, List[Dict[str, str]]] = {
 
             "text": "你的核心发现或结论是什么？有哪些证据可以支撑？",
 
-            "why_ask": "客观报告不允许'我觉得'——每个结论都必须有证据。",
+            "why_ask": "客观报告不允许'我觉得'——关键结论应当有客观证据或事实支撑。",
 
             "hint": "列出3-5个核心发现，每个后面标注支撑它的证据类型",
 
@@ -1972,37 +1972,3 @@ def get_mode_description(mode: WritingMode) -> str:
     desc += f"\n对标参考：{'、'.join(principles.benchmark_sources[:3])}"
 
     return desc
-
-
-
-
-
-def get_all_modes_summary() -> str:
-
-    """获取所有写作模式的概览"""
-
-    summary = "═══════════════════════════════════════════\n"
-
-    summary += "  四 大 写 作 模 式 概 览\n"
-
-    summary += "═══════════════════════════════════════════\n\n"
-
-
-
-    for mode, principles in ALL_PRINCIPLES.items():
-
-        summary += f"【{mode.value}】{principles.name}\n"
-
-        summary += f"  {principles.tagline[:80]}...\n"
-
-        summary += f"  适用场景：\n"
-
-        for p in principles.principles[:3]:
-
-            summary += f"    · {p['name']}\n"
-
-        summary += "\n"
-
-
-
-    return summary

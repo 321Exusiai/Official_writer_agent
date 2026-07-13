@@ -93,6 +93,41 @@ COMPACT_EXEMPLARS: Dict[str, CompactExemplar] = {
         ),
     ),
 
+    "whu_ai_yanxue": CompactExemplar(
+        id="whu_ai_yanxue",
+        title="武汉大学人工智能学院2025级自强班赴京开展研学实践",
+        source="优秀通讯范本 (用户精选)",
+        doc_type="通讯",
+        style="人民日报",
+        writing_mode="strategic_narrative",
+        award="黄金标杆范文",
+        word_count=1200,
+        structure_skeleton=(
+            "导语(时代背景与行程总览)→"
+            "战略对接(中关村学院：产业脉动)→"
+            "学术前沿(北大图灵班：科研志趣)→"
+            "国之重器(中科院空间中心：家国情怀)→"
+            "结语(使命担当与行动转化)"
+        ),
+        key_sentences=[
+            "在人工智能技术深刻重塑全球产业格局的时代背景下，拔尖创新人才培养已成为高等教育改革的战略支点。",
+            "在科研中保持纯粹，在国家需要时挺膺担当。",
+            "让每一次计算都与国家命运同频共振。"
+        ],
+        language_tags=[
+            "客观叙事与主观感悟解耦(研学手记侧栏)",
+            "高名词颗粒度(具体机构、项目名称)",
+            "事实铺垫-简短引用-行动转化的自然咬合",
+            "摒弃宏大空泛的排比句"
+        ],
+        reusable_pattern=(
+            "1. 将宏观战略作为背景起笔，赋予行程时代意义。\n"
+            "2. 用极度具体的硬核细节（如实验室名称、具体技术）取代形容词。\n"
+            "3. 引用不强行升华，用原话呈现力量并自然衔接。\n"
+            "4. 当遇到长篇心得感悟时，使用独立的侧栏或手记板块，维持主文清爽。"
+        ),
+    ),
+
     "kanzhun_le_jiu_zhuajin_gan": CompactExemplar(
         id="kanzhun_le_jiu_zhuajin_gan",
         title="看准了就抓紧干",
@@ -1501,6 +1536,17 @@ class KnowledgeBase:
         if not phrases:
             phrases = self.transitions.get("新华社", [])
         return phrases[:count]
+
+    def get_style_exemplar_summary(self, style: str) -> str:
+        """获取指定风格的范文简要总结（用于测试及检索）"""
+        results = self.search_exemplars(style=style)
+        if not results:
+            return f"暂无 {style} 风格的范文参考。"
+        
+        lines = []
+        for e in results:
+            lines.append(f"风格：{e.style}，标题：《{e.title}》，来源：{e.source}，荣誉：{e.award}")
+        return "\n".join(lines)
 
     # ── 术语检索 ──
 

@@ -186,42 +186,98 @@ class APIConfigManager:
         return self.config
 
     def test_connection(self, config: LLMConfig = None) -> Dict[str, Any]:
-        """测试 API 连接"""
+        """
+        测试 API 连接（带重试 + 分类错误处理）
+
+        改进：
+          - 重试机制（最多 2 次，指数退避）
+          - 响应格式验证
+          - 分类错误（超时/认证/限流/服务器/网络）
+          - 返回结构化结果
+        """
         cfg = config or self.config
         if not cfg.api_key:
-            return {"success": False, "message": "API Key 为空"}
+            return {"success": False, "message": "API Key 为空，请先填写"}
         if not cfg.api_base:
-            return {"success": False, "message": "API Base URL 为空"}
+            return {"success": False, "message": "API Base URL 为空，请先填写"}
+        if not cfg.model:
+            return {"success": False, "message": "模型名称为空，请先填写"}
 
-        try:
-            import requests
-            headers = {"Authorization": f"Bearer {cfg.api_key}", "Content-Type": "application/json"}
-            payload = {
-                "model": cfg.model,
-                "messages": [{"role": "user", "content": "回复OK"}],
-                "max_tokens": 10,
-            }
-            url = cfg.api_base.rstrip("/") + "/chat/completions"
-            response = requests.post(url, headers=headers, json=payload, timeout=cfg.timeout)
-            response.raise_for_status()
-            data = response.json()
-            content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
-            return {"success": True, "message": f"连接成功！模型返回：{content[:30]}"}
-        except requests.exceptions.ConnectionError:
-            return {"success": False, "message": "无法连接到 API 服务器，请检查网络或 Base URL"}
-        except requests.exceptions.Timeout:
-            return {"success": False, "message": "请求超时，请检查网络或增加超时时间"}
-        except Exception as e:
-            error_msg = str(e)
-            if "401" in error_msg or "unauthorized" in error_msg.lower():
-                return {"success": False, "message": "API Key 无效或已过期"}
-            if "403" in error_msg:
-                return {"success": False, "message": "API Key 无权限访问"}
-            if "429" in error_msg:
-                return {"success": False, "message": "请求频率过高，请稍后重试"}
-            if "500" in error_msg:
-                return {"success": False, "message": "API 服务器内部错误"}
-            return {"success": False, "message": f"连接失败：{error_msg[:100]}"}
+        import time
+
+        max_retries = 2
+        last_error: str = ""
+
+        for attempt in range(max_retries):
+            try:
+                import requests
+                headers = {"Authorization": f"Bearer {cfg.api_key}", "Content-Type": "application/json"}
+                payload = {
+                    "model": cfg.model,
+                    "messages": [{"role": "user", "content": "回复OK"}],
+                    "max_tokens": 10,
+                }
+                url = cfg.api_base.rstrip("/") + "/chat/completions"
+                response = requests.post(url, headers=headers, json=payload, timeout=min(cfg.timeout, 30))
+
+                # 分类 HTTP 状态码
+                if response.status_code == 401:
+                    return {"success": False, "message": "API Key 无效或已过期，请检查密钥"}
+                if response.status_code == 403:
+                    return {"success": False, "message": "API Key 无权限访问该模型，请检查账户权限"}
+                if response.status_code == 404:
+                    return {"success": False, "message": "端点不存在，请检查 API Base URL 或模型名称"}
+                if response.status_code == 429:
+                    if attempt < max_retries - 1:
+                        time.sleep(5)
+                        continue
+                    return {"success": False, "message": "请求频率过高，请稍后重试"}
+                if response.status_code >= 500:
+                    if attempt < max_retries - 1:
+                        time.sleep(2)
+                        continue
+                    return {"success": False, "message": "API 服务器内部错误，请稍后重试"}
+
+                response.raise_for_status()
+
+                # 响应格式验证
+                data = response.json()
+                choices = data.get("choices", [])
+                if not choices:
+                    return {"success": False, "message": "API 返回格式异常：缺少 choices 字段"}
+
+                content = choices[0].get("message", {}).get("content", "")
+                if not content:
+                    return {"success": False, "message": "API 返回内容为空，模型可能未正确响应"}
+
+                return {"success": True, "message": f"连接成功，模型响应正常：{content[:30]}"}
+
+            except requests.exceptions.Timeout:
+                last_error = "请求超时，请检查网络或增加超时时间"
+                if attempt < max_retries - 1:
+                    time.sleep(2)
+                    continue
+            except requests.exceptions.ConnectionError:
+                last_error = "无法连接到 API 服务器，请检查网络或 Base URL"
+                if attempt < max_retries - 1:
+                    time.sleep(2)
+                    continue
+            except json.JSONDecodeError:
+                return {"success": False, "message": "API 返回的数据格式异常（非有效 JSON），可能 Base URL 错误"}
+            except Exception as e:
+                error_msg = str(e)
+                if "401" in error_msg or "unauthorized" in error_msg.lower():
+                    return {"success": False, "message": "API Key 无效或已过期"}
+                if "403" in error_msg:
+                    return {"success": False, "message": "API Key 无权限访问"}
+                if "429" in error_msg:
+                    return {"success": False, "message": "请求频率过高，请稍后重试"}
+                last_error = f"连接失败：{error_msg[:100]}"
+                if attempt < max_retries - 1:
+                    time.sleep(2)
+                    continue
+
+        return {"success": False, "message": last_error}
 
     def is_enabled(self) -> bool:
         return self.config.enable and bool(self.config.api_key) and bool(self.config.api_base)

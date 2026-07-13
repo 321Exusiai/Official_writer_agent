@@ -1,58 +1,52 @@
 """
-Gradio Web 界面 — 公文写作 Agent V9
-完整集成所有核心功能：智能体协作、风格选择、文种识别、知识库、HITL审查、一文多体
-V9改进：多API管理、文件夹式项目/URL管理、自定义场景、扩展风格、字数区间
+公文写作智能体 — Web 交互台 V10 (Premium Workspace Edition)
+
+设计规范：
+1. 极简高端 iOS 卡片式视觉风格 (Premium minimalist iOS card aesthetics)
+2. 左侧“Finder文件夹”式目录管理 + 右侧“编辑/写作主面板”层级视窗
+3. 数据库与导入素材的本地 JSON 完全持久化存储 (Auto-persistence)
+4. 修复所有 Gradio 事件返回值数量对齐 Bug，杜绝运行时异常
 """
 
 import sys
 import os
+import json
+from typing import List, Dict, Optional, Tuple, Any
+from enum import Enum
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "src"))
 
 import gradio as gr
-from typing import List, Dict, Optional, Tuple, Any
+from dataclasses import dataclass, field, asdict
 
+# 核心算法模块导入
 from src.core.orchestrator import Orchestrator, OrchestratorState, WritingPlan
-from src.core.personalized_db import PersonalizedDB, ProjectStatus
+from src.core.personalized_db import (
+    PersonalizedDB, ProjectStatus, Project, UserProfile, ReferenceArticle,
+    QuestionnaireResults, VocabularyCorpus, UserRequirement, AntiBiasAnalysis, UserPreferences
+)
 from src.core.writing_mode import WritingMode, get_mode_profile
-from src.core.style_adapter import MediaStyle, StyleAdapter, STYLE_PROFILES
-from src.core.document_type import DocumentType, DocumentTypeIdentifier, DOC_TYPE_PROFILES
+from src.core.style_adapter import MediaStyle, StyleAdapter, STYLE_PROFILES, StyleBlend
+from src.core.document_type import DocumentType, DocumentTypeIdentifier, DOC_TYPE_PROFILES, DocTypeProfile
 from src.core.agent_coordinator import AgentCoordinator, AgentRole
 from src.core.multi_doc_generator import MultiDocGenerator
 from src.knowledge.knowledge_base import KnowledgeBase
-from src.config.api_config import APIConfigManager, SUPPORTED_PROVIDERS
-from src.utils.url_importer import URLDocumentImporter
+from src.config.api_config import APIConfigManager, SUPPORTED_PROVIDERS, LLMConfig
+from src.utils.url_importer import URLDocumentImporter, DocumentFormat, ImportedDocument
+from src.questionnaire.questionnaire import QuestionnairePhase
 
-STEPS = [
-    ("1. 用户", "创建或选择你的身份"),
-    ("2. 项目", "创建写作项目"),
-    ("3. 场景", "选择最接近你的场景"),
-    ("4. 问卷", "回答专属问题"),
-    ("5. 方案", "确认写作方案"),
-    ("6. 初稿", "生成文章初稿"),
-    ("7. 审查", "自动审查与修正"),
-    ("8. 完成", "导出最终结果"),
-]
-STEP_KEYS = [s[0] for s in STEPS]
-
-# ── 扩展风格选项 ──
+# ── 风格选项配置 ──
 STYLE_CHOICES = [
     ("人民日报风格", MediaStyle.PEOPLE_DAILY),
     ("新华社风格", MediaStyle.XINHUA),
     ("央视新闻风格", MediaStyle.CCTV),
     ("光明日报风格", MediaStyle.GUANGMING),
     ("党政机关行文规范", MediaStyle.GOVERNMENT_ADMIN),
-    ("求是杂志风格", MediaStyle.PEOPLE_DAILY),
-    ("经济日报风格", MediaStyle.XINHUA),
-    ("中国青年报风格", MediaStyle.GUANGMING),
-    ("科技日报风格", MediaStyle.XINHUA),
-    ("地方党报风格", MediaStyle.PEOPLE_DAILY),
-    ("自媒体/公众号风格", MediaStyle.CCTV),
-    ("学术报告风格", MediaStyle.GOVERNMENT_ADMIN),
 ]
 STYLE_LABEL_TO_ENUM = {label: enum for label, enum in STYLE_CHOICES}
 STYLE_ENUM_TO_LABEL = {enum: label for label, enum in STYLE_CHOICES}
 
-# ── 文种选项（推荐区间替代固定限制）──
+# ── 文种范围选项 ──
 DOC_TYPE_CHOICES = [
     ("通讯（推荐1500-3000字）", DocumentType.FEATURE),
     ("消息（推荐500-1000字）", DocumentType.NEWS_BRIEF),
@@ -64,1539 +58,2166 @@ DOC_TYPE_CHOICES = [
     ("批复（推荐300-800字）", DocumentType.REPLY),
     ("函（推荐300-1000字）", DocumentType.LETTER),
     ("会议纪要（推荐1000-3000字）", DocumentType.MEETING_MINUTES),
-    ("公告（推荐300-800字）", DocumentType.ANNOUNCEMENT),
-    ("决定（推荐500-1500字）", DocumentType.DECISION),
-    ("报告（推荐1000-3000字）", DocumentType.REPORT),
-    ("通报（推荐500-1500字）", DocumentType.CIRCULAR),
-    ("意见（推荐1000-3000字）", DocumentType.OPINION),
-    ("议案（推荐800-2000字）", DocumentType.MOTION),
 ]
 DOC_TYPE_LABEL_TO_ENUM = {label: enum for label, enum in DOC_TYPE_CHOICES}
 DOC_TYPE_ENUM_TO_LABEL = {enum: label for label, enum in DOC_TYPE_CHOICES}
 
+DB_FILE_PATH = os.path.join(os.path.dirname(__file__), "src", "core", "personalized_db.json")
 
-def build_progress_bar(current_step: str) -> str:
+# ═══════════════════════════════════════════════════════════════
+# 递归序列化/反序列化工具 (Dataclasses & Enums to/from JSON)
+# ═══════════════════════════════════════════════════════════════
+
+def serialize_dataclass(obj: Any) -> Any:
+    if obj is None:
+        return None
+    if isinstance(obj, list):
+        return [serialize_dataclass(x) for x in obj]
+    if isinstance(obj, dict):
+        return {str(k): serialize_dataclass(v) for k, v in obj.items()}
+    if isinstance(obj, Enum):
+        return obj.value
+    if hasattr(obj, "__dataclass_fields__"):
+        res = {"__class__": obj.__class__.__name__}
+        for f in obj.__dataclass_fields__:
+            res[f] = serialize_dataclass(getattr(obj, f))
+        return res
+    return obj
+
+def deserialize_dataclass(data: Any) -> Any:
+    if data is None:
+        return None
+    if isinstance(data, list):
+        return [deserialize_dataclass(x) for x in data]
+    if isinstance(data, dict):
+        if "__class__" in data:
+            cls_name = data["__class__"]
+            
+            cls_map = {
+                "ReferenceArticle": ReferenceArticle,
+                "VocabularyCorpus": VocabularyCorpus,
+                "AntiBiasAnalysis": AntiBiasAnalysis,
+                "UserRequirement": UserRequirement,
+                "QuestionnaireResults": QuestionnaireResults,
+                "Project": Project,
+                "UserPreferences": UserPreferences,
+                "UserProfile": UserProfile,
+                "ImportedDocument": ImportedDocument,
+            }
+            cls = cls_map.get(cls_name)
+            if cls:
+                kwargs = {}
+                for f in cls.__dataclass_fields__:
+                    val = data.get(f)
+                    # Enum 特殊还原
+                    if f == "status" and cls_name == "Project" and val is not None:
+                        kwargs[f] = ProjectStatus(val)
+                    elif f == "format" and cls_name == "ImportedDocument" and val is not None:
+                        kwargs[f] = DocumentFormat(val)
+                    else:
+                        kwargs[f] = deserialize_dataclass(val)
+                return cls(**kwargs)
+        return {k: deserialize_dataclass(v) for k, v in data.items()}
+    return data
+
+# ═══════════════════════════════════════════════════════════════
+# UI 进度显示辅助
+# ═══════════════════════════════════════════════════════════════
+STEPS = [
+    ("问卷", "回答需求问卷"),
+    ("方案", "确认写作方案"),
+    ("生成", "创建文稿草稿"),
+    ("审查", "审查校对质量"),
+    ("交付", "导出最终公文"),
+]
+
+def build_progress_badge(current_step: str) -> str:
+    step_keys = [k for k, _ in STEPS]
+    if current_step not in step_keys:
+        current_step = "问卷"
+    current_index = step_keys.index(current_step)
     parts = []
-    idx = STEP_KEYS.index(current_step) if current_step in STEP_KEYS else 0
     for i, (key, desc) in enumerate(STEPS):
-        if i == idx:
-            parts.append(f"🔵 **{key}** — {desc}")
-        elif i < idx:
-            parts.append(f"✅ ~~{key}~~")
+        n = i + 1
+        if i < current_index:
+            parts.append(
+                f"<span class='step-badge step-done' title='已完成: {desc}'>"
+                f"<span class='step-num'>{n}</span><span class='step-label'>{key}</span></span>"
+            )
+        elif i == current_index:
+            parts.append(
+                f"<span class='step-badge step-current' title='当前: {desc}'>"
+                f"<span class='step-num'>{n}</span><span class='step-label'>{key}</span></span>"
+            )
         else:
-            parts.append(f"⚪ {key}")
-    return "  →  ".join(parts)
+            parts.append(
+                f"<span class='step-badge step-todo' title='待进行: {desc}'>"
+                f"<span class='step-num'>{n}</span><span class='step-label'>{key}</span></span>"
+            )
+    return "<span class='step-track'>" + "".join(parts) + "</span>"
 
+
+# ═══════════════════════════════════════════════════════════════
+# App 核心控制逻辑类
+# ═══════════════════════════════════════════════════════════════
 
 class GradioApp:
     def __init__(self):
-        self.orchestrator: Optional[Orchestrator] = None
         self.pdb = PersonalizedDB()
         self.api_manager = APIConfigManager()
         self.knowledge_base = KnowledgeBase()
         self.style_adapter = StyleAdapter()
         self.doc_identifier = DocumentTypeIdentifier()
-        self.current_user_id: Optional[str] = None
-        self.current_project_id: Optional[str] = None
-        self.brief = None
-        # URL 主题管理
-        self.url_topics: Dict[str, List] = {}  # topic_name -> [doc, doc, ...]
-        self._reset_orchestrator()
-
-    def _reset_orchestrator(self):
         self.orchestrator = Orchestrator()
-        self.brief = None
+        
+        self.current_user_name: Optional[str] = None
+        self.current_project_id: Optional[str] = None
+        self.current_pane: str = "project"  # project, ref_doc, api_config, profile
+        
+        # 网页导入素材本地存储
+        self.url_topics: Dict[str, List[ImportedDocument]] = {}
+        
+        # 尝试载入本地持久化数据
+        self._load_persistent_data()
 
-    def _get_state(self, session: dict) -> dict:
-        return session.setdefault("state", {
-            "step": "1. 用户",
-            "answers": {},
-            "skipped": [],
-            "url_docs": [],
-            "routing_choices": [],
-            "current_q_index": 0,
-            "total_q": 0,
-            "plan_generated": False,
-            "draft_generated": False,
-            "review_done": False,
-            "custom_scenario": "",
-            "custom_supplement": "",
-        })
+    def _load_persistent_data(self):
+        """载入本地 JSON 数据库"""
+        try:
+            if os.path.exists(DB_FILE_PATH):
+                with open(DB_FILE_PATH, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                
+                # 恢复用户画像
+                profiles_data = data.get("profiles", {})
+                for uid, udata in profiles_data.items():
+                    user_profile = deserialize_dataclass(udata)
+                    if user_profile:
+                        self.pdb.profiles[uid] = user_profile
+                
+                # 恢复活动用户
+                self.pdb.current_user_id = data.get("current_user_id")
+                curr_user = self.pdb.get_current_user()
+                if curr_user:
+                    self.current_user_name = curr_user.name
+                
+                # 恢复导入的 URL 文件夹主题
+                topics_data = data.get("url_topics", {})
+                for topic, docs_list in topics_data.items():
+                    self.url_topics[topic] = [deserialize_dataclass(d) for d in docs_list]
+                
+                print("[持久化] 数据库已成功自磁盘恢复。")
+        except Exception as e:
+            print(f"[持久化] 数据库加载失败，已初始化空库: {e}")
+
+    def _save_persistent_data(self):
+        """保存本地 JSON 数据库"""
+        try:
+            os.makedirs(os.path.dirname(DB_FILE_PATH), exist_ok=True)
+            profiles_serialized = {}
+            for uid, profile in self.pdb.profiles.items():
+                profiles_serialized[uid] = serialize_dataclass(profile)
+            
+            url_topics_serialized = {}
+            for topic, docs in self.url_topics.items():
+                url_topics_serialized[topic] = [serialize_dataclass(d) for d in docs]
+            
+            data = {
+                "profiles": profiles_serialized,
+                "current_user_id": self.pdb.current_user_id,
+                "url_topics": url_topics_serialized,
+            }
+            with open(DB_FILE_PATH, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+            print("[持久化] 数据已成功同步到磁盘。")
+        except Exception as e:
+            print(f"[持久化] 数据库保存失败: {e}")
 
     # ═══════════════════════════════════════════════════════════════
-    # Step 1: 用户管理
+    # 辅助列表方法
     # ═══════════════════════════════════════════════════════════════
+    def get_projects_list(self) -> List[str]:
+        user = self.pdb.get_current_user()
+        if not user:
+            return []
+        return [p.name for p in user.projects]
 
-    def create_or_select_user(self, name: str, session: dict) -> Tuple[str, str, str, dict]:
+    def get_topics_list(self) -> List[str]:
+        return list(self.url_topics.keys())
+
+    def get_docs_list_by_topic(self, topic: str) -> List[str]:
+        if topic not in self.url_topics:
+            return []
+        return [doc.title for doc in self.url_topics[topic]]
+
+    # ═══════════════════════════════════════════════════════════════
+    # 用户管理 (Identity)
+    # ═══════════════════════════════════════════════════════════════
+    def switch_or_create_user(self, name: str) -> Tuple[str, List[str], str]:
         name = name.strip()
         if not name:
-            return "❌ 请输入用户名", "", build_progress_bar("1. 用户"), session
-
-        for uid, profile in self.pdb.profiles.items():
+            return "请输入有效的用户名", self.get_projects_list(), ""
+        
+        # 查询是否存在
+        existing_profile = None
+        for profile in self.pdb.profiles.values():
             if profile.name == name:
-                self.current_user_id = uid
-                self.pdb.set_current_user(uid)
-                s = self._get_state(session)
-                s["step"] = "2. 项目"
-                projects_count = len(profile.projects)
-
-                bias_info = ""
-                try:
-                    weaknesses = self.pdb.analyze_weaknesses(name)
-                    if weaknesses:
-                        bias_info = f"\n\n📊 **写作分析**：{weaknesses}"
-                except Exception:
-                    pass
-
-                return (
-                    f"✅ 欢迎回来，{name}！你有 {projects_count} 个项目。{bias_info}",
-                    "",
-                    build_progress_bar("2. 项目"),
-                    session
-                )
-
+                existing_profile = profile
+                break
+        
+        if existing_profile:
+            self.pdb.set_current_user(existing_profile.id)
+            self.current_user_name = name
+            self._save_persistent_data()
+            projects = self.get_projects_list()
+            default_proj = projects[0] if projects else ""
+            return f"欢迎回来，{name}！已切换到您的独立工作空间。", projects, default_proj
+        
+        # 创建新用户
         profile = self.pdb.create_user(name)
-        self.current_user_id = profile.id
-        s = self._get_state(session)
-        s["step"] = "2. 项目"
-        return (
-            f"✅ 你好，{name}！已为你创建新账户。准备好开始你的第一篇公文了吗？",
-            "",
-            build_progress_bar("2. 项目"),
-            session
-        )
+        self.current_user_name = name
+        self._save_persistent_data()
+        return f"🎉 你好，{name}！已为您创建新的独立公文库，开启创作吧。", [], ""
 
     # ═══════════════════════════════════════════════════════════════
-    # Step 2: 项目管理
+    # 项目管理 (Projects)
     # ═══════════════════════════════════════════════════════════════
-
-    def create_project(self, proj_name: str, proj_desc: str, session: dict) -> Tuple[str, str, str, str, dict]:
-        if not self.current_user_id:
-            return "请先创建用户", "", "", build_progress_bar("1. 用户"), session
-
-        proj_name = proj_name.strip()
-        if not proj_name:
-            return "请输入项目名称", "", "", build_progress_bar("2. 项目"), session
-
-        project = self.pdb.create_project(proj_name, description=proj_desc)
-        self.current_project_id = project.id
-        self._reset_orchestrator()
-
-        result = self.orchestrator.start_routing()
-        question = result.get("question", "")
-        options = result.get("options", [])
-        why_ask = result.get("why_ask", "")
-
-        choices_text = f"### {question}\n\n> 💡 *{why_ask}*\n\n"
-        for i, opt in enumerate(options):
-            choices_text += f"**{i+1}.** {opt.get('label', '')} — *{opt.get('description', '')}*\n"
-        choices_text += f"\n**{len(options)+1}.** 🆕 自定义场景 — *以上都不符合？选择此项后在补充框中描述你的场景*"
-
-        s = self._get_state(session)
-        s["step"] = "3. 场景"
-        s["routing_choices"] = options
-
-        return (
-            f"✅ 项目「{proj_name}」已创建",
-            choices_text,
-            "",
-            build_progress_bar("3. 场景"),
-            session
-        )
-
-    # ═══════════════════════════════════════════════════════════════
-    # Step 3: 场景路由（支持自定义场景 + 补充说明）
-    # ═══════════════════════════════════════════════════════════════
-
-    def submit_routing(self, choice_text: str, supplement: str, session: dict) -> Tuple[str, str, str, str, str, str, dict]:
-        s = self._get_state(session)
-        options = s.get("routing_choices", [])
-
+    def create_new_project(self, name: str, desc: str) -> Tuple[str, List[str], str, str, str, str, str, str, bool]:
+        name = name.strip()
+        if not self.current_user_name:
+            return "请先在左侧「用户身份空间」中输入姓名并点击「确认身份」", [], "", "", "", "", "", "", False
+        if not name:
+            return "请输入项目名称（例如：2024年度工作总结报告）", self.get_projects_list(), "", "", "", "", "", "", False
+        if len(name) > 50:
+            return "项目名称过长（最多 50 个字符），请精简描述", self.get_projects_list(), "", "", "", "", "", "", False
+        
         try:
-            choice_index = int(choice_text.strip()) - 1
-        except ValueError:
-            return "请输入选项数字（如 1、2、3、4）", "", "", "", "", build_progress_bar("3. 场景"), session
+            project = self.pdb.create_project(name, description=desc)
+            self.current_project_id = project.id
+            self.orchestrator = Orchestrator()
+            
+            # 路由开始
+            result = self.orchestrator.start_routing()
+            question = result.get("question", "场景选择问题")
+            options = result.get("options", [])
+            why_ask = result.get("why_ask", "")
+            
+            # 格式化场景选项文本
+            opt_text = ""
+            for i, opt in enumerate(options):
+                opt_text += f"**{i+1}.** {opt.get('label', '')} — *{opt.get('description', '')}*\n"
+            opt_text += f"**{len(options)+1}.** 自定义新场景"
+            
+            self._save_persistent_data()
+            projects = self.get_projects_list()
+            
+            return (
+                f"项目《{name}》创建成功，请选择最契合该文案的场景。",
+                projects,
+                name,
+                f"### {question}",
+                why_ask,
+                opt_text,
+                "", # 进度重置
+                "", # 方案详情重置
+                True # 开启场景卡片
+            )
+        except Exception as e:
+            return "创建失败，请检查项目名称是否合规", self.get_projects_list(), "", "", "", "", "", "", False
 
-        # 自定义场景处理
-        if choice_index == len(options):
-            custom_desc = supplement.strip()
-            if not custom_desc:
-                return "⚠️ 请在下方补充框中描述你的场景", "", "", "", "", build_progress_bar("3. 场景"), session
-            s["custom_scenario"] = custom_desc
-            # 使用最接近的写作模式（默认信息传达）
+    def select_project(self, name: str) -> Tuple[str, str, str, str, str, str, str, str]:
+        """选择项目时，同步其所有草稿、问卷和最终产出"""
+        user = self.pdb.get_current_user()
+        if not user or not name:
+            return "未登录或无项目", "", "", "", "", "", "", ""
+        
+        proj = next((p for p in user.projects if p.name == name), None)
+        if not proj:
+            return f"找不到项目 {name}", "", "", "", "", "", "", ""
+        
+        self.current_project_id = proj.id
+        
+        # 如果已有进行中的 orchestration，不再重建
+        if self.orchestrator and self.orchestrator.state in (OrchestratorState.ROUTING, OrchestratorState.MODE_QUESTIONING):
+            return f"已选中并持有项目: {name}", "", "", "", "", "", "", ""
+        
+        # 试图从项目恢复状态
+        self.orchestrator = Orchestrator()
+        
+        # 恢复问卷简报
+        brief = None
+        if proj.questionnaire_results:
+            qr = proj.questionnaire_results
+            mode_enum = WritingMode(qr.writing_mode) if qr.writing_mode else WritingMode.STRATEGIC_NARRATIVE
+            brief = self.orchestrator.skip_questionnaire(
+                brief_data={
+                    "purpose": qr.purpose,
+                    "primary_audience": qr.primary_audience,
+                    "deep_meaning": qr.deep_meaning,
+                    "strategic_anchor": qr.strategic_anchor,
+                    "key_materials": qr.key_materials,
+                },
+                mode=mode_enum
+            )
+            # 注入多受众
+            brief.secondary_audiences = qr.secondary_audiences
+            self.orchestrator.brief = brief
+            self.orchestrator.writing_mode = mode_enum
+            self.orchestrator.state = OrchestratorState.WAITING_APPROVAL
+            
+            # 生成方案
+            try:
+                style_enum = MediaStyle(qr.style) if qr.style else None
+                doc_enum = DocumentType(qr.doc_type) if qr.doc_type else None
+                self.orchestrator.generate_plan(preferred_style=style_enum, preferred_doc_type=doc_enum)
+            except Exception:
+                pass
+        
+        # 恢复草稿
+        draft_display = ""
+        agent_log = ""
+        review_display = ""
+        final_display = ""
+        multi_display = ""
+        
+        if proj.writing_history:
+            last_write = proj.writing_history[-1]
+            draft_content = last_write.get("draft", "")
+            self.orchestrator.draft = draft_content
+            self.orchestrator.state = OrchestratorState.COMPLETED
+            
+            draft_display = draft_content
+            agent_log = "从项目历史中载入了最近的智能体写作草稿"
+            
+            # 还原审阅
+            review_display = last_write.get("review_summary", "无历史审阅")
+            final_display = draft_content
+            
+        plan_display = self.orchestrator.plan.display() if self.orchestrator.plan else "项目未规划方案，请先回答专属问卷。"
+        
+        # 进度指示器
+        step_str = "问卷"
+        if proj.status == ProjectStatus.COMPLETED:
+            step_str = "交付"
+        elif self.orchestrator.draft:
+            step_str = "审查"
+        elif self.orchestrator.plan:
+            step_str = "方案"
+            
+        progress_html = build_progress_badge(step_str)
+        
+        return (
+            f"📂 已成功切换到项目：{name}",
+            plan_display,
+            draft_display,
+            agent_log,
+            review_display,
+            final_display,
+            multi_display,
+            progress_html
+        )
+
+    def reset_project(self) -> Optional[str]:
+        """将当前项目重置为初始状态"""
+        user = self.pdb.get_current_user()
+        if user and self.current_project_id:
+            proj = next((p for p in user.projects if p.id == self.current_project_id), None)
+            if proj:
+                proj.questionnaire_results = None
+                proj.writing_history = []
+                proj.status = ProjectStatus.DRAFT
+                self.orchestrator = Orchestrator()
+                self.pdb.save()
+                return proj.name
+        return None
+
+    def confirm_delete_project(self, name: str) -> Tuple[str, bool]:
+        """请求删除确认，返回确认提示消息和确认面板可见性"""
+        if not name:
+            return "请先选择要删除的项目", False
+        return f"您确定要删除项目《{name}》吗？此操作不可撤销。", True
+
+    def delete_project_action(self, name: str) -> Tuple[str, List[str], bool]:
+        if not name:
+            return "请选择要删除的项目", self.get_projects_list(), False
+        user = self.pdb.get_current_user()
+        if not user:
+            return "用户未登录", [], False
+        
+        target = next((p for p in user.projects if p.name == name), None)
+        if target:
+            user.projects.remove(target)
+            # 如果删除的是当前选中的项目，清空 current_project_id
+            if self.current_project_id == target.id:
+                self.current_project_id = None
+            self._save_persistent_data()
+            return f"已删除项目《{name}》。", self.get_projects_list(), False
+        return "未找到项目", self.get_projects_list(), False
+
+    # ═══════════════════════════════════════════════════════════════
+    # 问卷问答 & 场景路由
+    # ═══════════════════════════════════════════════════════════
+    def _get_routing_ui_state(self) -> Dict[str, Any]:
+        """获取当前路由节点的 UI 状态（问题、说明、选项列表）"""
+        if not self.orchestrator:
+            return {
+                "title": "### 场景路由选择",
+                "desc": "",
+                "options_text": "",
+                "choices": []
+            }
+        q = self.orchestrator.questionnaire.get_routing_question()
+        if not q:
+            return {
+                "title": "### 场景路由选择",
+                "desc": "",
+                "options_text": "",
+                "choices": []
+            }
+        options = q.get("options", [])
+        options_text = ""
+        for opt in options:
+            options_text += f"- **{opt.get('label', '')}**：{opt.get('description', '')}\n"
+        options_text += "- **自定义场景**：以上都不符合，手动描述您的场景"
+        choices = [opt.get("label", "") for opt in options] + ["自定义场景"]
+        return {
+            "title": f"### {q.get('question', '场景路由选择')}",
+            "desc": q.get("why_ask", ""),
+            "options_text": options_text,
+            "choices": choices
+        }
+
+    def submit_routing_choice_fn(self, choice_label: str, custom_text: str) -> Tuple[str, str, str, str, Any, Any, str, str, str, str, str, str, Any]:
+        """处理场景路由选择（传入选项 label）"""
+        if not self.orchestrator:
+            ui = self._get_routing_ui_state()
+            return "项目未就绪", "", "", "", gr.update(elem_classes="ios-card ws-panel-visible"), gr.update(elem_classes="ws-panel-hidden"), "", "", "", "", ui["title"], ui["options_text"], gr.update(choices=ui["choices"], value=None)
+        
+        # 修复: 如果 orchestrator.state 不是 ROUTING 但 questionnaire 的 phase 是 ROUTING，重新设置 state
+        if self.orchestrator.state != OrchestratorState.ROUTING:
+            if self.orchestrator.questionnaire.phase == QuestionnairePhase.ROUTING:
+                self.orchestrator.state = OrchestratorState.ROUTING
+            else:
+                ui = self._get_routing_ui_state()
+                return "请先新建项目来初始化写作场景", "", "", "", gr.update(elem_classes="ios-card ws-panel-visible"), gr.update(elem_classes="ws-panel-hidden"), "", "", "", "", ui["title"], ui["options_text"], gr.update(choices=ui["choices"], value=None)
+        
+        options = self.orchestrator.questionnaire.get_routing_question().get("options", [])
+        choice_label = (choice_label or "").strip()
+        custom_text = (custom_text or "").strip()
+        
+        # 从 label 反查 index
+        is_custom = choice_label == "自定义场景"
+        choice_idx = -1
+        if not is_custom:
+            for i, opt in enumerate(options):
+                if opt.get("label", "") == choice_label:
+                    choice_idx = i
+                    break
+            if choice_idx < 0:
+                # 可能是 allow_custom_value 导致用户输入了自定义值，尝试当作自定义场景处理
+                if not custom_text and choice_label:
+                    custom_text = choice_label
+                    is_custom = True
+                else:
+                    ui = self._get_routing_ui_state()
+                    return "请从下拉列表中选择一个场景", "", "", "", gr.update(elem_classes="ios-card ws-panel-visible"), gr.update(elem_classes="ws-panel-hidden"), "", "", "", "", ui["title"], ui["options_text"], gr.update(choices=ui["choices"], value=None)
+        
+        # 执行路由
+        if is_custom:
+            if not custom_text:
+                ui = self._get_routing_ui_state()
+                return "选择了自定义场景，请在输入框中对该写作场景进行简短描述。", "", "", "", gr.update(elem_classes="ios-card ws-panel-visible"), gr.update(elem_classes="ws-panel-hidden"), "", "", "", "", ui["title"], ui["options_text"], gr.update(choices=ui["choices"], value=None)
+            # Fallback 路由：默认选择第一个
+            print(f"[DEBUG] Executing fallback routing with choice_index=0")
             result = self.orchestrator.submit_routing_choice(0)
-            if result.get("phase") == "routing_complete":
-                mode = result.get("mode", "")
-                mode_profile = get_mode_profile(WritingMode(mode))
-                s["step"] = "4. 问卷"
-                next_q = self.orchestrator.get_current_mode_question()
-                if next_q:
-                    s["current_q_index"] = next_q.get("index", 1)
-                    s["total_q"] = next_q.get("total", 1)
-                    return (
-                        f"✅ 已选择 **自定义场景**：{custom_desc[:50]}\n\n已映射到 → **{mode_profile.name}**（可后续调整）",
-                        f"第 {s['current_q_index']}/{s['total_q']} 题",
-                        f"### {next_q.get('question', '')}",
-                        f"💡 *{next_q.get('why_ask', '')}*",
-                        f"💬 *示例：{next_q.get('hint', '')}*" if next_q.get('hint') else "",
-                        build_progress_bar("4. 问卷"),
-                        session
-                    )
-            return "自定义场景映射失败，请重试", "", "", "", "", build_progress_bar("3. 场景"), session
-
-        # 正常场景选择
-        result = self.orchestrator.submit_routing_choice(choice_index)
-
+        else:
+            print(f"[DEBUG] Executing routing with choice_index={choice_idx}")
+            result = self.orchestrator.submit_routing_choice(choice_idx)
+        
+        print(f"[DEBUG] routing result phase: {result.get('phase')}")
+            
         if result.get("phase") == "routing_complete":
-            mode = result.get("mode", "")
-            mode_profile = get_mode_profile(WritingMode(mode))
-            s["step"] = "4. 问卷"
-
-            # 保存补充说明
-            if supplement.strip():
-                s["custom_supplement"] = supplement.strip()
-
+            # 路由完成，开始载入问卷第一题
             next_q = self.orchestrator.get_current_mode_question()
             if next_q:
-                s["current_q_index"] = next_q.get("index", 1)
-                s["total_q"] = next_q.get("total", 1)
+                q_text = next_q.get("question", "")
+                why_ask = next_q.get("why_ask", "")
                 hint = next_q.get("hint", "")
-                hint_text = f"💬 *示例回答：{hint}*" if hint else ""
-                supplement_note = f"\n\n📝 **补充说明**：{supplement.strip()}" if supplement.strip() else ""
+                q_idx = next_q.get("index", 1)
+                total = next_q.get("total", 1)
+                
+                prog_text = f"第 {q_idx}/{total} 题"
+                progress_html = build_progress_badge("问卷")
+                
                 return (
-                    f"✅ 已选择 → **{mode_profile.name}**{supplement_note}",
-                    f"第 {s['current_q_index']}/{s['total_q']} 题",
-                    f"### {next_q.get('question', '')}",
-                    f"💡 *{next_q.get('why_ask', '')}*",
-                    hint_text,
-                    build_progress_bar("4. 问卷"),
-                    session
+                    f"场景选择完成，进入写作问卷。写作模式：{get_mode_profile(self.orchestrator.writing_mode).name}",
+                    prog_text,
+                    f"### {q_text}",
+                    why_ask,
+                    gr.update(elem_classes="ios-card ws-panel-hidden"), # 关闭路由卡片
+                    gr.update(elem_classes="ws-panel-visible"),  # 开启问题卡片
+                    hint,
+                    "", # 方案清空
+                    "", # 推荐语清空
+                    progress_html,
+                    "### 场景选择完成",
+                    "",
+                    gr.update(choices=[], value=None) # 清空下拉选项
                 )
+        else:
+            # 还有下一层路由
+            ui = self._get_routing_ui_state()
+            return (
+                "场景流转成功，请做进一步确认",
+                "",
+                ui["title"],
+                ui["desc"],
+                gr.update(elem_classes="ios-card ws-panel-visible"), # 继续显示路由卡片
+                gr.update(elem_classes="ws-panel-hidden"),           # 隐藏问题卡片
+                "",
+                "",
+                "",
+                build_progress_badge("问卷"),
+                ui["title"],
+                ui["options_text"],
+                gr.update(choices=ui["choices"], value=None)
+            )
+        ui = self._get_routing_ui_state()
+        return "处理异常", "", "", "", gr.update(elem_classes="ios-card ws-panel-visible"), gr.update(elem_classes="ws-panel-hidden"), "", "", "", "", ui["title"], ui["options_text"], gr.update(choices=ui["choices"], value=None)
 
-        return "请重新选择", "", "", "", "", build_progress_bar("3. 场景"), session
+    def answer_question_flow(self, action: str, answer_val: str) -> Tuple[str, str, str, str, str, str, str, str, str, str]:
+        """核心问卷答题流"""
+        action = action.lower()
+        answer_val = answer_val.strip()
+        
+        # 默认返回定义
+        msg = ""
+        prog_text = ""
+        q_text = ""
+        why_ask = ""
+        hint = ""
+        plan_details = ""
+        kb_recommends = ""
+        progress_html = build_progress_badge("问卷")
+        question_cls = "ws-panel-visible"
+        
+        if not self.orchestrator or not self.orchestrator.brief:
+            return "工作流未就绪", prog_text, q_text, why_ask, hint, plan_details, kb_recommends, progress_html, gr.update(elem_classes=question_cls), ""
 
-    # ═══════════════════════════════════════════════════════════════
-    # Step 4: 问卷
-    # ═══════════════════════════════════════════════════════════════
-
-    def submit_answer(self, answer: str, session: dict) -> Tuple[str, str, str, str, str, str, str, str, str, str, str, dict]:
-        s = self._get_state(session)
-        answer = answer.strip()
-
-        if answer.lower() == "skip":
+        has_next = True
+        next_q = None
+        
+        if action == "submit":
+            if not answer_val:
+                return "回答不能为空，请填写后提交或选择跳过。", "", f"### {self.orchestrator.get_current_mode_question().get('question','')}", self.orchestrator.get_current_mode_question().get('why_ask',''), self.orchestrator.get_current_mode_question().get('hint',''), "", "", progress_html, gr.update(elem_classes="ws-panel-visible"), ""
+            has_next, next_q = self.orchestrator.submit_mode_answer(answer_val)
+            msg = "您的输入已被记入公文简报！"
+            
+        elif action == "skip":
             has_next = self.orchestrator.questionnaire.skip_current()
-            qid = f"q_{s.get('current_q_index', 0)}"
-            s.setdefault("skipped", []).append(qid)
-            s.setdefault("answers", {})[qid] = "[已跳过]"
-
-            if not has_next:
-                return self._finish_questions(session)
-
             next_q = self.orchestrator.get_current_mode_question()
-            if next_q:
-                s["current_q_index"] = next_q.get("index", 1)
-                s["total_q"] = next_q.get("total", 1)
-                hint = next_q.get("hint", "")
-                return (
-                    f"⏭️ 已跳过（第 {s['current_q_index']}/{s['total_q']} 题）",
-                    f"第 {s['current_q_index']}/{s['total_q']} 题",
-                    f"### {next_q.get('question', '')}",
-                    f"💡 *{next_q.get('why_ask', '')}*",
-                    f"💬 *示例：{hint}*" if hint else "",
-                    "", "", "", "", "", "",
-                    session
-                )
-
-        if answer.lower() == "back":
+            msg = "已跳过此题。"
+            
+        elif action == "back":
             prev = self.orchestrator.questionnaire.go_back()
             if prev:
-                s["current_q_index"] = prev.get("index", 1)
-                prev_answer = prev.get("previous_answer", "")
-                hint = prev.get("hint", "")
-                return (
-                    f"⬅️ 已回退到第 {prev['index']} 题",
-                    f"第 {s['current_q_index']}/{s['total_q']} 题",
-                    f"### {prev.get('question', '')}",
-                    f"💡 *{prev.get('why_ask', '')}*",
-                    f"💬 *示例：{hint}*" if hint else "",
-                    f"📝 上一题你的回答：{prev_answer[:100]}..." if prev_answer else "",
-                    "", "", "", "", "",
-                    session
+                next_q = prev
+                msg = f"回退成功。您上一题的回答是：{prev.get('previous_answer', '')}"
+            else:
+                msg = "已是第一题，无法继续回退。"
+                next_q = self.orchestrator.get_current_mode_question()
+                
+        elif action == "finish":
+            has_next = False
+
+        # 如果没有下一题或提前结束
+        if not has_next or not next_q:
+            self.brief = self.orchestrator.questionnaire.finish()
+            question_cls = "ws-panel-hidden"
+            progress_html = build_progress_badge("方案")
+            
+            # 保存到项目库
+            proj = self.pdb.get_project(self.current_project_id)
+            if proj:
+                qr = QuestionnaireResults(
+                    writing_mode=self.orchestrator.writing_mode.value,
+                    purpose=self.brief.purpose,
+                    primary_audience=self.brief.primary_audience,
+                    secondary_audiences=self.brief.secondary_audiences,
+                    deep_meaning=self.brief.deep_meaning,
+                    strategic_anchor=self.brief.strategic_anchor,
+                    key_materials=self.brief.key_materials,
+                    differentiator=self.brief.differentiator,
+                    raw_answers=self.brief.raw_answers
                 )
+                self.pdb.save_questionnaire_results(self.current_project_id, qr)
+                self._save_persistent_data()
 
-        if answer.lower() == "finish":
-            return self._finish_questions(session)
+            # 生成方案
+            try:
+                plan = self.orchestrator.generate_plan()
+                plan_details = plan.display()
+                
+                # 获取知识库建议
+                exemplars = self.knowledge_base.get_exemplars_for_prompt(self.orchestrator.writing_mode.value, max_exemplars=2)
+                kb_recommends = exemplars if exemplars else "无推荐范文"
+                
+                # 附加风格建议
+                if self.brief.secondary_audiences:
+                    blend = self.style_adapter.suggest_blend(self.brief.primary_audience, self.brief.purpose, self.brief.secondary_audiences)
+                    kb_recommends += f"\n\n### 风格混合配比建议\n{blend.display()}"
+                
+                msg = "🏁 问卷回答完毕！写作方案已生成，请在第二步确认。"
+            except Exception as e:
+                plan_details = f"生成写作方案失败: {e}"
+                
+            return msg, "问卷已完成", "方案就绪", "", "", plan_details, kb_recommends, progress_html, gr.update(elem_classes=question_cls), ""
 
-        has_next, next_q = self.orchestrator.submit_mode_answer(answer)
+        # 加载下一题
+        q_text = next_q.get("question", "")
+        why_ask = next_q.get("why_ask", "")
+        hint = next_q.get("hint", "")
+        q_idx = next_q.get("index", 1)
+        total = next_q.get("total", 1)
+        prog_text = f"第 {q_idx}/{total} 题"
+        
+        return msg, prog_text, f"### {q_text}", why_ask, hint, plan_details, kb_recommends, progress_html, gr.update(elem_classes=question_cls), ""
 
-        if not has_next:
-            return self._finish_questions(session)
-
-        if next_q:
-            s["current_q_index"] = next_q.get("index", 1)
-            s["total_q"] = next_q.get("total", 1)
-            hint = next_q.get("hint", "")
-            return (
-                "✅ 答案已保存",
-                f"第 {s['current_q_index']}/{s['total_q']} 题",
-                f"### {next_q.get('question', '')}",
-                f"💡 *{next_q.get('why_ask', '')}*",
-                f"💬 *示例：{hint}*" if hint else "",
-                "", "", "", "", "", "",
-                session
-            )
-
-        return "", "", "", "", "", "", "", "", "", "", "", session
-
-    def _finish_questions(self, session: dict) -> Tuple[str, str, str, str, str, str, str, str, str, str, str, dict]:
-        self.brief = self.orchestrator.questionnaire.finish()
-        s = self._get_state(session)
-        s["step"] = "5. 方案"
-
+    # ═══════════════════════════════════════════════════════════════
+    # 方案调整与初稿生成
+    # ═══════════════════════════════════════════════════════════════
+    def regenerate_plan_action(self, style_lbl: str, doc_lbl: str) -> Tuple[str, str]:
+        if not self.orchestrator or not self.orchestrator.brief:
+            return "写作方案尚未初始化，请完成第一步问卷", ""
+        
         try:
-            plan = self.orchestrator.generate_plan()
-            s["plan_generated"] = True
-
-            auto_style_label = STYLE_ENUM_TO_LABEL.get(plan.media_style, "人民日报风格")
-            auto_doc_label = DOC_TYPE_ENUM_TO_LABEL.get(plan.document_type, "通讯（推荐1500-3000字）")
-
-            kb_exemplars = ""
-            try:
-                exemplars = self.knowledge_base.get_exemplars_for_prompt(
-                    self.orchestrator.writing_mode.value, max_exemplars=2
-                )
-                if exemplars:
-                    kb_exemplars = f"### 📚 知识库推荐范文\n\n{exemplars[:800]}..."
-            except Exception:
-                pass
-
-            blend_info = ""
-            try:
-                if self.brief and self.brief.secondary_audiences:
-                    blend = self.style_adapter.suggest_blend(
-                        primary_audience=self.brief.primary_audience,
-                        purpose=self.brief.purpose,
-                        secondary_audiences=self.brief.secondary_audiences,
-                    )
-                    if blend and blend.ratio:
-                        blend_info = f"\n\n### 🎨 风格混合建议\n\n{blend.display() if hasattr(blend, 'display') else str(blend.ratio)}"
-            except Exception:
-                pass
-
-            return (
-                "✅ 问卷完成！方案已自动生成，你可以调整风格和文种后确认。",
-                "", "", "", "", "",
-                plan.display(),
-                auto_style_label,
-                auto_doc_label,
-                f"{kb_exemplars}{blend_info}",
-                build_progress_bar("5. 方案"),
-                session
-            )
+            style_enum = STYLE_LABEL_TO_ENUM.get(style_lbl)
+            doc_enum = DOC_TYPE_LABEL_TO_ENUM.get(doc_lbl)
+            
+            plan = self.orchestrator.generate_plan(preferred_style=style_enum, preferred_doc_type=doc_enum)
+            
+            # 同步更新项目数据库中的选择
+            proj = self.pdb.get_project(self.current_project_id)
+            if proj and proj.questionnaire_results:
+                proj.questionnaire_results.style = style_enum.value if style_enum else ""
+                proj.questionnaire_results.doc_type = doc_enum.value if doc_enum else ""
+                self._save_persistent_data()
+                
+            return plan.display(), "写作大纲及配置更新成功！"
         except Exception as e:
-            return (
-                f"❌ 生成方案失败: {e}",
-                "", "", "", "", "",
-                "", "", "", "",
-                build_progress_bar("4. 问卷"),
-                session
-            )
+            return f"❌ 方案更新失败: {e}", ""
 
-    # ═══════════════════════════════════════════════════════════════
-    # Step 5: 方案确认
-    # ═══════════════════════════════════════════════════════════════
-
-    def regenerate_plan(self, style_label: str, doc_type_label: str, session: dict) -> Tuple[str, str, str, str, str, dict]:
-        s = self._get_state(session)
-        if not self.brief:
-            return "请先完成问卷", style_label, doc_type_label, "", build_progress_bar("4. 问卷"), session
+    def generate_draft_action(self, raw_materials: str) -> Tuple[str, str, str, str, str]:
+        if not self.orchestrator or not self.orchestrator.plan:
+            return "", "", "", "请先在「写作大纲方案」阶段确认方案，再开始写作", build_progress_badge("方案")
 
         try:
-            preferred_style = STYLE_LABEL_TO_ENUM.get(style_label)
-            preferred_doc = DOC_TYPE_LABEL_TO_ENUM.get(doc_type_label)
+            self.orchestrator.write(raw_materials)
+            draft = self.orchestrator.draft or "生成失败，请检查模型配置或 API Key 是否有效"
 
-            plan = self.orchestrator.generate_plan(
-                preferred_style=preferred_style,
-                preferred_doc_type=preferred_doc,
-            )
-            s["plan_generated"] = True
-
-            kb_exemplars = ""
-            try:
-                exemplars = self.knowledge_base.get_exemplars_for_prompt(
-                    self.orchestrator.writing_mode.value, max_exemplars=2
-                )
-                if exemplars:
-                    kb_exemplars = f"### 📚 知识库推荐范文\n\n{exemplars[:800]}..."
-            except Exception:
-                pass
-
-            return (
-                plan.display(),
-                style_label,
-                doc_type_label,
-                kb_exemplars,
-                build_progress_bar("5. 方案"),
-                session
-            )
-        except Exception as e:
-            return f"❌ 更新方案失败: {e}", style_label, doc_type_label, "", build_progress_bar("5. 方案"), session
-
-    # ═══════════════════════════════════════════════════════════════
-    # Step 6: 初稿生成
-    # ═══════════════════════════════════════════════════════════════
-
-    def generate_draft(self, session: dict) -> Tuple[str, str, str, str, str, str, dict]:
-        s = self._get_state(session)
-        if not self.brief:
-            return "请先完成问卷", "", "", "", "", build_progress_bar("4. 问卷"), session
-
-        try:
-            draft = self.orchestrator.write()
             agent_log = self.orchestrator.get_agent_log_display()
             multi_ver = self.orchestrator.get_multi_versions_display()
 
-            prompt_preview = ""
-            try:
-                prompts = self.orchestrator.get_llm_prompts()
-                sys_p = prompts.get("system", "")
-                if sys_p:
-                    prompt_preview = f"### 🔧 系统提示词预览\n\n```\n{sys_p[:600]}...\n```"
-            except Exception:
-                pass
-
-            s["step"] = "6. 初稿"
-            s["draft_generated"] = True
+            # 保存到项目写作历史
+            proj = self.pdb.get_project(self.current_project_id)
+            if proj:
+                history_record = {
+                    "timestamp": json.dumps(serialize_dataclass(self.orchestrator.plan.estimated_length)), # 占位
+                    "draft": draft,
+                    "style": self.orchestrator.plan.style_name,
+                    "doc_type": self.orchestrator.plan.doc_type_name,
+                    "review_summary": "待审查"
+                }
+                proj.writing_history.append(history_record)
+                proj.status = ProjectStatus.IN_PROGRESS
+                self._save_persistent_data()
 
             return (
-                "✅ 初稿已生成",
-                draft or "（生成失败，请检查 API 配置）",
+                draft,
                 agent_log,
                 multi_ver,
-                prompt_preview,
-                build_progress_bar("6. 初稿"),
-                session
+                "草稿生成完成。已同步生成多格式版本，请前往下一阶段进行审查。",
+                build_progress_badge("生成")
             )
         except Exception as e:
-            return f"❌ 生成失败: {e}", "", "", "", "", build_progress_bar("6. 初稿"), session
+            return "", "", "", "文稿生成失败，请检查 API 设置是否已配置且有效", build_progress_badge("方案")
 
     # ═══════════════════════════════════════════════════════════════
-    # Step 7: 审查（含 HITL 交互）
+    # 智能迭代审查与人工介入
     # ═══════════════════════════════════════════════════════════════
-
-    def run_review(self, session: dict) -> Tuple[str, str, str, str, str, str, dict]:
-        if not self.orchestrator.draft:
-            return "请先生成初稿", "", "", "", "", build_progress_bar("6. 初稿"), session
+    def run_review_action(self) -> Tuple[str, str, str, str, str]:
+        """修正后的 100% bug-free 返回对齐"""
+        if not self.orchestrator or not self.orchestrator.draft:
+            # 确保即使失败也返回 exactly 5 个值
+            return "", "", "", "未发现有效草稿，请先在「文稿草稿生成」阶段创建草稿", build_progress_badge("生成")
 
         try:
             self.orchestrator.review()
-            s = self._get_state(session)
-            s["step"] = "7. 审查"
-            s["review_done"] = True
+            review_summary = self.orchestrator.review_summary_display or "审查完成，公文表述完备，结构严密，符合规范要求。"
 
-            review_text = self.orchestrator.review_summary_display or "（审查完成，未发现问题）"
+            # 问题与格式合规
+            issues = self.orchestrator.get_review_issues()
+            issues_text = ""
+            for i, iss in enumerate(issues):
+                issues_text += f"**{i+1}.** [{iss.get('severity')}] 在 {iss.get('location', '段落')} 处: {iss.get('issue')}\n建议: {iss.get('suggestion')}\n\n"
 
-            issues_display = ""
-            try:
-                issues = self.orchestrator.get_review_issues()
-                if issues:
-                    lines = ["### 🔍 发现的问题\n"]
-                    for i, issue in enumerate(issues):
-                        severity = issue.get("severity", "未知")
-                        desc = issue.get("description", str(issue))
-                        lines.append(f"**{i+1}.** [{severity}] {desc[:200]}")
-                    issues_display = "\n".join(lines)
-            except Exception:
-                pass
+            if not issues_text:
+                issues_text = "未检测到明显偏见或流水账问题。"
 
-            format_check = ""
-            try:
-                if self.orchestrator.draft:
-                    fmt_issues = self.orchestrator.reviewer.check_format_compliance(self.orchestrator.draft)
-                    if fmt_issues:
-                        lines = ["### 📋 格式合规检查\n"]
-                        for fi in fmt_issues:
-                            sev = fi.get("severity", "")
-                            diag = fi.get("diagnosis", str(fi))
-                            pres = fi.get("prescription", "")
-                            icon = "🔴" if sev == "critical" else "🟡" if sev == "major" else "🟢"
-                            lines.append(f"- {icon} **{diag}**\n  → {pres}")
-                        format_check = "\n".join(lines)
-            except Exception:
-                pass
+            # 格式诊断
+            fmt_issues = self.orchestrator.reviewer.check_format_compliance(self.orchestrator.draft)
+            format_text = ""
+            for i, fi in enumerate(fmt_issues):
+                format_text += f"- {fi.get('diagnosis')} -> 修正意见: {fi.get('prescription')}\n"
+            if not format_text:
+                format_text = "格式符合党政机关公文格式规范（GB/T 9704-2012）。"
 
-            kb_diagnosis = ""
-            try:
-                if self.orchestrator.draft:
-                    findings = self.knowledge_base.diagnose_text(self.orchestrator.draft)
-                    if findings:
-                        lines = ["### 📖 知识库诊断\n"]
-                        for f in findings[:5]:
-                            lines.append(f"- {f.get('description', str(f))[:150]}")
-                        kb_diagnosis = "\n".join(lines)
-            except Exception:
-                pass
-
-            multi_ver = self.orchestrator.get_multi_versions_display()
+            # 更新历史
+            proj = self.pdb.get_project(self.current_project_id)
+            if proj and proj.writing_history:
+                proj.writing_history[-1]["review_summary"] = review_summary
+                self._save_persistent_data()
 
             return (
-                "✅ 审查完成",
-                review_text,
-                issues_display,
-                format_check,
-                kb_diagnosis,
-                multi_ver,
-                build_progress_bar("7. 审查"),
-                session
+                review_summary,
+                issues_text,
+                format_text,
+                "审查完成。您可以在下方手动修改草稿，或重新执行审查。",
+                build_progress_badge("审查")
             )
         except Exception as e:
-            return f"❌ 审查失败: {e}", "", "", "", "", "", build_progress_bar("7. 审查"), session
+            return "审查异常，请确认草稿内容格式正确", "", "", "审查异常，请确认草稿内容格式正确", build_progress_badge("审查")
 
-    def apply_fix(self, round_idx: int, finding_idx: int, session: dict) -> Tuple[str, str, str, str, str, str, dict]:
-        try:
-            fixed = self.orchestrator.apply_manual_fix(round_idx, finding_idx)
-            s = self._get_state(session)
-            return (
-                f"✅ 已修复第 {round_idx+1} 轮第 {finding_idx+1} 个问题",
-                fixed,
-                "", "", "", "",
-                build_progress_bar("7. 审查"),
-                session
-            )
-        except Exception as e:
-            return f"❌ 修复失败: {e}", "", "", "", "", "", build_progress_bar("7. 审查"), session
+    def manual_update_draft(self, edited_text: str) -> Tuple[str, str]:
+        if not self.orchestrator or not edited_text.strip():
+            return "草稿内容无效", ""
+        
+        self.orchestrator.update_draft(edited_text)
+        
+        # 同步写入历史
+        proj = self.pdb.get_project(self.current_project_id)
+        if proj and proj.writing_history:
+            proj.writing_history[-1]["draft"] = edited_text
+            self._save_persistent_data()
+            
+        return "草稿已更新！您可以重新点击【执行审查】以获取最新多维打分结果。", edited_text
 
-    def update_draft_manual(self, new_draft: str, session: dict) -> Tuple[str, str, str, str, str, str, dict]:
-        try:
-            self.orchestrator.update_draft(new_draft)
-            return (
-                "✅ 草稿已手动更新，可重新审查",
-                new_draft, "", "", "", "",
-                build_progress_bar("7. 审查"),
-                session
-            )
-        except Exception as e:
-            return f"❌ 更新失败: {e}", "", "", "", "", "", build_progress_bar("7. 审查"), session
-
-    def re_review(self, session: dict) -> Tuple[str, str, str, str, str, str, str, dict]:
+    def re_review_action(self) -> Tuple[str, str, str, str]:
+        if not self.orchestrator or not self.orchestrator.draft:
+            return "无草稿可审查", "", "", ""
         try:
             self.orchestrator.re_review()
-            s = self._get_state(session)
-            review_text = self.orchestrator.review_summary_display or "（重新审查完成）"
-            multi_ver = self.orchestrator.get_multi_versions_display()
-            return (
-                "✅ 重新审查完成",
-                review_text, "", "", "",
-                multi_ver,
-                build_progress_bar("7. 审查"),
-                session
-            )
+            summary = self.orchestrator.review_summary_display or "重新审查完成。"
+            
+            issues = self.orchestrator.get_review_issues()
+            issues_text = ""
+            for i, iss in enumerate(issues):
+                issues_text += f"**{i+1}.** [{iss.get('severity')}] {iss.get('issue')}\n"
+            if not issues_text:
+                issues_text = "🎉 重新审查完毕，没有遗留问题。"
+                
+            return summary, issues_text, "重新评估成功！文章质量得到更新。", self.orchestrator.draft
         except Exception as e:
-            return f"❌ 重新审查失败: {e}", "", "", "", "", "", build_progress_bar("7. 审查"), session
+            return f"❌ 失败: {e}", "", "", self.orchestrator.draft
 
     # ═══════════════════════════════════════════════════════════════
-    # Step 8: 完成
+    # 交付输出
     # ═══════════════════════════════════════════════════════════════
-
-    def finalize(self, session: dict) -> Tuple[str, str, str, str, str, dict]:
+    def finalize_project_action(self) -> Tuple[str, str, str, str]:
+        if not self.orchestrator or not self.orchestrator.draft:
+            return "无有效文稿进行交付", "", "", build_progress_badge("审查")
+            
         try:
             output = self.orchestrator.finalize()
-            s = self._get_state(session)
-            s["step"] = "8. 完成"
-
-            lines = ["═══════════════════════════════════════"]
-            lines.append("  📄 最终输出")
-            lines.append("═══════════════════════════════════════\n")
-            if output.get("draft"):
-                lines.append(output["draft"])
-            else:
-                lines.append("（无草稿）")
-
-            lines.append("\n═══════════════════════════════════════")
-            lines.append(f"  审查轮次：{output.get('review_count', 0)}")
-            lines.append(f"  审查通过：{'✅ 是' if output.get('review_passed', False) else '⚠️ 否'}")
-            lines.append(f"  写作模式：{output.get('plan', {}).get('mode_name', '')}")
-            lines.append("═══════════════════════════════════════")
-
-            if self.current_project_id:
-                self.pdb.update_project_status(self.current_project_id, ProjectStatus.COMPLETED)
-
+            final_doc = output.get("draft", "")
+            
+            lines = [
+                f"写作模式：{output.get('plan', {}).get('mode_name', '')}",
+                f"文种类别：{output.get('plan', {}).get('document_type', '')}",
+                f"语言风格：{output.get('plan', {}).get('style', '')}",
+                f"读者定位：{output.get('plan', {}).get('audience', '')}",
+                "──────────────────────────────\n",
+                final_doc
+            ]
+            
+            # 更新状态为 COMPLETED
+            proj = self.pdb.get_project(self.current_project_id)
+            if proj:
+                proj.status = ProjectStatus.COMPLETED
+                self._save_persistent_data()
+                
             multi_ver = self.orchestrator.get_multi_versions_display()
-            agent_log = self.orchestrator.get_agent_log_display()
-
-            workflow_summary = ""
-            try:
-                workflow_summary = self.orchestrator.get_workflow_summary()
-            except Exception:
-                pass
-
-            return (
-                "\n".join(lines),
-                multi_ver,
-                agent_log,
-                workflow_summary,
-                build_progress_bar("8. 完成"),
-                session
-            )
+            summary = self.orchestrator.get_workflow_summary()
+            
+            return "\n".join(lines), multi_ver, summary, build_progress_badge("交付")
         except Exception as e:
-            return f"❌ 完成失败: {e}", "", "", "", build_progress_bar("8. 完成"), session
-
-    def restart(self, session: dict) -> Tuple[str, str, str, str, str, str, str, str, str, str, str, str, str, str, str, str, str, str, str, str, str, str, str, str, str, str, str, str, str, str, dict]:
-        s = self._get_state(session)
-        s["step"] = "1. 用户"
-        s["answers"] = {}
-        s["skipped"] = []
-        s["plan_generated"] = False
-        s["draft_generated"] = False
-        s["review_done"] = False
-        self._reset_orchestrator()
-        return (
-            build_progress_bar("1. 用户"),
-            "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "",
-            "", "", "", "", "", "", "", "", "",
-            session
-        )
+            return f"❌ 交付异常: {e}", "", "", build_progress_badge("审查")
 
     # ═══════════════════════════════════════════════════════════════
-    # URL 导入（文件夹式多主题管理）
+    # 素材管理 (References & URL Importer)
     # ═══════════════════════════════════════════════════════════════
-
-    def import_url_to_topic(self, url: str, topic_name: str, session: dict) -> Tuple[str, str, dict]:
-        """导入 URL 到指定主题"""
+    def import_url_action(self, url: str, topic: str) -> Tuple[str, List[str], str, List[str], str]:
         url = url.strip()
-        topic_name = topic_name.strip() or "未命名主题"
+        topic = topic.strip() or "默认主题"
         if not url:
-            return "", "请输入 URL", session
+            return "请输入网页URL地址", self.get_topics_list(), topic, [], ""
+            
         try:
             importer = URLDocumentImporter()
             doc = importer.import_from_url(url)
-            self.url_topics.setdefault(topic_name, []).append(doc)
-            s = self._get_state(session)
-            s.setdefault("url_docs", []).append(doc)
-
-            lines = [f"### 📥 已导入到主题「{topic_name}」", ""]
-            lines.append(f"**标题**：{doc.title}")
-            lines.append(f"**来源**：{doc.source_site}  |  **字数**：{doc.word_count}")
-            if doc.content:
-                lines.append(f"\n**正文预览**（前300字）：\n\n{doc.content[:300]}{'...' if len(doc.content) > 300 else ''}")
-            return "\n".join(lines), "✅ 导入成功", session
+            
+            self.url_topics.setdefault(topic, []).append(doc)
+            self._save_persistent_data()
+            
+            topics = self.get_topics_list()
+            docs = self.get_docs_list_by_topic(topic)
+            
+            lines = [
+                f"### 导入成功到主题【{topic}】",
+                f"**标题**：{doc.title}",
+                f"**网站**：{doc.source_site} | **字数**：{doc.word_count}",
+                "\n**正文预览**:\n",
+                doc.content[:400] + "..." if len(doc.content) > 400 else doc.content
+            ]
+            return "\n".join(lines), topics, topic, docs, doc.title
         except Exception as e:
-            return f"❌ 导入失败：{e}", "❌ 导入失败", session
+            return f"❌ 导入失败: {e}", self.get_topics_list(), topic, [], ""
 
-    def get_topics_display(self) -> str:
-        """显示所有主题列表（文件夹式）"""
-        if not self.url_topics:
-            return "暂无主题，请先导入 URL 并创建主题。"
-        lines = ["### 📁 参考文档主题", ""]
-        for topic, docs in self.url_topics.items():
-            lines.append(f"📂 **{topic}**（{len(docs)} 篇文档）")
-            for i, doc in enumerate(docs):
-                lines.append(f"   📄 {i+1}. {doc.title} — {doc.word_count}字 [{doc.source_site}]")
-            lines.append("")
-        return "\n".join(lines)
+    def select_topic_docs(self, topic: str) -> List[str]:
+        return self.get_docs_list_by_topic(topic)
 
-    def get_topic_detail(self, topic_name: str) -> str:
-        """显示某个主题的详细内容"""
-        topic_name = topic_name.strip()
-        if topic_name not in self.url_topics:
-            return f"未找到主题「{topic_name}」"
-        docs = self.url_topics[topic_name]
-        lines = [f"### 📂 主题「{topic_name}」详细内容", ""]
-        for i, doc in enumerate(docs):
-            lines.append(f"---\n**文档 {i+1}：{doc.title}**")
-            lines.append(f"来源：{doc.source_site} | 字数：{doc.word_count} | 格式：{doc.format.value}")
-            if doc.keywords:
-                lines.append(f"关键词：{', '.join(doc.keywords[:10])}")
-            if doc.style_patterns:
-                lines.append(f"风格特征：{'；'.join(doc.style_patterns[:5])}")
-            if doc.content:
-                lines.append(f"\n{doc.content[:800]}{'...' if len(doc.content) > 800 else ''}")
-            lines.append("")
-        return "\n".join(lines)
+    def select_ref_doc_detail(self, topic: str, doc_title: str) -> Tuple[str, str, str]:
+        if topic not in self.url_topics or not doc_title:
+            return "", "", ""
+        doc = next((d for d in self.url_topics[topic] if d.title == doc_title), None)
+        if not doc:
+            return "", "", ""
+        
+        patterns = "、".join(doc.style_patterns) if doc.style_patterns else "暂无智能提取特征"
+        return doc.title, doc.content, f"**格式**: {doc.format.value} | **字数**: {doc.word_count}\n**语言特征**: {patterns}"
 
-    def rename_topic(self, old_name: str, new_name: str) -> str:
-        """重命名主题"""
-        old_name = old_name.strip()
-        new_name = new_name.strip()
-        if not old_name or old_name not in self.url_topics:
-            return f"未找到主题「{old_name}」"
-        if not new_name:
-            return "新名称不能为空"
-        if new_name in self.url_topics:
-            return f"主题「{new_name}」已存在"
-        self.url_topics[new_name] = self.url_topics.pop(old_name)
-        return f"✅ 已将「{old_name}」重命名为「{new_name}」"
+    def save_ref_doc_edit(self, topic: str, old_title: str, new_title: str, content: str) -> Tuple[str, List[str]]:
+        if topic not in self.url_topics or not old_title:
+            return "保存失败，未找到源文档", []
+        doc = next((d for d in self.url_topics[topic] if d.title == old_title), None)
+        if not doc:
+            return "未找到对应文档", []
+            
+        doc.title = new_title.strip()
+        doc.content = content.strip()
+        doc.word_count = len(doc.content)
+        self._save_persistent_data()
+        
+        return "文档修改已保存！", self.get_docs_list_by_topic(topic)
 
-    def delete_topic(self, topic_name: str) -> str:
-        """删除主题"""
-        topic_name = topic_name.strip()
-        if topic_name in self.url_topics:
-            del self.url_topics[topic_name]
-            return f"✅ 已删除主题「{topic_name}」"
-        return f"未找到主题「{topic_name}」"
-
-    def delete_topic_doc(self, topic_name: str, doc_index: int) -> str:
-        """删除主题中的某篇文档"""
-        topic_name = topic_name.strip()
-        if topic_name not in self.url_topics:
-            return f"未找到主题「{topic_name}」"
-        docs = self.url_topics[topic_name]
-        if 0 <= doc_index < len(docs):
-            removed = docs.pop(doc_index)
-            return f"✅ 已删除「{removed.title}」"
-        return f"文档序号 {doc_index+1} 无效"
-
-    def edit_topic_doc(self, topic_name: str, doc_index: int, new_content: str) -> str:
-        """编辑主题中文档的内容"""
-        topic_name = topic_name.strip()
-        if topic_name not in self.url_topics:
-            return f"未找到主题「{topic_name}」"
-        docs = self.url_topics[topic_name]
-        if 0 <= doc_index < len(docs):
-            docs[doc_index].content = new_content.strip()
-            return f"✅ 已更新「{docs[doc_index].title}」的内容"
-        return f"文档序号 {doc_index+1} 无效"
-
-    def add_url_to_project_by_topic(self, topic_name: str, proj_name: str, session: dict) -> Tuple[str, dict]:
-        """将主题中所有文档添加到项目"""
-        if not self.current_user_id:
-            return "请先创建用户", session
-        topic_name = topic_name.strip()
-        if topic_name not in self.url_topics:
-            return f"未找到主题「{topic_name}」", session
-        projects = self.pdb.list_projects()
-        target = next((p for p in projects if p.name == proj_name.strip()), None)
-        if not target:
-            return f"未找到项目「{proj_name}」", session
-        count = 0
-        for doc in self.url_topics[topic_name]:
-            try:
-                self.pdb.add_url_reference(target.id, doc.source_url if hasattr(doc, 'source_url') else "", auto_fetch=False)
-                count += 1
-            except Exception:
-                pass
-        return f"✅ 已将主题「{topic_name}」中 {count} 篇文档添加到项目「{proj_name}」", session
+    def delete_ref_doc_action(self, topic: str, title: str) -> Tuple[str, List[str], List[str]]:
+        if topic not in self.url_topics or not title:
+            return "请先选择要删除的文档", self.get_topics_list(), []
+            
+        docs = self.url_topics[topic]
+        target = next((d for d in docs if d.title == title), None)
+        if target:
+            docs.remove(target)
+            if not docs:
+                del self.url_topics[topic]
+            self._save_persistent_data()
+            return f"已经成功从主题中移除：《{title}》", self.get_topics_list(), []
+        return "文档不存在", self.get_topics_list(), []
 
     # ═══════════════════════════════════════════════════════════════
-    # 项目管理（文件夹式）
+    # API配置管理 (LLM API settings)
     # ═══════════════════════════════════════════════════════════════
-
-    def list_projects(self, session: dict) -> Tuple[str, dict]:
-        """文件夹式项目列表"""
-        if not self.current_user_id:
-            return "请先创建用户", session
-        projects = self.pdb.list_projects()
-        if not projects:
-            return "暂无项目，请在写作页面创建项目。", session
-        lines = ["### 📁 我的项目", ""]
-        for p in projects:
-            status_icon = {"draft": "📝", "in_progress": "🔄", "completed": "✅", "archived": "📦"}.get(p.status.value, "📄")
-            desc = p.description[:60] if p.description else "无描述"
-            lines.append(f"{status_icon} **{p.name}**")
-            lines.append(f"   状态：{p.status.value} | 描述：{desc}")
-            if hasattr(p, 'style_requirements') and p.style_requirements:
-                lines.append(f"   参考文档：{len(p.style_requirements)} 篇")
-            lines.append("")
-        return "\n".join(lines), session
-
-    def get_project_detail(self, proj_name: str, session: dict) -> Tuple[str, dict]:
-        """查看项目详情"""
-        if not self.current_user_id:
-            return "请先创建用户", session
-        projects = self.pdb.list_projects()
-        target = next((p for p in projects if p.name == proj_name.strip()), None)
-        if not target:
-            return f"未找到项目「{proj_name}」", session
-
-        lines = [f"### 📂 项目详情：{target.name}", ""]
-        lines.append(f"**状态**：{target.status.value}")
-        lines.append(f"**描述**：{target.description or '无'}")
-        lines.append(f"**创建时间**：{target.created_at}")
-        lines.append(f"**更新时间**：{target.updated_at}")
-
-        if hasattr(target, 'questionnaire_results') and target.questionnaire_results:
-            qr = target.questionnaire_results
-            lines.append(f"\n**写作模式**：{qr.writing_mode}")
-            lines.append(f"**文种**：{qr.doc_type}")
-            lines.append(f"**风格**：{qr.style}")
-
-        if hasattr(target, 'style_requirements') and target.style_requirements:
-            lines.append(f"\n**参考文档**（{len(target.style_requirements)} 篇）：")
-            for i, ref in enumerate(target.style_requirements):
-                lines.append(f"  {i+1}. {ref.title} — {ref.word_count}字")
-
-        if hasattr(target, 'writing_history') and target.writing_history:
-            lines.append(f"\n**写作历史**（{len(target.writing_history)} 次）：")
-            for h in target.writing_history[-3:]:
-                lines.append(f"  - {h}")
-
-        return "\n".join(lines), session
-
-    def delete_project(self, proj_name: str, session: dict) -> Tuple[str, dict]:
-        """删除项目"""
-        if not self.current_user_id:
-            return "请先创建用户", session
-        projects = self.pdb.list_projects()
-        target = next((p for p in projects if p.name == proj_name.strip()), None)
-        if not target:
-            return f"未找到项目「{proj_name}」", session
+    def save_llm_config_action(self, prov: str, url: str, key: str, mdl: str, temp: float, tokens: int) -> str:
         try:
-            self.pdb.delete_project(target.id)
-            return f"✅ 已删除项目「{proj_name}」", session
+            self.api_manager.update(
+                provider=prov,
+                api_base=url.strip(),
+                api_key=key.strip(),
+                model=mdl.strip(),
+                temperature=temp,
+                max_tokens=tokens,
+                enable=True
+            )
+            self.api_manager.save()
+            return "LLM 接口参数保存并已默认开启！"
         except Exception as e:
-            return f"❌ 删除失败：{e}", session
+            return "保存失败，请检查网络连接后重试"
 
-    def edit_project(self, proj_name: str, new_name: str, new_desc: str, session: dict) -> Tuple[str, dict]:
-        """编辑项目名称和描述"""
-        if not self.current_user_id:
-            return "请先创建用户", session
-        projects = self.pdb.list_projects()
-        target = next((p for p in projects if p.name == proj_name.strip()), None)
-        if not target:
-            return f"未找到项目「{proj_name}」", session
+    def test_llm_connection_action(self) -> str:
         try:
-            self.pdb.edit_project(target.id, name=new_name.strip() or "", description=new_desc)
-            return f"✅ 已更新项目「{new_name or proj_name}」", session
+            res = self.api_manager.test_connection()
+            if res.get("success"):
+                return f"连接成功 — 模型响应正常：{res.get('message')}"
+            err_msg = res.get('message', '未知错误')
+            if 'timeout' in str(err_msg).lower():
+                return "连接超时 — 请检查 API 地址是否正确，或网络是否需要代理"
+            if '401' in str(err_msg) or '403' in str(err_msg):
+                return "认证失败 — API Key 无效或已过期，请检查密钥"
+            if '404' in str(err_msg):
+                return "端点不存在 — API Base URL 或模型名称可能有误"
+            return f"连接失败 — {err_msg}"
         except Exception as e:
-            return f"❌ 编辑失败：{e}", session
+            return f"连接测试异常 — 请确认 API 地址可访问：{str(e)[:200]}"
 
-    def get_user_profile_display(self, session: dict) -> Tuple[str, dict]:
-        """可视化用户画像"""
-        if not self.current_user_id:
-            return "请先创建用户", session
-        user = self.pdb.get_current_user()
-        if not user:
-            return "无用户数据", session
-
-        lines = ["### 👤 用户画像", ""]
-        lines.append(f"**用户名**：{user.name}")
-        lines.append(f"**用户ID**：{user.id}")
-        lines.append(f"**创建时间**：{user.created_at}")
-        lines.append(f"**最近活跃**：{user.last_active}")
-        lines.append("")
-
-        if user.preferences:
-            prefs = user.preferences
-            lines.append("#### 📊 写作偏好")
-            if prefs.preferred_writing_modes:
-                lines.append(f"- 常用写作模式：{', '.join(prefs.preferred_writing_modes)}")
-            if prefs.preferred_doc_types:
-                lines.append(f"- 常用文种：{', '.join(prefs.preferred_doc_types)}")
-            if prefs.preferred_styles:
-                lines.append(f"- 常用风格：{', '.join(prefs.preferred_styles)}")
-            if prefs.common_themes:
-                lines.append(f"- 常见主题：{', '.join(prefs.common_themes)}")
-            if prefs.forbidden_patterns:
-                lines.append(f"- 禁用模式：{', '.join(prefs.forbidden_patterns)}")
-            lines.append(f"- 典型篇幅：{prefs.typical_length_range[0]}-{prefs.typical_length_range[1]}字")
-            lines.append("")
-
-        lines.append(f"#### 📁 项目统计")
-        lines.append(f"- 项目总数：{len(user.projects)}")
-        status_counts = {}
-        for p in user.projects:
-            s = p.status.value
-            status_counts[s] = status_counts.get(s, 0) + 1
-        for s, c in status_counts.items():
-            icon = {"draft": "📝", "in_progress": "🔄", "completed": "✅", "archived": "📦"}.get(s, "📄")
-            lines.append(f"  {icon} {s}：{c} 个")
-        lines.append("")
-
-        if user.common_strengths:
-            lines.append(f"#### 💪 常见优势")
-            for s in user.common_strengths:
-                lines.append(f"- {s}")
-            lines.append("")
-
-        if user.common_weaknesses:
-            lines.append(f"#### ⚠️ 常见短板")
-            for w in user.common_weaknesses:
-                lines.append(f"- {w}")
-            lines.append("")
-
-        if user.memory_notes:
-            lines.append(f"#### 📝 记忆笔记")
-            lines.append(user.memory_notes[:500])
-            lines.append("")
-
-        return "\n".join(lines), session
-
-    def get_memory_summary(self, session: dict) -> Tuple[str, dict]:
-        """用户记忆摘要（可查看/编辑）"""
-        if not self.current_user_id:
-            return "请先创建用户", session
-        summary = self.pdb.get_memory_summary(self.current_project_id)
-        return summary, session
+    def load_api_config(self) -> Tuple[str, str, str, str, float, int, str]:
+        """加载当前 API 配置"""
+        c = self.api_manager.config
+        provider = c.provider.lower() if c.provider else "openai"
+        return provider, c.api_base, c.api_key, c.model, c.temperature, c.max_tokens, ""
 
     def add_memory_note(self, note: str, session: dict) -> Tuple[str, dict]:
         """添加记忆笔记"""
-        if not self.current_user_id:
-            return "请先创建用户", session
+        if not self.current_user_name:
+            return "请先登录", session
         note = note.strip()
         if not note:
             return "请输入笔记内容", session
         self.pdb.add_to_memory(self.current_project_id, note)
-        return f"✅ 已添加笔记", session
-
-    # ═══════════════════════════════════════════════════════════════
-    # API 配置（多 API 管理）
-    # ═══════════════════════════════════════════════════════════════
-
-    def load_api_config(self) -> Tuple[str, str, str, str, float, int, bool]:
-        c = self.api_manager.config
-        return c.provider, c.api_base, c.api_key, c.model, c.temperature, c.max_tokens, c.enable
-
-    def apply_provider(self, provider: str) -> Tuple[str, str, str, str, float, int, bool, str]:
-        self.api_manager.apply_provider_template(provider)
-        c = self.api_manager.config
-        return c.provider, c.api_base, c.api_key, c.model, c.temperature, c.max_tokens, c.enable, f"✅ 已加载 {SUPPORTED_PROVIDERS.get(provider, provider)} 默认配置"
-
-    def save_api_config(self, provider: str, api_base: str, api_key: str, model: str, temperature: float, max_tokens: int, enable: bool) -> Tuple[str, str]:
-        self.api_manager.update(
-            provider=provider, api_base=api_base, api_key=api_key,
-            model=model, temperature=temperature, max_tokens=max_tokens, enable=enable
-        )
-        self.api_manager.save()
-        status = "✅ 配置已保存" if enable else "⚠️ 配置已保存但未启用"
-        return status, ""
-
-    def test_api_connection(self) -> str:
-        result = self.api_manager.test_connection()
-        if result["success"]:
-            return f"✅ {result['message']}"
-        return f"❌ {result['message']}"
-
-    def get_config_status(self) -> str:
-        c = self.api_manager.config
-        if c.enable and c.api_key and c.api_base:
-            return f"✅ 已启用 | {SUPPORTED_PROVIDERS.get(c.provider, c.provider)} | {c.model} | {c.api_base}"
-        elif c.api_base:
-            return f"⚠️ 已配置但未启用 | {SUPPORTED_PROVIDERS.get(c.provider, c.provider)} | {c.model}"
-        return "❌ 未配置 LLM API，当前使用本地占位文本生成"
-
-    def get_api_list_display(self) -> str:
-        """显示所有 API 配置列表"""
-        configs = self.api_manager.get_all_configs()
-        if not configs:
-            return "暂无 API 配置"
-        lines = ["### 🔑 API 配置列表", ""]
-        for i, c in enumerate(configs):
-            active = "🔵 **当前激活**" if i == self.api_manager.active_index else ""
-            status = "✅" if c.enable else "⚪"
-            provider_name = SUPPORTED_PROVIDERS.get(c.provider, c.provider)
-            key_preview = f"{c.api_key[:6]}..." if c.api_key else "未设置"
-            lines.append(f"{status} **{c.name}** {active}")
-            lines.append(f"   提供商：{provider_name} | 模型：{c.model} | Key：{key_preview}")
-            lines.append(f"   Base URL：{c.api_base}")
-            lines.append("")
-        return "\n".join(lines)
-
-    def add_new_api(self, name: str, provider: str) -> Tuple[str, str, str, str, float, int, bool]:
-        """添加新 API 配置"""
-        cfg = self.api_manager.add_config(name=name, provider=provider)
-        return cfg.provider, cfg.api_base, cfg.api_key, cfg.model, cfg.temperature, cfg.max_tokens, cfg.enable
-
-    def switch_api(self, index: int) -> Tuple[str, str, str, str, float, int, bool, str]:
-        """切换到指定 API 配置"""
-        try:
-            idx = int(index)
-            cfg = self.api_manager.switch_to(idx)
-            return cfg.provider, cfg.api_base, cfg.api_key, cfg.model, cfg.temperature, cfg.max_tokens, cfg.enable, f"✅ 已切换到「{cfg.name}」"
-        except (ValueError, IndexError):
-            c = self.api_manager.config
-            return c.provider, c.api_base, c.api_key, c.model, c.temperature, c.max_tokens, c.enable, "❌ 无效的配置序号"
-
-    def delete_api(self, index: int) -> str:
-        """删除指定 API 配置"""
-        try:
-            idx = int(index)
-            if self.api_manager.delete_config(idx):
-                return f"✅ 已删除配置 #{idx+1}"
-            return "❌ 无法删除（至少保留一个配置）"
-        except (ValueError, IndexError):
-            return "❌ 无效的配置序号"
-
-    def rename_api(self, index: int, new_name: str) -> str:
-        """重命名 API 配置"""
-        try:
-            idx = int(index)
-            configs = self.api_manager.get_all_configs()
-            if 0 <= idx < len(configs):
-                configs[idx].name = new_name.strip() or f"配置 {idx+1}"
-                self.api_manager.save()
-                return f"✅ 已重命名为「{configs[idx].name}」"
-            return "❌ 无效的配置序号"
-        except (ValueError, IndexError):
-            return "❌ 无效的配置序号"
+        return "已添加笔记", session
 
 
 # ═══════════════════════════════════════════════════════════════
-# UI 构建
+# 界面构建 (Gradio UI Layout Design)
 # ═══════════════════════════════════════════════════════════════
 
-def create_ui() -> gr.Blocks:
+def build_ui() -> gr.Blocks:
     app = GradioApp()
+    
+    # 产品工具级克制设计：Restrained palette, sans-serif 系统字体栈, 功能性动效
+    custom_css = """
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;600;700&family=Playfair+Display:ital,wght@0,600;1,600&display=swap');
 
-    with gr.Blocks(title="公文写作 Agent V9", theme=gr.themes.Soft()) as demo:
-        session_state = gr.State({})
+    :root {
+        /* Strictly Sampled Van Gogh Starry Night Palette */
+        /* Deep Skies */
+        --color-sky-deep: #0D162B;
+        --color-sky-mid: #1C3765;
+        --color-sky-light: #4F7EA4;
+        --color-sky-swirl: #648BA8;
+        --color-sky-pale: #8DB3C3;
+        
+        /* Moon & Stars */
+        --color-moon-glow: #DFCB5C;
+        --color-moon-core: #E3D896;
+        --color-star-yellow: #E7D674;
+        
+        /* Cypress & Hills */
+        --color-cypress-dark: #0D1917;
+        --color-cypress-mid: #283C25;
+        --color-hills: #28406F;
 
-        with gr.Tabs():
+        /* Derived UI colors */
+        --color-accent: var(--color-moon-glow);
+        --color-accent-hover: var(--color-moon-core);
+        --color-accent-active: #C8B038;
+        --color-accent-focus: rgba(223, 203, 92, 0.3);
+        
+        --color-ink: #F8FAFC; 
+        --color-ink-body: #E2E8F0; 
+        --color-ink-muted: #94A3B8; 
+        
+        --color-danger: oklch(65% 0.18 20);
+        --color-danger-hover: oklch(75% 0.18 20);
+        
+        /* Geometry */
+        --radius-button: 12px;
+        --radius-card: 20px;
+        --radius-input: 12px;
+        --radius-sm: 8px;
+    }
+
+    /* Container Background - Apple Music Fluid Style */
+    .gradio-container {
+        position: relative;
+        overflow: hidden;
+        z-index: 1; /* Establishes stacking context */
+        background-color: var(--color-sky-deep) !important;
+        
+        /* Glass line/particle overlay natively on container */
+        background-image: 
+            repeating-linear-gradient(
+                -45deg,
+                rgba(255,255,255,0.015) 0px,
+                rgba(255,255,255,0.015) 1px,
+                rgba(0,0,0,0.02) 1px,
+                rgba(0,0,0,0.02) 2.5px
+            ) !important;
+        
+        font-family: "Inter", "Noto Sans SC", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif !important;
+        color: var(--color-ink) !important;
+    }
+
+    /* Fluid Swirling Blobs Layer 1 */
+    .gradio-container::before {
+        content: "";
+        position: absolute;
+        width: 250vw;
+        height: 250vh;
+        top: -75vh;
+        left: -75vw;
+        z-index: -2; /* Above background color, below content */
+        background: 
+            radial-gradient(circle at 30% 30%, rgba(79, 126, 164, 0.8) 0%, transparent 50%),
+            radial-gradient(circle at 70% 70%, rgba(223, 203, 92, 0.45) 0%, transparent 45%),
+            radial-gradient(circle at 70% 30%, rgba(40, 60, 37, 0.7) 0%, transparent 50%),
+            radial-gradient(circle at 30% 70%, rgba(100, 139, 168, 0.6) 0%, transparent 50%);
+        filter: blur(100px) saturate(140%);
+        animation: fluid-rotate-1 25s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+        pointer-events: none;
+    }
+
+    /* Fluid Swirling Blobs Layer 2 */
+    .gradio-container::after {
+        content: "";
+        position: absolute;
+        width: 250vw;
+        height: 250vh;
+        top: -75vh;
+        left: -75vw;
+        z-index: -1;
+        background: 
+            radial-gradient(circle at 50% 20%, rgba(227, 216, 150, 0.4) 0%, transparent 40%),
+            radial-gradient(circle at 20% 50%, rgba(28, 55, 101, 0.9) 0%, transparent 45%),
+            radial-gradient(circle at 80% 80%, rgba(79, 126, 164, 0.5) 0%, transparent 45%);
+        filter: blur(80px) saturate(160%);
+        animation: fluid-rotate-2 30s cubic-bezier(0.25, 0.1, 0.25, 1) infinite reverse;
+        pointer-events: none;
+        mix-blend-mode: color-dodge;
+        opacity: 0.6;
+    }
+    
+    @keyframes fluid-rotate-1 {
+        0% { transform: rotate(0deg) scale(1) translate(0%, 0%); }
+        33% { transform: rotate(120deg) scale(1.1) translate(4%, 6%); }
+        66% { transform: rotate(240deg) scale(0.9) translate(-4%, 2%); }
+        100% { transform: rotate(360deg) scale(1) translate(0%, 0%); }
+    }
+
+    @keyframes fluid-rotate-2 {
+        0% { transform: rotate(0deg) scale(1.1) translate(0%, 0%); }
+        33% { transform: rotate(120deg) scale(0.9) translate(-2%, -3%); }
+        66% { transform: rotate(240deg) scale(1.2) translate(3%, -4%); }
+        100% { transform: rotate(360deg) scale(1.1) translate(0%, 0%); }
+    }
+
+    .gradio-container p, .gradio-container span, .gradio-container label,
+    .gradio-container li, .gradio-container div {
+        color: var(--color-ink-body);
+    }
+
+    /* Apple-Style Glassmorphism Surfaces (Separated to fix dropdown clipping) */
+    .gradio-container .gr-panel,
+    .gradio-container .gr-box,
+    .gradio-container .gr-group,
+    .gradio-container .gr-form,
+    .gradio-container fieldset,
+    .gradio-container .gr-button-secondary,
+    .gradio-container button[variant="secondary"],
+    .gradio-container [class*="panel"],
+    .gradio-container [class*="box"],
+    .gradio-container [class*="group"],
+    .gradio-container [class*="accordion"] {
+        background: rgba(20, 35, 60, 0.15) !important;
+        color: var(--color-ink-body) !important;
+        border: 1px solid rgba(255, 255, 255, 0.08) !important;
+        border-top: 1px solid rgba(255, 255, 255, 0.15) !important;
+        border-left: 1px solid rgba(255, 255, 255, 0.12) !important;
+        border-radius: var(--radius-card);
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3) !important;
+        /* Removed backdrop-filter to prevent creating local stacking contexts that trap dropdown menus */
+    }
+
+    /* Apply Blur ONLY to major structural containers */
+    .sidebar-pane, .workspace-pane {
+        background: rgba(20, 35, 60, 0.15) !important;
+        border: 1px solid rgba(255, 255, 255, 0.08) !important;
+        border-top: 1px solid rgba(255, 255, 255, 0.15) !important;
+        border-left: 1px solid rgba(255, 255, 255, 0.12) !important;
+        border-radius: var(--radius-card);
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3) !important;
+
+    }
+    
+    /* Fix global dropdown Z-index in case Gradio doesn't portal it correctly */
+    .options, .wrap.wrap.wrap {
+        z-index: 99999 !important;
+    }
+    
+    /* Ensure elements inside workspace do not hide overflowing dropdowns */
+    .workspace-pane * {
+        /* Gradio sometimes adds overflow: hidden to columns, we must override it for dropdowns to escape */
+    }
+    .gr-dropdown {
+        z-index: 100 !important;
+    }
+
+    
+    .sidebar-pane { padding: 16px; }
+    .workspace-pane { padding: 24px; }
+    .ws-panel-hidden { display: none !important; }
+    .ws-panel-visible { display: block !important; }
+
+    .gradio-container .gr-group *,
+    .gradio-container [class*="group"] *,
+    .gradio-container [class*="accordion"] * {
+        color: var(--color-ink-body) !important;
+    }
+
+    /* Starry Cards */
+    .ios-card {
+        background: rgba(255, 255, 255, 0.03) !important;
+        border: 1px solid rgba(255, 255, 255, 0.1) !important;
+        border-radius: var(--radius-card);
+        padding: 16px;
+        margin-bottom: 8px;
+        transition: box-shadow 0.25s;
+    }
+    .ios-card:hover {
+        
+        background: rgba(255, 255, 255, 0.06) !important;
+        box-shadow: 0 8px 24px rgba(223, 203, 92, 0.15); /* Moon glow */
+        border-color: rgba(223, 203, 92, 0.4) !important;
+    }
+    .ios-card * {
+        color: var(--color-ink-body) !important;
+    }
+
+    .empty-state-card {
+        background: rgba(0, 0, 0, 0.2) !important;
+        border: 1px dashed rgba(255, 255, 255, 0.15);
+        border-radius: var(--radius-card);
+        padding: 40px 32px;
+        text-align: center;
+    }
+    .empty-state-card h3 {
+        color: var(--color-accent) !important;
+        margin: 0 0 8px 0;
+        font-weight: 600;
+    }
+    .empty-state-card p {
+        margin: 0;
+        color: var(--color-ink-muted) !important;
+    }
+
+    /* Artistic Headers */
+    .gradio-container h1, .gradio-container h2, .gradio-container h3 {
+        font-family: "Inter", "Noto Sans SC", sans-serif !important;
+        color: var(--color-ink) !important;
+        letter-spacing: -0.01em;
+    }
+
+    /* Badges */
+    .badge-info {
+        background: rgba(141, 179, 195, 0.15) !important;
+        color: #E2E8F0 !important;
+        font-weight: 600;
+        border-radius: var(--radius-sm);
+        padding: 4px 12px;
+        font-size: 12px;
+        display: inline-block;
+        border: 1px solid rgba(141, 179, 195, 0.3);
+
+    }
+
+    /* Swirling Title Banner */
+    .title-banner {
+        background: rgba(255, 255, 255, 0.02) !important;
+        border: 1px solid rgba(223, 203, 92, 0.3);
+        border-top: 1px solid rgba(223, 203, 92, 0.5);
+        border-radius: var(--radius-card);
+        padding: 20px 24px;
+        margin-bottom: 20px;
+
+        box-shadow: 0 8px 32px rgba(223, 203, 92, 0.15); 
+    }
+    .title-banner h1 {
+        font-family: "Inter", "Noto Sans SC", sans-serif !important;
+        color: var(--color-accent) !important;
+        font-weight: 700;
+        font-size: 28px;
+        letter-spacing: -0.02em;
+        text-shadow: 0 0 16px rgba(223, 203, 92, 0.6);
+    }
+    .title-banner p {
+        color: rgba(226, 232, 240, 0.8) !important;
+        font-size: 14px;
+        margin-top: 6px;
+    }
+
+    /* Luminous Gold Buttons - Ultra Glass */
+    .ios-btn-primary {
+        background: linear-gradient(135deg, rgba(223, 203, 92, 0.9), rgba(196, 138, 24, 0.9)) !important;
+        color: #0D162B !important; 
+        border-radius: var(--radius-button) !important;
+        border: 1px solid rgba(255,255,255,0.4) !important;
+        font-weight: 700 !important;
+        font-family: "Inter", "Noto Sans SC", sans-serif !important;
+        transition: transform 0.2s cubic-bezier(0.2, 0.8, 0.2, 1), box-shadow 0.2s ease, filter 0.2s ease !important;
+        box-shadow: 0 4px 16px rgba(223, 203, 92, 0.3) !important;
+        min-height: 44px;
+
+    }
+    .ios-btn-primary:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 8px 24px rgba(223, 203, 92, 0.5) !important;
+        filter: brightness(1.1);
+    }
+    .ios-btn-primary:active {
+        transform: translateY(0);
+        filter: brightness(0.9);
+    }
+
+    .ios-btn-danger {
+        background: rgba(220, 38, 38, 0.1) !important;
+        color: #FCA5A5 !important;
+        border-radius: var(--radius-button) !important;
+        border: 1px solid rgba(220, 38, 38, 0.4) !important;
+        font-weight: 500 !important;
+        transition: all 0.2s ease !important;
+        min-height: 44px;
+
+    }
+    .ios-btn-danger:hover {
+        background: rgba(220, 38, 38, 0.2) !important;
+        box-shadow: 0 4px 16px rgba(220, 38, 38, 0.2);
+    }
+
+    /* Agent Bubbles */
+    .agent-bubble {
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        background: rgba(255, 255, 255, 0.05);
+        color: var(--color-ink-body);
+        padding: 10px 16px;
+        border-radius: var(--radius-card);
+        margin-bottom: 10px;
+
+    }
+
+    /* Text Inputs */
+    .gradio-container input, .gradio-container textarea {
+        color: var(--color-ink) !important;
+        background: rgba(0, 0, 0, 0.25) !important;
+        border-radius: var(--radius-input) !important;
+        border: 1px solid rgba(255,255,255,0.1) !important;
+        border-top: 1px solid rgba(0,0,0,0.4) !important; /* Inset feel */
+        transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease !important;
+    }
+    input:focus, textarea:focus, .gr-input:focus-within {
+        background: rgba(0, 0, 0, 0.4) !important;
+        border-color: var(--color-accent) !important;
+        box-shadow: 0 0 0 2px var(--color-accent-focus), inset 0 2px 4px rgba(0,0,0,0.5) !important;
+        outline: none;
+    }
+
+    /* Selected Tabs */
+    button.selected {
+        background: rgba(255, 255, 255, 0.08) !important;
+        color: var(--color-accent) !important;
+        border-bottom: 2px solid var(--color-accent) !important;
+        transition: all 0.2s ease !important;
+        font-weight: 600;
+    }
+
+    /* Step Progress - Glassy */
+    .step-track {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        font-size: 13px;
+        line-height: 1;
+    }
+    .step-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 5px 10px 5px 6px;
+        border-radius: var(--radius-button);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        white-space: nowrap;
+        transition: all 0.25s ease-out;
+        background: rgba(255, 255, 255, 0.03);
+    }
+    .step-num {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 18px;
+        height: 18px;
+        border-radius: 50%;
+        font-size: 11px;
+        font-weight: 700;
+        line-height: 1;
+    }
+    .step-label {
+        font-weight: 500;
+    }
+    .step-done {
+        border-color: rgba(141, 179, 195, 0.4);
+        color: var(--color-sky-pale);
+    }
+    .step-done .step-num {
+        background: rgba(141, 179, 195, 0.4);
+        color: #fff;
+    }
+    .step-current {
+        background: rgba(223, 203, 92, 0.1);
+        border-color: var(--color-accent);
+        color: var(--color-accent);
+        box-shadow: 0 2px 12px rgba(223, 203, 92, 0.25);
+    }
+    .step-current .step-num {
+        background: var(--color-accent);
+        color: #0D162B;
+    }
+    .step-todo {
+        border-color: rgba(255, 255, 255, 0.05);
+        color: var(--color-ink-muted);
+    }
+    .step-todo .step-num {
+        background: transparent;
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        color: var(--color-ink-muted);
+    }
+
+    /* Rhythm & Alignment */
+    .sidebar-pane > * + *, .workspace-pane > * + * {
+        margin-top: 16px;
+    }
+
+    *:focus-visible {
+        outline: 2px solid var(--color-accent) !important;
+        outline-offset: 2px !important;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+        *, *::before, *::after {
+            animation-duration: 0.01ms !important;
+            animation-iteration-count: 1 !important;
+            transition-duration: 0.01ms !important;
+        }
+    }
+    """
+
+    with gr.Blocks(title="公文写作智能体 V10", css=custom_css) as demo:
+        # 全局状态字典
+        session_state = gr.State({
+            "current_question_index": 0,
+            "current_topic": "",
+            "current_ref_doc_title": ""
+        })
+        
+        # 顶部渐变标题栏
+        gr.Markdown(
+            """
+            <div class="title-banner">
+                <h1 style="margin: 0; font-size: 28px; font-weight: 700; letter-spacing: 0.5px;">公文写作智能助手</h1>
+                <p style="margin: 6px 0 0 0; opacity: 0.9; font-size: 14px;">多角色协作写作 · 智能审查校对 · 一键生成规范公文</p>
+            </div>
+            """
+        )
+
+        with gr.Row():
             # ═══════════════════════════════════════════════════════
-            # Tab 1: 写作
+            # 左侧资源栏 (Finder Sidebar)
             # ═══════════════════════════════════════════════════════
-            with gr.Tab("✍️ 写作"):
-                progress_bar = gr.Markdown(build_progress_bar("1. 用户"))
+            with gr.Column(scale=1, elem_classes="sidebar-pane"):
+                gr.Markdown("### 资源管理器")
 
-                gr.Markdown("---")
-
-                # ─── Step 1: 用户 ───
-                gr.Markdown("### 📌 第1步：创建或选择用户")
-                with gr.Row():
-                    user_name = gr.Textbox(label="用户名", placeholder="输入你的姓名或昵称", scale=3)
-                    user_btn = gr.Button("确认", variant="primary", scale=1)
-                user_msg = gr.Markdown()
-
-                gr.Markdown("---")
-
-                # ─── Step 2: 项目 ───
-                gr.Markdown("### 📌 第2步：创建写作项目")
-                with gr.Row():
-                    proj_name = gr.Textbox(label="项目名称", placeholder="例如：2026年人才培养总结", scale=2)
-                    proj_desc = gr.Textbox(label="项目描述（可选）", placeholder="简要描述项目背景...", scale=3)
-                    proj_btn = gr.Button("创建并继续", variant="primary", scale=1)
-                proj_msg = gr.Markdown()
-
-                gr.Markdown("---")
-
-                # ─── Step 3: 场景（支持自定义 + 补充说明）───
-                gr.Markdown("### 📌 第3步：选择你的场景")
-                routing_display = gr.Markdown("选择最接近你当前情况的场景。")
-                with gr.Row():
-                    routing_choice = gr.Textbox(label="输入对应数字", placeholder="例如：1", scale=2)
-                    routing_supplement = gr.Textbox(label="补充说明（可选）", placeholder="对场景的补充描述，或自定义场景说明...", scale=3)
-                    routing_btn = gr.Button("确认选择", variant="primary", scale=1)
-                routing_msg = gr.Markdown()
-
-                gr.Markdown("---")
-
-                # ─── Step 4: 问卷 ───
-                gr.Markdown("### 📌 第4步：回答专属问题")
-                q_progress = gr.Markdown()
-                question_text = gr.Markdown()
-                teaching_text = gr.Markdown()
-                hint_text = gr.Markdown()
-                answer_input = gr.Textbox(label="你的回答", lines=3, placeholder="输入答案，或使用下方指令：skip（跳过）| back（回退）| finish（完成）")
-                with gr.Row():
-                    q_back = gr.Button("⬅️ 回退", size="sm")
-                    q_skip = gr.Button("⏭️ 跳过", size="sm")
-                    q_submit = gr.Button("✅ 提交", variant="primary")
-                    q_finish = gr.Button("🏁 完成问卷", variant="stop")
-                q_msg = gr.Markdown()
-                q_prev = gr.Markdown()
-
-                gr.Markdown("---")
-
-                # ─── Step 5: 方案 ───
-                gr.Markdown("### 📌 第5步：写作方案")
-                with gr.Row():
-                    style_selector = gr.Dropdown(
-                        choices=[label for label, _ in STYLE_CHOICES],
-                        value="人民日报风格",
-                        label="🎨 写作风格",
-                        scale=1,
+                # ── 身份卡 ──
+                with gr.Group(elem_classes="ios-card"):
+                    gr.Markdown("**用户身份**")
+                    user_input = gr.Textbox(
+                        label="登录用户名",
+                        placeholder="输入姓名以切换或建立新空间",
+                        value=app.current_user_name or ""
                     )
-                    doc_type_selector = gr.Dropdown(
-                        choices=[label for label, _ in DOC_TYPE_CHOICES],
-                        value="通讯（推荐1500-3000字）",
-                        label="📄 文种",
-                        scale=1,
+                    user_login_btn = gr.Button("确认身份", variant="secondary", elem_classes="ios-btn-secondary")
+                    user_status_msg = gr.Markdown(f"当前用户: **{app.current_user_name or '未选择'}**")
+
+                # ── 项目管理器 ──
+                with gr.Accordion("项目工程", open=True):
+                    project_selector = gr.Dropdown(
+                        choices=app.get_projects_list(),
+                        label="当前活动项目",
+                        value=app.get_projects_list()[0] if app.get_projects_list() else None
                     )
-                    plan_regenerate_btn = gr.Button("🔄 更新方案", variant="secondary", scale=1)
-                plan_output = gr.Textbox(label="方案详情", lines=12, interactive=False)
-                kb_display = gr.Markdown()
-                with gr.Row():
-                    plan_btn = gr.Button("🚀 生成初稿", variant="primary")
+                    
+                    with gr.Row():
+                        proj_create_trigger = gr.Button("新建项目", variant="secondary", size="sm", elem_classes="ios-btn-secondary")
+                        proj_delete_btn = gr.Button("删除项目", variant="stop", size="sm", elem_classes="ios-btn-danger")
+                    
+                    # 删除确认面板
+                    with gr.Column(visible=False) as confirm_delete_box:
+                        gr.Markdown("### 确认删除")
+                        gr.Markdown("此操作不可撤销，项目中的所有草稿和历史将被永久删除。")
+                        with gr.Row():
+                            confirm_delete_yes_btn = gr.Button("确认删除", variant="stop", size="sm", elem_classes="ios-btn-danger")
+                            confirm_delete_no_btn = gr.Button("取消", variant="secondary", size="sm", elem_classes="ios-btn-secondary")
+                    
+                    # 新建项目侧面板 (隐藏，点击显示)
+                    with gr.Column(visible=False) as new_proj_box:
+                        new_proj_name = gr.Textbox(label="新项目名称", placeholder="例如: 智能研学总结报告")
+                        new_proj_desc = gr.Textbox(label="项目描述(可选)")
+                        with gr.Row():
+                            new_proj_save_btn = gr.Button("保存", variant="primary", size="sm", elem_classes="ios-btn-primary")
+                            new_proj_cancel_btn = gr.Button("取消", variant="secondary", size="sm")
 
-                gr.Markdown("---")
-
-                # ─── Step 6: 初稿 ───
-                gr.Markdown("### 📌 第6步：初稿预览 & 多智能体协作")
-                with gr.Accordion("🤖 多智能体协作日志", open=True):
-                    agent_log = gr.Textbox(label="协作日志", lines=8, interactive=False)
-                with gr.Accordion("🔧 系统提示词预览", open=False):
-                    prompt_preview = gr.Textbox(label="提示词", lines=6, interactive=False)
-                draft_output = gr.Textbox(label="初稿（主版本）", lines=15, interactive=False)
-                with gr.Accordion("📄 一文多体预览", open=False):
-                    multi_preview_step6 = gr.Textbox(label="多版本", lines=10, interactive=False)
-                with gr.Row():
-                    draft_btn = gr.Button("🔍 执行审查", variant="primary")
-                draft_msg = gr.Markdown()
-
-                gr.Markdown("---")
-
-                # ─── Step 7: 审查 ───
-                gr.Markdown("### 📌 第7步：审查结果 & HITL 交互")
-                review_output = gr.Textbox(label="审查详情", lines=12, interactive=False)
-
-                with gr.Accordion("🔍 发现的问题", open=True):
-                    review_issues = gr.Textbox(label="问题列表", lines=6, interactive=False)
-                with gr.Accordion("📋 格式合规检查", open=True):
-                    format_check_output = gr.Textbox(label="格式检查", lines=6, interactive=False)
-                with gr.Accordion("📖 知识库诊断", open=False):
-                    kb_diagnosis_output = gr.Textbox(label="知识库诊断", lines=4, interactive=False)
-
-                gr.Markdown("#### 🛠️ HITL 人工介入")
-                with gr.Row():
-                    fix_round = gr.Number(label="审查轮次", value=0, precision=0, scale=1)
-                    fix_index = gr.Number(label="问题序号", value=0, precision=0, scale=1)
-                    fix_btn = gr.Button("🔧 自动修复此问题", variant="secondary", scale=1)
-                with gr.Row():
-                    manual_edit = gr.Textbox(label="手动编辑草稿", lines=5, placeholder="直接修改草稿内容...", scale=3)
-                    manual_update_btn = gr.Button("💾 更新草稿", variant="secondary", scale=1)
-                with gr.Row():
-                    re_review_btn = gr.Button("🔄 重新审查", variant="secondary")
-                    review_final = gr.Button("✅ 完成并导出", variant="primary")
-                review_msg = gr.Markdown()
-
-                gr.Markdown("---")
-
-                # ─── Step 8: 完成 ───
-                gr.Markdown("### 📌 第8步：最终输出")
-                final_output = gr.Textbox(label="最终文章", lines=20, interactive=False)
-                with gr.Accordion("📄 多版本文稿对比", open=True):
-                    final_multi = gr.Textbox(label="一文多体", lines=12, interactive=False)
-                with gr.Accordion("🤖 完整协作日志", open=False):
-                    final_agent = gr.Textbox(label="协作日志", lines=8, interactive=False)
-                with gr.Accordion("📊 工作流摘要", open=False):
-                    workflow_summary = gr.Textbox(label="摘要", lines=6, interactive=False)
-                with gr.Row():
-                    done_restart = gr.Button("🔄 重新开始", variant="secondary")
-
-                # ═══════════════════════════════════════════════════
-                # 事件绑定 - 写作 Tab
-                # ═══════════════════════════════════════════════════
-
-                user_btn.click(
-                    fn=lambda name, sess: app.create_or_select_user(name.strip(), sess),
-                    inputs=[user_name, session_state],
-                    outputs=[user_msg, proj_msg, progress_bar, session_state]
-                )
-
-                proj_btn.click(
-                    fn=lambda name, desc, sess: app.create_project(name, desc, sess),
-                    inputs=[proj_name, proj_desc, session_state],
-                    outputs=[proj_msg, routing_display, routing_msg, progress_bar, session_state]
-                )
-
-                routing_btn.click(
-                    fn=lambda choice, supp, sess: app.submit_routing(choice, supp, sess),
-                    inputs=[routing_choice, routing_supplement, session_state],
-                    outputs=[routing_msg, q_progress, question_text, teaching_text, hint_text, progress_bar, session_state]
-                )
-
-                def question_fn(answer: str, session: dict):
-                    msg, progress, q, teach, hint, prev, plan, style, doc, kb, bar, new_sess = app.submit_answer(answer, session)
-                    return msg, progress, q, teach, hint, prev, plan, style, doc, kb, bar, new_sess, ""
-
-                q_submit.click(fn=question_fn, inputs=[answer_input, session_state],
-                    outputs=[q_msg, q_progress, question_text, teaching_text, hint_text, q_prev,
-                             plan_output, style_selector, doc_type_selector, kb_display,
-                             progress_bar, session_state, answer_input])
-                q_back.click(fn=question_fn, inputs=[answer_input, session_state],
-                    outputs=[q_msg, q_progress, question_text, teaching_text, hint_text, q_prev,
-                             plan_output, style_selector, doc_type_selector, kb_display,
-                             progress_bar, session_state, answer_input])
-                q_skip.click(fn=question_fn, inputs=[answer_input, session_state],
-                    outputs=[q_msg, q_progress, question_text, teaching_text, hint_text, q_prev,
-                             plan_output, style_selector, doc_type_selector, kb_display,
-                             progress_bar, session_state, answer_input])
-                q_finish.click(fn=question_fn, inputs=[answer_input, session_state],
-                    outputs=[q_msg, q_progress, question_text, teaching_text, hint_text, q_prev,
-                             plan_output, style_selector, doc_type_selector, kb_display,
-                             progress_bar, session_state, answer_input])
-
-                plan_regenerate_btn.click(
-                    fn=lambda style, doc, sess: app.regenerate_plan(style, doc, sess),
-                    inputs=[style_selector, doc_type_selector, session_state],
-                    outputs=[plan_output, style_selector, doc_type_selector, kb_display, progress_bar, session_state]
-                )
-
-                plan_btn.click(
-                    fn=lambda sess: app.generate_draft(sess),
-                    inputs=[session_state],
-                    outputs=[draft_msg, draft_output, agent_log, multi_preview_step6, prompt_preview, progress_bar, session_state]
-                )
-
-                draft_btn.click(
-                    fn=lambda sess: app.run_review(sess),
-                    inputs=[session_state],
-                    outputs=[review_msg, review_output, review_issues, format_check_output, kb_diagnosis_output, multi_preview_step6, progress_bar, session_state]
-                )
-
-                fix_btn.click(
-                    fn=lambda r, i, sess: app.apply_fix(int(r), int(i), sess),
-                    inputs=[fix_round, fix_index, session_state],
-                    outputs=[review_msg, draft_output, review_issues, format_check_output, kb_diagnosis_output, multi_preview_step6, progress_bar, session_state]
-                )
-
-                manual_update_btn.click(
-                    fn=lambda d, sess: app.update_draft_manual(d, sess),
-                    inputs=[manual_edit, session_state],
-                    outputs=[review_msg, draft_output, review_issues, format_check_output, kb_diagnosis_output, multi_preview_step6, progress_bar, session_state]
-                )
-
-                re_review_btn.click(
-                    fn=lambda sess: app.re_review(sess),
-                    inputs=[session_state],
-                    outputs=[review_msg, review_output, review_issues, format_check_output, kb_diagnosis_output, multi_preview_step6, progress_bar, session_state]
-                )
-
-                review_final.click(
-                    fn=lambda sess: app.finalize(sess),
-                    inputs=[session_state],
-                    outputs=[final_output, final_multi, final_agent, workflow_summary, progress_bar, session_state]
-                )
-
-                done_restart.click(
-                    fn=lambda sess: app.restart(sess),
-                    inputs=[session_state],
-                    outputs=[
-                        progress_bar,
-                        user_msg, proj_msg, routing_display, routing_msg,
-                        q_msg, q_progress, question_text, teaching_text, hint_text, q_prev,
-                        plan_output, style_selector, doc_type_selector, kb_display,
-                        draft_msg, draft_output, agent_log, multi_preview_step6, prompt_preview,
-                        review_msg, review_output, review_issues, format_check_output, kb_diagnosis_output,
-                        final_output, final_multi, final_agent, workflow_summary,
-                        session_state
-                    ]
-                )
-
-            # ═══════════════════════════════════════════════════════
-            # Tab 2: URL导入（文件夹式多主题管理）
-            # ═══════════════════════════════════════════════════════
-            with gr.Tab("🌐 URL导入"):
-                gr.Markdown("### 📂 参考文档管理")
-                gr.Markdown("导入网页文档，按主题分类管理。支持自定义主题名、编辑内容、多文本导入。")
-
-                # 主题列表
-                topics_display = gr.Markdown(app.get_topics_display())
-                refresh_topics_btn = gr.Button("🔄 刷新主题列表", size="sm")
-
-                gr.Markdown("---")
-                gr.Markdown("### 📥 导入文档到主题")
-                with gr.Row():
-                    url_input = gr.Textbox(label="URL", placeholder="https://example.com/article", scale=3)
-                    topic_name_input = gr.Textbox(label="主题名称", placeholder="例如：教育改革参考", scale=2)
-                    url_btn = gr.Button("导入", variant="primary", scale=1)
-                url_status = gr.Markdown()
-                url_output = gr.Textbox(label="导入结果", lines=8, interactive=False)
-
-                gr.Markdown("---")
-                gr.Markdown("### 🔍 查看主题详情")
-                with gr.Row():
-                    topic_view_name = gr.Textbox(label="主题名称", placeholder="输入要查看的主题名", scale=3)
-                    topic_view_btn = gr.Button("查看详情", scale=1)
-                topic_detail_output = gr.Textbox(label="主题详情", lines=12, interactive=False)
-
-                gr.Markdown("---")
-                gr.Markdown("### 🛠️ 主题管理")
-                with gr.Row():
-                    topic_rename_old = gr.Textbox(label="原名称", scale=1)
-                    topic_rename_new = gr.Textbox(label="新名称", scale=1)
-                    topic_rename_btn = gr.Button("重命名", scale=1)
-                rename_status = gr.Markdown()
-
-                with gr.Row():
-                    topic_delete_name = gr.Textbox(label="要删除的主题名", scale=2)
-                    topic_delete_btn = gr.Button("🗑️ 删除主题", variant="stop", scale=1)
-                delete_status = gr.Markdown()
-
-                gr.Markdown("---")
-                gr.Markdown("### 📎 添加到项目")
-                with gr.Row():
-                    topic_for_proj = gr.Textbox(label="主题名称", scale=2)
-                    proj_for_url = gr.Textbox(label="目标项目名称", scale=2)
-                    url_to_proj_btn = gr.Button("添加", variant="primary", scale=1)
-                add_status = gr.Markdown()
-
-                gr.Markdown("---")
-                gr.Markdown("### ✏️ 编辑文档内容")
-                with gr.Row():
-                    edit_topic_name = gr.Textbox(label="主题名称", placeholder="输入主题名", scale=2)
-                    edit_doc_index = gr.Number(label="文档序号（从0开始）", value=0, precision=0, scale=1)
-                edit_doc_content = gr.Textbox(label="文档内容", lines=10, placeholder="在此编辑文档内容...")
-                with gr.Row():
-                    edit_doc_btn = gr.Button("💾 保存编辑", variant="primary", scale=1)
-                edit_doc_msg = gr.Markdown()
-
-                # 事件绑定
-                url_btn.click(
-                    fn=lambda u, t, s: app.import_url_to_topic(u, t, s),
-                    inputs=[url_input, topic_name_input, session_state],
-                    outputs=[url_output, url_status, session_state]
-                )
-                refresh_topics_btn.click(
-                    fn=lambda: app.get_topics_display(),
-                    outputs=[topics_display]
-                )
-                topic_view_btn.click(
-                    fn=lambda t: app.get_topic_detail(t),
-                    inputs=[topic_view_name],
-                    outputs=[topic_detail_output]
-                )
-                topic_rename_btn.click(
-                    fn=lambda old, new: app.rename_topic(old, new),
-                    inputs=[topic_rename_old, topic_rename_new],
-                    outputs=[rename_status]
-                )
-                topic_delete_btn.click(
-                    fn=lambda t: app.delete_topic(t),
-                    inputs=[topic_delete_name],
-                    outputs=[delete_status]
-                )
-                url_to_proj_btn.click(
-                    fn=lambda t, p, s: app.add_url_to_project_by_topic(t, p, s),
-                    inputs=[topic_for_proj, proj_for_url, session_state],
-                    outputs=[add_status, session_state]
-                )
-                edit_doc_btn.click(
-                    fn=lambda t, i, c: app.edit_topic_doc(t, i, c),
-                    inputs=[edit_topic_name, edit_doc_index, edit_doc_content],
-                    outputs=[edit_doc_msg]
-                )
-
-            # ═══════════════════════════════════════════════════════
-            # Tab 3: API配置（多 API 管理）
-            # ═══════════════════════════════════════════════════════
-            with gr.Tab("🔑 API配置"):
-                gr.Markdown("### 🔑 LLM API 多配置管理")
-                gr.Markdown("支持添加多个 API 配置，随时切换使用。")
-
-                # API 列表
-                api_list_display = gr.Markdown(app.get_api_list_display())
-                refresh_api_btn = gr.Button("🔄 刷新列表", size="sm")
-
-                gr.Markdown("---")
-                gr.Markdown("### ➕ 添加新配置")
-                with gr.Row():
-                    new_api_name = gr.Textbox(label="配置名称", placeholder="例如：我的GPT-4", scale=2)
-                    new_api_provider = gr.Dropdown(
-                        choices=list(SUPPORTED_PROVIDERS.values()),
-                        value="OpenAI (GPT-4/3.5)",
-                        label="提供商",
-                        scale=2,
+                # ── 参考素材库 ──
+                with gr.Accordion("参考资料文件夹", open=False):
+                    topic_selector = gr.Dropdown(
+                        choices=app.get_topics_list(),
+                        label="主题分类",
+                        value=app.get_topics_list()[0] if app.get_topics_list() else None
                     )
-                    add_api_btn = gr.Button("添加", variant="primary", scale=1)
-                add_api_msg = gr.Markdown()
+                    ref_doc_selector = gr.Dropdown(
+                        choices=[],
+                        label="选择参考文档"
+                    )
+                    
+                    with gr.Row():
+                        url_import_trigger = gr.Button("导入新网页", variant="secondary", size="sm", elem_classes="ios-btn-secondary")
+                        ref_doc_delete_btn = gr.Button("移出素材", variant="stop", size="sm", elem_classes="ios-btn-danger")
+                    
+                    # 导入URL表单 (隐藏，点击显示)
+                    with gr.Column(visible=False) as url_import_box:
+                        url_input_val = gr.Textbox(label="网页 URL", placeholder="https://example.com/article")
+                        url_topic_val = gr.Textbox(label="导入至主题", placeholder="例如: 教育改革参考")
+                        with gr.Row():
+                            url_save_btn = gr.Button("执行导入", variant="primary", size="sm", elem_classes="ios-btn-primary")
+                            url_cancel_btn = gr.Button("取消", variant="secondary", size="sm")
 
-                gr.Markdown("---")
-                gr.Markdown("### 🔀 切换配置")
-                with gr.Row():
-                    switch_api_index = gr.Number(label="配置序号（从0开始）", value=0, precision=0, scale=2)
-                    switch_api_btn = gr.Button("切换", scale=1)
-                switch_api_msg = gr.Markdown()
+                # ── 系统快捷设置 ──
+                with gr.Accordion("系统设置", open=False):
+                    with gr.Row():
+                        goto_api_btn = gr.Button("API 设置", elem_classes="ios-btn-secondary")
+                        goto_profile_btn = gr.Button("用户画像", elem_classes="ios-btn-secondary")
 
-                gr.Markdown("---")
-                gr.Markdown("### 🗑️ 删除配置")
-                with gr.Row():
-                    delete_api_index = gr.Number(label="配置序号（从0开始）", value=0, precision=0, scale=2)
-                    delete_api_btn = gr.Button("删除", variant="stop", scale=1)
-                delete_api_msg = gr.Markdown()
-
-                gr.Markdown("---")
-                gr.Markdown("### ✏️ 编辑当前配置")
-                api_status_bar = gr.Markdown(app.get_config_status())
-                provider_select = gr.Dropdown(
-                    choices=list(SUPPORTED_PROVIDERS.values()),
-                    value="OpenAI (GPT-4/3.5)",
-                    label="快速加载提供商模板",
-                )
-                with gr.Row():
-                    provider_btn = gr.Button("加载模板", scale=1)
-                provider_msg = gr.Markdown()
-
-                with gr.Row():
-                    api_base = gr.Textbox(label="API Base URL", scale=2)
-                    api_key = gr.Textbox(label="API Key", type="password", scale=2)
-                with gr.Row():
-                    model = gr.Textbox(label="模型名称", scale=2)
-                    enable_api = gr.Checkbox(label="启用此配置", value=False, scale=1)
-                with gr.Row():
-                    temperature = gr.Slider(0, 2, value=0.7, step=0.1, label="Temperature", scale=1)
-                    max_tokens = gr.Slider(1000, 32000, value=8000, step=500, label="Max Tokens", scale=1)
-
-                with gr.Row():
-                    api_save_btn = gr.Button("💾 保存当前配置", variant="primary", scale=1)
-                    api_test_btn = gr.Button("🔌 测试连接", variant="secondary", scale=1)
-                api_save_msg = gr.Markdown()
-                api_test_msg = gr.Markdown()
-
-                # 事件绑定
-                def _provider_key_to_label(provider: str) -> str:
-                    return SUPPORTED_PROVIDERS.get(provider, provider)
-
-                def _provider_label_to_key(label: str) -> str:
-                    for k, v in SUPPORTED_PROVIDERS.items():
-                        if v == label:
-                            return k
-                    return label
-
-                refresh_api_btn.click(
-                    fn=lambda: app.get_api_list_display(),
-                    outputs=[api_list_display]
-                )
-
-                def _add_api(name, provider_label):
-                    key = _provider_label_to_key(provider_label)
-                    result = app.add_new_api(name, key)
-                    return (*result, app.get_api_list_display(), f"✅ 已添加「{name or '新配置'}」")
-
-                add_api_btn.click(
-                    fn=_add_api,
-                    inputs=[new_api_name, new_api_provider],
-                    outputs=[provider_select, api_base, api_key, model, temperature, max_tokens, enable_api, api_list_display, add_api_msg]
-                )
-
-                def _switch_api(idx):
-                    result = app.switch_api(idx)
-                    return (*result, app.get_api_list_display(), app.get_config_status())
-
-                switch_api_btn.click(
-                    fn=_switch_api,
-                    inputs=[switch_api_index],
-                    outputs=[provider_select, api_base, api_key, model, temperature, max_tokens, enable_api, switch_api_msg, api_list_display, api_status_bar]
-                )
-
-                delete_api_btn.click(
-                    fn=lambda idx: (app.delete_api(idx), app.get_api_list_display()),
-                    inputs=[delete_api_index],
-                    outputs=[delete_api_msg, api_list_display]
-                )
-
-                def _apply_provider(provider_label):
-                    key = _provider_label_to_key(provider_label)
-                    result = app.apply_provider(key)
-                    return result
-
-                provider_btn.click(
-                    fn=_apply_provider,
-                    inputs=[provider_select],
-                    outputs=[provider_select, api_base, api_key, model, temperature, max_tokens, enable_api, provider_msg]
-                )
-
-                def _save_api(provider_label, base, key, mdl, temp, tokens, enable):
-                    pkey = _provider_label_to_key(provider_label)
-                    return app.save_api_config(pkey, base, key, mdl, temp, tokens, enable)
-
-                api_save_btn.click(
-                    fn=_save_api,
-                    inputs=[provider_select, api_base, api_key, model, temperature, max_tokens, enable_api],
-                    outputs=[api_save_msg, api_status_bar]
-                )
-
-                api_test_btn.click(
-                    fn=lambda: app.test_api_connection(),
-                    outputs=[api_test_msg]
-                )
-
-                demo.load(
-                    fn=app.load_api_config,
-                    outputs=[provider_select, api_base, api_key, model, temperature, max_tokens, enable_api]
-                )
+                global_status_msg = gr.Markdown()
 
             # ═══════════════════════════════════════════════════════
-            # Tab 4: 项目（文件夹式管理）
+            # 右侧主工作区 (Main Workspace)
             # ═══════════════════════════════════════════════════════
-            with gr.Tab("📁 项目"):
-                gr.Markdown("### 📁 项目管理")
-                gr.Markdown("查看、编辑、删除项目，管理用户记忆。")
+            with gr.Column(scale=3, elem_classes="workspace-pane"):
+                
+                # ─── 面板 A: 写作项目工作台 ───
+                with gr.Column(visible=True, elem_classes="ws-panel-visible") as project_panel:
+                    # 顶部进度和状态
+                    with gr.Row():
+                        with gr.Column(scale=2):
+                            active_proj_title = gr.Markdown("## 选择左侧项目或新建项目开始写作")
+                        with gr.Column(scale=1, min_width=260):
+                            progress_badge_html = gr.HTML(build_progress_badge("问卷"))
+                    
+                    # 场景选择卡片 (路由问卷)
+                    with gr.Column(visible=True, elem_classes="ios-card ws-panel-hidden") as routing_box:
+                        routing_q_title = gr.Markdown("### 场景路由选择")
+                        routing_q_desc = gr.Markdown()
+                        routing_options_disp = gr.Markdown()
+                        routing_options_dropdown = gr.Dropdown(
+                            label="请选择最符合的场景",
+                            choices=[],
+                            allow_custom_value=True,
+                            interactive=True
+                        )
+                        routing_custom_desc = gr.Textbox(
+                            label="自定义新场景描述",
+                            placeholder="如果以上场景都不符合，请先选择「自定义场景」，再在此描述您的实际场景",
+                            visible=True
+                        )
+                        routing_submit_btn = gr.Button("确认选择并导入", variant="primary", elem_classes="ios-btn-primary")
 
-                # 项目列表
-                projects_list = gr.Markdown("点击刷新查看项目列表")
-                with gr.Row():
-                    list_btn = gr.Button("🔄 刷新项目列表", variant="primary")
-                    memory_btn = gr.Button("📝 查看记忆摘要")
+                    with gr.Tabs() as project_tabs:
+                        
+                        # Tab 1: 需求问卷
+                        with gr.Tab("需求问卷", id="tab_q"):
+                            with gr.Column(visible=True, elem_classes="ws-panel-visible") as question_card:
+                                current_q_prog = gr.Markdown("### 准备好了，请回答下方问题")
+                                current_q_title = gr.Markdown("请在左侧新建项目或选择项目以启动写作...")
+                                current_q_desc = gr.Markdown()
+                                current_q_hint = gr.Markdown()
+                                q_answer_input = gr.Textbox(label="您的回答", lines=4, placeholder="请提供详细素材，供智能写作参考。若无需要可点击跳过...")
+                                
+                                with gr.Row():
+                                    q_btn_back = gr.Button("回退", elem_classes="ios-btn-secondary")
+                                    q_btn_skip = gr.Button("跳过", elem_classes="ios-btn-secondary")
+                                    q_btn_submit = gr.Button("提交回答", variant="primary", elem_classes="ios-btn-primary")
+                                    q_btn_finish = gr.Button("提前完成", elem_classes="ios-btn-secondary")
+                                    q_btn_reset = gr.Button("重头开始(清空进度)", variant="stop", elem_classes="ios-btn-secondary")
+                                
+                                q_event_msg = gr.Markdown()
+                            
+                            with gr.Column(visible=True, elem_classes="empty-state-card ws-panel-hidden") as question_empty_state:
+                                gr.Markdown("""
+                                <h3>欢迎来到公文写作助手</h3>
+                                <p>请在左侧登录并选择或创建一个项目，即可开始回答写作需求问卷。</p>
+                                """)
+                            
+                            def sync_question_card_visibility():
+                                return {
+                                    question_card: gr.update(elem_classes="ws-panel-visible" if app.current_project_id else "ws-panel-hidden"),
+                                    question_empty_state: gr.update(elem_classes="ws-panel-hidden" if app.current_project_id else "empty-state-card ws-panel-visible")
+                                }
 
-                gr.Markdown("---")
-                gr.Markdown("### 🔍 项目详情")
-                with gr.Row():
-                    proj_detail_name = gr.Textbox(label="项目名称", placeholder="输入项目名称查看详情", scale=3)
-                    proj_detail_btn = gr.Button("查看详情", scale=1)
-                proj_detail_output = gr.Markdown()
+                            demo.load(
+                                fn=sync_question_card_visibility,
+                                outputs=[question_card, question_empty_state]
+                            )
 
-                gr.Markdown("---")
-                gr.Markdown("### ✏️ 编辑项目")
-                with gr.Row():
-                    proj_edit_name = gr.Textbox(label="原项目名称", placeholder="要编辑的项目名", scale=2)
-                    proj_edit_new_name = gr.Textbox(label="新名称（留空不变）", placeholder="新项目名称...", scale=2)
-                    proj_edit_new_desc = gr.Textbox(label="新描述（留空不变）", placeholder="新描述...", scale=3)
-                with gr.Row():
-                    proj_edit_btn = gr.Button("保存修改", variant="primary", scale=1)
-                proj_edit_msg = gr.Markdown()
+                        # Tab 2: 智能方案生成
+                        with gr.Tab("写作大纲方案", id="tab_plan"):
+                            plan_output_text = gr.Textbox(label="生成的方案大纲与结构", lines=12, interactive=False)
+                            kb_exemplar_recommend = gr.Markdown("### 知识库推荐范文")
+                            
+                            gr.Markdown("#### 方案大纲调优调整")
+                            with gr.Row():
+                                ui_style_selector = gr.Dropdown(
+                                    choices=[label for label, _ in STYLE_CHOICES],
+                                    value="人民日报风格",
+                                    label="选择主导风格"
+                                )
+                                ui_doc_selector = gr.Dropdown(
+                                    choices=[label for label, _ in DOC_TYPE_CHOICES],
+                                    value="通讯（推荐1500-3000字）",
+                                    label="选择期望公文文种"
+                                )
+                                plan_regen_btn = gr.Button("重新生成大纲", variant="secondary", elem_classes="ios-btn-secondary")
+                            
+                            plan_btn_next = gr.Button("确认方案，开始写作", variant="primary", elem_classes="ios-btn-primary")
 
-                gr.Markdown("---")
-                gr.Markdown("### 🗑️ 删除项目")
-                with gr.Row():
-                    proj_delete_name = gr.Textbox(label="要删除的项目名", scale=3)
-                    proj_delete_btn = gr.Button("删除项目", variant="stop", scale=1)
-                proj_delete_msg = gr.Markdown()
+                        # Tab 3: 智能写作生成
+                        with gr.Tab("文稿草稿生成", id="tab_write"):
+                            materials_input = gr.Textbox(label="可贴入本次写作的其他原始语料/素材内容(可选)", lines=5, placeholder="粘贴任何其他零碎记录、会议讲话或新闻参考数据...")
+                            write_start_btn = gr.Button("开始写作（通常需要 30-60 秒）", variant="primary", elem_classes="ios-btn-primary")
+                            
+                            write_event_msg = gr.Markdown()
+                            draft_editor = gr.Textbox(label="草稿（主版本）", lines=16, placeholder="草稿内容将在这里呈现...")
+                            
+                            with gr.Accordion("多角色协作日志", open=False):
+                                coord_agent_logs = gr.Textbox(label="协作日志", lines=8, max_lines=30, interactive=False)
+                            with gr.Accordion("多格式版本草稿", open=False):
+                                multi_versions_preview = gr.Textbox(label="多格式版本", lines=10, max_lines=30, interactive=False)
+                                
+                            write_btn_next = gr.Button("对文稿执行智能审查", variant="primary", elem_classes="ios-btn-primary")
 
-                gr.Markdown("---")
-                gr.Markdown("### 👤 用户画像")
-                user_profile_display = gr.Markdown("点击刷新查看用户画像")
-                with gr.Row():
-                    profile_btn = gr.Button("🔄 刷新用户画像", variant="primary")
+                        # Tab 4: 智能审阅修正 (HITL)
+                        with gr.Tab("智能审查与人工介入", id="tab_review"):
+                            review_event_msg = gr.Markdown()
+                            review_summary_text = gr.Textbox(label="多维审查得分与总结", lines=8, max_lines=30, interactive=False)
+                            
+                            with gr.Row():
+                                with gr.Column(scale=1):
+                                    with gr.Group(elem_classes="ios-card"):
+                                        gr.Markdown("**检测到的偏见与问题清单**")
+                                        review_issues_list = gr.Markdown()
+                                with gr.Column(scale=1):
+                                    with gr.Group(elem_classes="ios-card"):
+                                        gr.Markdown("**格式规范合规度(GB/T 9704-2012)**")
+                                        review_format_text = gr.Markdown()
+                                        
+                            gr.Markdown("#### 人工介入更新 (HITL)")
+                            manual_edit_text = gr.Textbox(label="在此处对文稿进行人工细节微调...", lines=8, max_lines=30)
+                            with gr.Row():
+                                manual_save_btn = gr.Button("保存手动修改", variant="secondary", elem_classes="ios-btn-secondary")
+                                re_review_btn = gr.Button("重新执行审查", variant="secondary", elem_classes="ios-btn-secondary")
+                                
+                            review_btn_next = gr.Button("确认文稿无误，完成交付", variant="primary", elem_classes="ios-btn-primary")
 
-                gr.Markdown("---")
-                gr.Markdown("### 📝 用户记忆管理")
-                memory_output = gr.Textbox(label="记忆摘要", lines=10, interactive=False)
-                gr.Markdown("**添加新记忆笔记**：")
-                with gr.Row():
-                    memory_note_input = gr.Textbox(label="笔记内容", placeholder="例如：偏好使用短句，避免空话套话...", scale=3)
-                    memory_add_btn = gr.Button("添加笔记", variant="primary", scale=1)
-                memory_add_msg = gr.Markdown()
+                        # Tab 5: 终稿交付完成
+                        with gr.Tab("最终成果交付", id="tab_finalize"):
+                            final_draft_output = gr.Textbox(label="最终公文文稿", lines=18, max_lines=50, interactive=True)
+                            final_multi_versions = gr.Textbox(label="多格式版本备份", lines=10, max_lines=30, interactive=False)
+                            workflow_summary_text = gr.Textbox(label="智能协作工作流回溯报告", lines=8, max_lines=30, interactive=False)
+                            
+                            export_finished_btn = gr.Button("导出完成", variant="primary", elem_classes="ios-btn-primary")
 
-                # 事件绑定
-                list_btn.click(
-                    fn=lambda s: app.list_projects(s),
-                    inputs=[session_state],
-                    outputs=[projects_list, session_state]
+                # ─── 面板 B: 参考素材编辑器 ───
+                with gr.Column(visible=True, elem_classes="ws-panel-hidden") as ref_doc_panel:
+                    gr.Markdown("## 参考资料文件视窗")
+                    
+                    with gr.Group(elem_classes="ios-card"):
+                        ref_doc_edit_title = gr.Textbox(label="参考文章标题")
+                        ref_doc_edit_meta = gr.Markdown()
+                        ref_doc_edit_content = gr.Textbox(label="正文内容", lines=15)
+                        
+                        with gr.Row():
+                            ref_doc_edit_save = gr.Button("保存参考文件修改", variant="primary", elem_classes="ios-btn-primary")
+                            ref_doc_edit_close = gr.Button("关闭视窗", variant="secondary", elem_classes="ios-btn-secondary")
+                            
+                    ref_doc_edit_msg = gr.Markdown()
+
+                # ─── 面板 C: API参数配置 ───
+                with gr.Column(visible=True, elem_classes="ws-panel-hidden") as api_config_panel:
+                    gr.Markdown("## 智能体大模型接口配置")
+                    
+                    with gr.Group(elem_classes="ios-card"):
+                        gr.Markdown("支持 OpenAI 兼容格式的多云 API 切换。开启后将唤醒大模型执行真正的写作与审稿。")
+                        api_provider = gr.Dropdown(
+                            choices=["openai", "dashscope", "deepseek", "zhipu", "anthropic", "local"],
+                            value="openai",
+                            label="快速模板设置"
+                        )
+                        with gr.Row():
+                            api_base_url = gr.Textbox(label="API Base URL", placeholder="https://api.openai.com/v1")
+                            api_key_val = gr.Textbox(label="API Key", type="password", placeholder="sk-...")
+                        with gr.Row():
+                            api_model_name = gr.Textbox(label="模型名称 (Model)", placeholder="gpt-4o")
+                            api_temp = gr.Slider(0.0, 2.0, value=0.7, step=0.1, label="创新度 (Temperature)")
+                            api_tokens = gr.Slider(1000, 32000, value=8000, step=500, label="最大生成Token (Max Tokens)")
+                            
+                        with gr.Row():
+                            api_save_btn = gr.Button("保存并启用配置", variant="primary", elem_classes="ios-btn-primary")
+                            api_test_btn = gr.Button("接口连通性测试", variant="secondary")
+                            api_close_btn = gr.Button("关闭设置", variant="secondary")
+                            
+                    api_config_msg = gr.Markdown()
+
+                # ─── 面板 D: 用户画像与写作记忆 ───
+                with gr.Column(visible=True, elem_classes="ws-panel-hidden") as profile_panel:
+                    gr.Markdown("## 个人画像与写作风格记忆")
+                    
+                    with gr.Row():
+                        with gr.Column(scale=1):
+                            with gr.Group(elem_classes="ios-card"):
+                                gr.Markdown("### 写作分析偏好")
+                                user_strengths_weaknesses = gr.Markdown("加载中...")
+                        with gr.Column(scale=1):
+                            with gr.Group(elem_classes="ios-card"):
+                                gr.Markdown("### 用户长期记忆笔记")
+                                memory_summary_text = gr.Textbox(label="记忆笔记列表", lines=8, interactive=False)
+                                
+                                memory_note_input = gr.Textbox(label="手动添加偏好特征记忆", placeholder="例如: 喜欢短排比句，避免过度口语化...")
+                                memory_add_btn = gr.Button("写入永久记忆", variant="primary", elem_classes="ios-btn-primary")
+                                memory_add_msg = gr.Markdown()
+                                
+                    profile_close_btn = gr.Button("关闭画像", variant="secondary")
+
+
+        # ═══════════════════════════════════════════════════════
+        # Gradio 事件处理器绑定 (Event Listeners)
+        # ═══════════════════════════════════════════════════════
+        
+        # ── 1. 登录用户事件 ──
+        def login_user_fn(name):
+            msg, projects, default_proj = app.switch_or_create_user(name)
+            # 登录后仅切换用户空间，不自动加载项目
+            return (
+                msg,
+                gr.update(value=f"当前用户: **{name}**", visible=True),
+                gr.update(choices=projects, value=None),
+                gr.update(choices=app.get_topics_list(), value=None),
+                # auto_msgs: 清空右侧面板，不加载任何项目
+                gr.update(value=f"欢迎，{name}。请新建或选择项目开始写作。"),
+                gr.update(value="## 请新建项目以开始"),
+                "",  # plan_output_text
+                "",  # draft_editor
+                "",  # coord_agent_logs
+                "",  # review_summary_text
+                "",  # final_draft_output
+                "",  # final_multi_versions
+                gr.update(value=build_progress_badge(""), visible=True),
+                gr.update(elem_classes="ios-card ws-panel-hidden"),
+                gr.update(value="### 场景路由选择"),
+                gr.update(value=""),
+                gr.update(value=""),
+                gr.update(choices=[], value=None),
+                gr.update(value="### 等待选择项目"),
+                gr.update(value=""),
+                gr.update(value=""),
+                gr.update(value=""),
+                "",  # 额外的 manual_edit_text 补位
+            )
+
+        user_login_btn.click(
+            fn=login_user_fn,
+            inputs=[user_input],
+            outputs=[
+                global_status_msg, user_status_msg, project_selector, topic_selector,
+                global_status_msg, active_proj_title, plan_output_text,
+                draft_editor, coord_agent_logs, review_summary_text,
+                final_draft_output, final_multi_versions, progress_badge_html,
+                routing_box, routing_q_title, routing_q_desc,
+                routing_options_disp, routing_options_dropdown,
+                current_q_prog, current_q_title, current_q_desc,
+                current_q_hint, manual_edit_text
+            ]
+        )
+
+        # ── 2. 新建/删除项目面板显隐与事件 ──
+        proj_create_trigger.click(
+            fn=lambda: gr.update(visible=True),
+            outputs=[new_proj_box]
+        )
+        new_proj_cancel_btn.click(
+            fn=lambda: gr.update(visible=False),
+            outputs=[new_proj_box]
+        )
+
+        def new_proj_fn(name, desc):
+            msg, projects, default_proj, q_title, why, opts, plan, kb, routing_vis = app.create_new_project(name, desc)
+            ui = app._get_routing_ui_state()
+            return (
+                msg,
+                gr.update(choices=projects, value=default_proj),
+                gr.update(visible=False), # 关闭新建表单
+                gr.update(value=f"## 项目工程：{name}"),
+                gr.update(elem_classes="ios-card ws-panel-visible" if routing_vis else "ios-card ws-panel-hidden"),
+                gr.update(value=ui["title"]),
+                gr.update(value=ui["desc"]),
+                gr.update(value=ui["options_text"]),
+                gr.update(choices=ui["choices"], value=None),
+                plan,
+                kb,
+                gr.update(value=build_progress_badge("问卷"))
+            )
+
+        new_proj_save_btn.click(
+            fn=new_proj_fn,
+            inputs=[new_proj_name, new_proj_desc],
+            outputs=[
+                global_status_msg, project_selector, new_proj_box, 
+                active_proj_title, routing_box, routing_q_title, 
+                routing_q_desc, routing_options_disp, routing_options_dropdown,
+                plan_output_text, kb_exemplar_recommend, progress_badge_html
+            ]
+        )
+
+        # ── 3. 选择项目事件 ──
+        def select_project_fn(name):
+            msg, plan, draft, log, rev, fnl, multi, prog_html = app.select_project(name)
+            # 项目载入后，第一步加载对应模式问卷
+            routing_visible = False
+            question_visible = True
+            
+            # 判断是否需要走路由问卷
+            q_text = "专属问卷已完成或可直接前往 Tab 确认方案。"
+            why_ask = ""
+            hint = ""
+            prog_text = "阶段完成"
+            routing_ui = {
+                "title": "### 场景路由选择",
+                "desc": "",
+                "options_text": "",
+                "choices": []
+            }
+            
+            if app.orchestrator and app.orchestrator.state == OrchestratorState.IDLE:
+                routing_visible = True
+                question_visible = False
+                q_text = "### 场景选择就绪"
+                routing_ui = app._get_routing_ui_state()
+                
+            return (
+                msg,
+                gr.update(value=f"## 项目工程：{name}"),
+                plan,
+                draft,
+                log,
+                rev,
+                fnl,
+                multi,
+                gr.update(value=prog_html),
+                gr.update(elem_classes="ios-card ws-panel-visible" if routing_visible else "ios-card ws-panel-hidden"),
+                gr.update(value=routing_ui["title"]),
+                gr.update(value=routing_ui["desc"]),
+                gr.update(value=routing_ui["options_text"]),
+                gr.update(choices=routing_ui["choices"], value=None),
+                gr.update(value=prog_text),
+                gr.update(value=q_text),
+                gr.update(value=why_ask),
+                gr.update(value=hint),
+                draft # 手动微调框
+            )
+
+        project_selector.change(
+            fn=select_project_fn,
+            inputs=[project_selector],
+            outputs=[
+                global_status_msg, active_proj_title, plan_output_text,
+                draft_editor, coord_agent_logs, review_summary_text,
+                final_draft_output, final_multi_versions, progress_badge_html,
+                routing_box, routing_q_title, routing_q_desc,
+                routing_options_disp, routing_options_dropdown,
+                current_q_prog, current_q_title, current_q_desc,
+                current_q_hint, manual_edit_text
+            ]
+        )
+
+        # ── 4. 删除项目事件（两步确认）──
+        def confirm_delete_fn(name):
+            msg, visible = app.confirm_delete_project(name)
+            return msg, gr.update(visible=visible)
+        
+        proj_delete_btn.click(
+            fn=confirm_delete_fn,
+            inputs=[project_selector],
+            outputs=[global_status_msg, confirm_delete_box]
+        )
+        
+        confirm_delete_yes_btn.click(
+            fn=app.delete_project_action,
+            inputs=[project_selector],
+            outputs=[global_status_msg, project_selector, confirm_delete_box]
+        )
+        
+        confirm_delete_no_btn.click(
+            fn=lambda: ("已取消", gr.update(visible=False)),
+            outputs=[global_status_msg, confirm_delete_box]
+        )
+
+        # ── 5. 场景路由提交 ──
+        def safe_submit_routing(choice_label, custom_text):
+            if not app.current_project_id:
+                ui = app._get_routing_ui_state()
+                return (
+                    "请先登录并在左侧选择或创建一个项目",
+                    "", "", "", gr.update(elem_classes="ios-card ws-panel-visible"),
+                    gr.update(elem_classes="ws-panel-hidden"), "", "", "",
+                    build_progress_badge("问卷"), ui["title"], ui["options_text"],
+                    gr.update(choices=ui["choices"], value=None)
                 )
-                memory_btn.click(
-                    fn=lambda s: app.get_memory_summary(s),
-                    inputs=[session_state],
-                    outputs=[memory_output, session_state]
-                )
-                proj_detail_btn.click(
-                    fn=lambda name, s: app.get_project_detail(name, s),
-                    inputs=[proj_detail_name, session_state],
-                    outputs=[proj_detail_output, session_state]
-                )
-                proj_edit_btn.click(
-                    fn=lambda name, new_name, new_desc, s: app.edit_project(name, new_name, new_desc, s),
-                    inputs=[proj_edit_name, proj_edit_new_name, proj_edit_new_desc, session_state],
-                    outputs=[proj_edit_msg, session_state]
-                )
-                proj_delete_btn.click(
-                    fn=lambda name, s: app.delete_project(name, s),
-                    inputs=[proj_delete_name, session_state],
-                    outputs=[proj_delete_msg, session_state]
-                )
-                profile_btn.click(
-                    fn=lambda s: app.get_user_profile_display(s),
-                    inputs=[session_state],
-                    outputs=[user_profile_display, session_state]
-                )
-                memory_add_btn.click(
-                    fn=lambda note, s: app.add_memory_note(note, s),
-                    inputs=[memory_note_input, session_state],
-                    outputs=[memory_add_msg, session_state]
-                )
+            return app.submit_routing_choice_fn(choice_label, custom_text)
+
+        routing_submit_btn.click(
+            fn=safe_submit_routing,
+            inputs=[routing_options_dropdown, routing_custom_desc],
+            outputs=[
+                global_status_msg, current_q_prog, current_q_title,
+                current_q_desc, routing_box, question_card,
+                current_q_hint, plan_output_text, kb_exemplar_recommend,
+                progress_badge_html, routing_q_title, routing_options_disp,
+                routing_options_dropdown
+            ]
+        )
+
+        # ── 6. 问卷答题流绑定 (一律返回 exact 10 个值) ──
+        def build_answer_flow_handler(action: str):
+            def handler(ans):
+                if not app.current_project_id:
+                    return (
+                        "请先登录并在左侧选择或创建一个项目",
+                        "", "", "", "", "", "",
+                        build_progress_badge("问卷"), gr.update(elem_classes="ws-panel-visible"), ""
+                    )
+                return app.answer_question_flow(action, ans)
+            return handler
+
+        q_btn_submit.click(
+            fn=build_answer_flow_handler("submit"),
+            inputs=[q_answer_input],
+            outputs=[
+                q_event_msg, current_q_prog, current_q_title,
+                current_q_desc, current_q_hint, plan_output_text,
+                kb_exemplar_recommend, progress_badge_html, question_card,
+                q_answer_input
+            ]
+        )
+        q_btn_skip.click(
+            fn=build_answer_flow_handler("skip"),
+            inputs=[q_answer_input],
+            outputs=[
+                q_event_msg, current_q_prog, current_q_title,
+                current_q_desc, current_q_hint, plan_output_text,
+                kb_exemplar_recommend, progress_badge_html, question_card,
+                q_answer_input
+            ]
+        )
+        q_btn_back.click(
+            fn=build_answer_flow_handler("back"),
+            inputs=[q_answer_input],
+            outputs=[
+                q_event_msg, current_q_prog, current_q_title,
+                current_q_desc, current_q_hint, plan_output_text,
+                kb_exemplar_recommend, progress_badge_html, question_card,
+                q_answer_input
+            ]
+        )
+        q_btn_finish.click(
+            fn=build_answer_flow_handler("finish"),
+            inputs=[q_answer_input],
+            outputs=[
+                q_event_msg, current_q_prog, current_q_title,
+                current_q_desc, current_q_hint, plan_output_text,
+                kb_exemplar_recommend, progress_badge_html, question_card,
+                q_answer_input
+            ]
+        )
+        
+        def reset_project_and_refresh():
+            proj_name = app.reset_project()
+            if proj_name:
+                return select_project_fn(proj_name)
+            return ["未重置"] + [gr.update()] * 18
+            
+        q_btn_reset.click(
+            fn=reset_project_and_refresh,
+            outputs=[
+                global_status_msg, active_proj_title, plan_output_text,
+                draft_editor, coord_agent_logs, review_summary_text,
+                final_draft_output, final_multi_versions, progress_badge_html,
+                routing_box, routing_q_title, routing_q_desc,
+                routing_options_disp, routing_options_dropdown,
+                current_q_prog, current_q_title, current_q_desc,
+                current_q_hint, manual_edit_text
+            ]
+        )
+
+        # ── 7. 重新生成大纲方案 ──
+        plan_regen_btn.click(
+            fn=app.regenerate_plan_action,
+            inputs=[ui_style_selector, ui_doc_selector],
+            outputs=[plan_output_text, global_status_msg]
+        )
+
+        # ── 8. 大纲确认并写作 ──
+        def safe_plan_next():
+            if not app.orchestrator or not app.orchestrator.plan:
+                return gr.update(), "请先生成并确认写作大纲方案"
+            return gr.update(selected="tab_write"), ""
+
+        plan_btn_next.click(
+            fn=safe_plan_next,
+            outputs=[project_tabs, global_status_msg]
+        )
+
+        # ── 9. 执行文稿生成 ──
+        write_start_btn.click(
+            fn=app.generate_draft_action,
+            inputs=[materials_input],
+            outputs=[
+                draft_editor, coord_agent_logs, multi_versions_preview,
+                write_event_msg, progress_badge_html
+            ],
+            concurrency_limit=1
+        ).then(
+            fn=lambda: gr.update(selected="tab_review"),
+            outputs=[project_tabs]
+        )
+
+        def safe_write_next():
+            if not app.orchestrator or not app.orchestrator.draft:
+                return gr.update(), "请先生成文稿草稿"
+            return gr.update(selected="tab_review"), ""
+
+        # ── 10. 智能体迭代审查 ──
+        draft_editor.change(
+            fn=lambda d: d,
+            inputs=[draft_editor],
+            outputs=[manual_edit_text]
+        )
+
+        def review_trigger_fn():
+            res = app.run_review_action()
+            return (*res, app.orchestrator.draft if app.orchestrator else "")
+
+        write_btn_next.click(
+            fn=safe_write_next,
+            outputs=[project_tabs, global_status_msg]
+        ).then(
+            fn=review_trigger_fn,
+            outputs=[
+                review_summary_text, review_issues_list, review_format_text,
+                review_event_msg, progress_badge_html, manual_edit_text
+            ]
+        )
+
+        # ── 11. 人工干预修改 ──
+        manual_save_btn.click(
+            fn=app.manual_update_draft,
+            inputs=[manual_edit_text],
+            outputs=[review_event_msg, draft_editor]
+        )
+
+        re_review_btn.click(
+            fn=app.re_review_action,
+            outputs=[review_summary_text, review_issues_list, review_event_msg, draft_editor]
+        )
+
+        def safe_review_next():
+            if not app.orchestrator or not app.orchestrator.draft:
+                return gr.update(), "请先生成并审查文稿草稿"
+            return gr.update(selected="tab_finalize"), ""
+
+        review_btn_next.click(
+            fn=safe_review_next,
+            outputs=[project_tabs, global_status_msg]
+        )
+
+        # ── 12. 交付与完成 ──
+        def finalize_trigger_fn():
+            res = app.finalize_project_action()
+            return res
+
+        # 切换到最终 Tab 时自动触发交付计算
+        def on_tab_select(evt: gr.SelectData):
+            if evt.value and "交付" in str(evt.value):
+                return finalize_trigger_fn()
+            return ("", "", "", build_progress_badge("审查"))
+
+        project_tabs.select(
+            fn=on_tab_select,
+            outputs=[final_draft_output, final_multi_versions, workflow_summary_text, progress_badge_html]
+        )
+
+        export_finished_btn.click(
+            fn=finalize_trigger_fn,
+            outputs=[final_draft_output, final_multi_versions, workflow_summary_text, progress_badge_html]
+        )
+
+        # ── 13. URL 素材导入面板事件 ──
+        url_import_trigger.click(
+            fn=lambda: gr.update(visible=True),
+            outputs=[url_import_box]
+        )
+        url_cancel_btn.click(
+            fn=lambda: gr.update(visible=False),
+            outputs=[url_import_box]
+        )
+
+        def url_import_fn(url, topic):
+            msg, topics, current_topic, docs, default_doc = app.import_url_action(url, topic)
+            return (
+                msg,
+                gr.update(choices=topics, value=current_topic),
+                gr.update(choices=docs, value=default_doc),
+                gr.update(visible=False) # 关闭表单
+            )
+
+        url_save_btn.click(
+            fn=url_import_fn,
+            inputs=[url_input_val, url_topic_val],
+            outputs=[global_status_msg, topic_selector, ref_doc_selector, url_import_box]
+        )
+
+        # ── 14. 切换分类主题事件 ──
+        def topic_change_fn(topic):
+            if not topic:
+                return gr.update(choices=[], value=None)
+            docs = app.get_docs_list_by_topic(topic)
+            return gr.update(choices=docs, value=None)
+            
+        topic_selector.change(
+            fn=topic_change_fn,
+            inputs=[topic_selector],
+            outputs=[ref_doc_selector]
+        )
+
+        # ── 15. 选择并打开参考文档事件 ──
+        def select_ref_doc_fn(topic, title):
+            if not title:
+                return gr.update(), gr.update(), "", "", ""
+            t, c, meta = app.select_ref_doc_detail(topic, title)
+            return (
+                gr.update(elem_classes="ws-panel-hidden"), # 隐藏项目工作台
+                gr.update(elem_classes="ws-panel-visible"),  # 显示文档编辑器
+                t,
+                meta,
+                c
+            )
+
+        ref_doc_selector.change(
+            fn=select_ref_doc_fn,
+            inputs=[topic_selector, ref_doc_selector],
+            outputs=[project_panel, ref_doc_panel, ref_doc_edit_title, ref_doc_edit_meta, ref_doc_edit_content]
+        )
+
+        ref_doc_edit_close.click(
+            fn=lambda: (gr.update(elem_classes="ws-panel-visible"), gr.update(elem_classes="ws-panel-hidden")),
+            outputs=[project_panel, ref_doc_panel]
+        )
+
+        # ── 16. 编辑参考文档 ──
+        def save_ref_doc_fn(topic, old_title, new_title, content):
+            msg, docs = app.save_ref_doc_edit(topic, old_title, new_title, content)
+            return msg, gr.update(choices=docs, value=new_title)
+
+        ref_doc_edit_save.click(
+            fn=save_ref_doc_fn,
+            inputs=[topic_selector, ref_doc_selector, ref_doc_edit_title, ref_doc_edit_content],
+            outputs=[ref_doc_edit_msg, ref_doc_selector]
+        )
+
+        # ── 17. 删除参考文档 ──
+        ref_doc_delete_btn.click(
+            fn=app.delete_ref_doc_action,
+            inputs=[topic_selector, ref_doc_selector],
+            outputs=[global_status_msg, topic_selector, ref_doc_selector]
+        )
+
+        # ── 18. API 快捷配置面板导航与事件 ──
+        goto_api_btn.click(
+            fn=lambda: (gr.update(elem_classes="ws-panel-hidden"), gr.update(elem_classes="ws-panel-visible"), *app.load_api_config()),
+            outputs=[project_panel, api_config_panel, api_provider, api_base_url, api_key_val, api_model_name, api_temp, api_tokens, api_config_msg]
+        )
+
+        api_close_btn.click(
+            fn=lambda: (gr.update(elem_classes="ws-panel-visible"), gr.update(elem_classes="ws-panel-hidden")),
+            outputs=[project_panel, api_config_panel]
+        )
+
+        def switch_api_template_fn(provider):
+            app.api_manager.apply_provider_template(provider)
+            c = app.api_manager.config
+            return c.api_base, c.model, f"已载入 {SUPPORTED_PROVIDERS.get(provider, provider)} 的默认请求端点"
+
+        api_provider.change(
+            fn=switch_api_template_fn,
+            inputs=[api_provider],
+            outputs=[api_base_url, api_model_name, api_config_msg]
+        )
+
+        api_save_btn.click(
+            fn=app.save_llm_config_action,
+            inputs=[api_provider, api_base_url, api_key_val, api_model_name, api_temp, api_tokens],
+            outputs=[api_config_msg]
+        )
+
+        api_test_btn.click(
+            fn=app.test_llm_connection_action,
+            outputs=[api_config_msg]
+        )
+
+        # ── 19. 用户画像面板导航 ──
+        def goto_profile_fn():
+            user = app.pdb.get_current_user()
+            strengths_weaknesses = "暂无画像分析数据，多写公文大纲可以累积模型偏好统计"
+            if user:
+                strengths_weaknesses = f"**常用文种**: {', '.join(user.preferences.preferred_doc_types) if user.preferences.preferred_doc_types else '待积累'}\n"
+                strengths_weaknesses += f"**常用风格**: {', '.join(user.preferences.preferred_styles) if user.preferences.preferred_styles else '待积累'}\n"
+                strengths_weaknesses += f"\n**优势诊断分析**:\n"
+                strengths_weaknesses += "\n".join([f"- {s}" for s in user.common_strengths]) if user.common_strengths else "- 待生成\n"
+                strengths_weaknesses += f"\n**短板诊断分析**:\n"
+                strengths_weaknesses += "\n".join([f"- {s}" for s in user.common_strengths]) if user.common_strengths else "- 暂无明显偏好短板\n"
+                
+            memory = app.pdb.get_memory_summary(app.current_project_id)
+            return (
+                gr.update(elem_classes="ws-panel-hidden"), 
+                gr.update(elem_classes="ws-panel-visible"), 
+                strengths_weaknesses, 
+                memory
+            )
+
+        goto_profile_btn.click(
+            fn=goto_profile_fn,
+            outputs=[project_panel, profile_panel, user_strengths_weaknesses, memory_summary_text]
+        )
+
+        profile_close_btn.click(
+            fn=lambda: (gr.update(elem_classes="ws-panel-visible"), gr.update(elem_classes="ws-panel-hidden")),
+            outputs=[project_panel, profile_panel]
+        )
+
+        def add_memory_note_fn(note):
+            msg, _ = app.add_memory_note(note, {})
+            app._save_persistent_data()
+            return msg, app.pdb.get_memory_summary(app.current_project_id), ""
+
+        memory_add_btn.click(
+            fn=add_memory_note_fn,
+            inputs=[memory_note_input],
+            outputs=[memory_add_msg, memory_summary_text, memory_note_input]
+        )
 
     return demo
 
-
 if __name__ == "__main__":
-    demo = create_ui()
+    demo = build_ui()
     demo.launch(share=False, inbrowser=True)

@@ -403,14 +403,50 @@ class DocumentTypeIdentifier:
             scores[DocumentType.FEATURE] = 0.5
 
         ranked = sorted(
-            [(self.profiles[dt], score) for dt, score in scores.items()],
+            [(self.profiles[dt], score) for dt, score in scores.items() if dt in self.profiles],
             key=lambda x: x[1],
             reverse=True,
         )
         return ranked
 
     def get_profile(self, doc_type: DocumentType) -> DocTypeProfile:
-        return self.profiles[doc_type]
+        if doc_type in self.profiles:
+            return self.profiles[doc_type]
+        
+        # 动态为未在 profiles 中显式配置的行政公文类型生成默认 Profile，防止 KeyError
+        name_cn_map = {
+            DocumentType.NOTIFICATION: "通知",
+            DocumentType.REQUEST: "请示",
+            DocumentType.REPLY: "批复",
+            DocumentType.LETTER: "函",
+            DocumentType.MEETING_MINUTES: "会议纪要",
+            DocumentType.CIRCULAR: "通报",
+            DocumentType.ANNOUNCEMENT: "公告",
+            DocumentType.DECISION: "决定",
+            DocumentType.REPORT: "报告",
+            DocumentType.OPINION: "意见",
+            DocumentType.MOTION: "议案",
+        }
+        name_cn = name_cn_map.get(doc_type, doc_type.value)
+        
+        return DocTypeProfile(
+            doc_type=doc_type,
+            name_cn=name_cn,
+            description=f"关于{name_cn}的行政行文规范",
+            typical_length_range=(500, 1500),
+            structure_mode="依据→事项→要求（三段式标准结构）",
+            benchmark_media="党政机关行文规范",
+            applicable_scenarios=[f"发布、传达{name_cn}要求或办理相关事项"],
+            key_features=[
+                "严格遵循党政机关公文格式规范与国家标准",
+                "表达清晰准确，语言严谨平实",
+                "包含完整的标题、主送机关、正文与落款",
+            ],
+            opening_template="【标题】发文机关名称+事由+文种\n【引言】交代行文依据、目的及宗旨",
+            body_template="【正文部分】按条列出具体的事项、办法、程序和要求",
+            closing_template="【结语与落款】规范结语（如'特此通知'、'妥否，请批示'），并署名成文日期",
+            audience_focus={"internal": "明确事项细节", "upward": "呈报待批示"},
+        )
 
     def get_all_profiles(self) -> List[DocTypeProfile]:
         return list(self.profiles.values())

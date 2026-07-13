@@ -25,7 +25,7 @@ from .writing_mode import (
     get_mode_profile,
     ALL_PRINCIPLES,
 )
-from ..utils.response_cache import cached_prompt, store_prompt
+from ..utils.response_cache import cached_prompt
 
 
 class ReviewSeverity(Enum):
@@ -272,7 +272,7 @@ OBJECTIVE_ERROR_DB = {
     "conclusion_without_evidence": {
         "patterns": [],
         "diagnosis": "结论缺少数据或案例支撑",
-        "prescription": "每个结论必须附带数据来源或案例引用。建议格式：'……（数据来源：XX报告/XX部门统计）'",
+        "prescription": "建议关键结论附带数据来源或案例引用以增强可信度。建议格式：'……（数据来源：XX报告/XX部门统计）'",
         "severity": ReviewSeverity.CRITICAL,
         "check_method": "semantic",
     },
@@ -296,7 +296,7 @@ INFO_ERROR_DB = {
     "missing_5w1h": {
         "patterns": [],
         "diagnosis": "导语缺少5W1H中的关键要素",
-        "prescription": "导语必须包含：时间、地点、主体、事件、目的/意义。读者看完第一段应能回答'谁在什么时间什么地点做了什么'。",
+        "prescription": "导语建议涵盖：时间、地点、主体、事件、目的/意义等核心要素，确保读者看完第一段能基本了解'谁在什么时间什么地点做了什么'。",
         "severity": ReviewSeverity.CRITICAL,
         "check_method": "structural",
     },

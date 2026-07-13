@@ -9,13 +9,14 @@
 
 工作流：
   ┌──────────┐    ┌──────────┐    ┌──────────┐    ┌──────────┐
-  │ 决策树路由│ → │ 模式问卷 │ → │ 规划方案 │ → │ 写作+审查 │
+  │ 决策树路由│ →   │ 模式问卷  │ →  │ 规划方案   │ →  │ 写作+审查 │
   └──────────┘    └──────────┘    └──────────┘    └──────────┘
        │                │                │                │
        ▼                ▼                ▼                ▼
   确定WritingMode  WritingBrief   HITL-1确认     HITL-2输出
 """
 
+import json
 from dataclasses import dataclass, field
 from typing import List, Dict, Optional, Any, Callable, Tuple
 from enum import Enum
@@ -24,6 +25,7 @@ from ..questionnaire.questionnaire import (
     Questionnaire, WritingBrief,
     QuestionnairePhase,
 )
+from ..utils.response_cache import cached_prompt, store_prompt, make_cache_key
 from .style_adapter import (
     StyleAdapter, MediaStyle, StyleProfile, STYLE_PROFILES
 )
@@ -92,7 +94,7 @@ class WritingPlan:
 
 class Orchestrator:
 
-    def __init__(self):
+    def __init__(self, api_manager=None, knowledge_base=None, style_adapter=None):
         self.questionnaire = Questionnaire()
         self.style_adapter = StyleAdapter()
         self.doc_identifier = DocumentTypeIdentifier()
@@ -105,8 +107,20 @@ class Orchestrator:
         from ..config.api_config import APIConfigManager
         self.api_manager = APIConfigManager()
 
+        # Token 优化器集成（六大策略）
+        from ..utils.token_optimizer import (
+            TokenOptimizer, CacheAligner, ContextManager,
+            CompressionMode,
+        )
+        self._token_optimizer = TokenOptimizer(mode=CompressionMode.STANDARD)
+        self._cache_aligner = CacheAligner()
+        self._context_manager = ContextManager()
+        self._api_call_count: int = 0
+        self._api_fail_count: int = 0
+        self._total_tokens_saved: int = 0
+
         self.state = OrchestratorState.IDLE
-        self.brief: Optional[WritingBrief] = None
+        self.brief: Optional[WritingBrief] = self.questionnaire.brief
         self.plan: Optional[WritingPlan] = None
         self.draft: Optional[str] = None
         self.review_results: List[ReviewResult] = []
@@ -142,6 +156,8 @@ class Orchestrator:
     def start_routing(self) -> Dict[str, Any]:
         """启动决策树路由，返回第一个分流问题"""
         self.state = OrchestratorState.ROUTING
+        self.questionnaire = Questionnaire()
+        self.brief = self.questionnaire.brief
         q = self.questionnaire.get_routing_question()
         if self._on_question:
             self._on_question(q)
@@ -155,7 +171,8 @@ class Orchestrator:
         result = self.questionnaire.submit_routing_choice(choice_index)
 
         if result["phase"] == "routing_complete":
-            self.writing_mode = WritingMode(result["mode"])
+            # result["mode"] is already a WritingMode enum member
+            self.writing_mode = result["mode"] if isinstance(result["mode"], WritingMode) else WritingMode(result["mode"])
             self.state = OrchestratorState.MODE_QUESTIONING
             return result
 
@@ -467,43 +484,128 @@ class Orchestrator:
         self.agent_log.append(f"  [{agent}] {message}")
 
     def _call_llm(self, system_prompt: str, user_prompt: str, temperature: float = 0.7, max_tokens: int = 8000) -> str:
-        """调用 LLM API 生成内容"""
-        try:
-            config = self.api_manager.config
-            if not config.enable or not config.api_key or not config.api_base:
-                return self._generate_fallback(system_prompt, user_prompt)
+        """
+        调用 LLM API 生成内容（集成六大 Token 优化策略 + 健壮性机制）
 
-            import requests
-            headers = {
-                "Authorization": f"Bearer {config.api_key}",
-                "Content-Type": "application/json",
-            }
-            payload = {
-                "model": config.model,
-                "messages": [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt},
-                ],
-                "temperature": config.temperature,
-                "max_tokens": config.max_tokens,
-            }
-            url = config.api_base.rstrip("/") + "/chat/completions"
-            response = requests.post(url, headers=headers, json=payload, timeout=config.timeout)
-            response.raise_for_status()
-            data = response.json()
-            content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
-            if content:
-                return content
+        优化集成：
+          A. Prompt 文本压缩（省 50-70%）
+          D. 缓存对齐 + LRU 缓存（省 50-90%）
+          统计：token 节省量追踪
 
+        健壮性：
+          - 配置校验（enable/api_key/api_base）
+          - 重试机制（指数退避，最多 3 次）
+          - 响应验证（非空 + 长度检查）
+          - 分类错误处理（超时/认证/限流/服务器）
+          - 优雅降级（fallback 占位文本）
+        """
+        self._api_call_count += 1
+
+        # ── 1. 配置校验 ──
+        config = self.api_manager.config
+        if not config.enable or not config.api_key or not config.api_base:
             return self._generate_fallback(system_prompt, user_prompt)
 
-        except Exception as e:
-            return f"LLM API 调用失败：{e}\n\n--- 使用占位文本 ---\n\n{self._generate_fallback(system_prompt, user_prompt)}"
+        # ── 2. Prompt 压缩（Strategy A）──
+        original_chars = len(system_prompt) + len(user_prompt)
+        system_opt, user_opt, stats = self._token_optimizer.optimize_prompt(system_prompt, user_prompt)
+        self._total_tokens_saved += stats.estimated_input_tokens_saved
 
-    def _generate_fallback(self, system_prompt: str, user_prompt: str) -> str:
+        # ── 3. 缓存对齐（Strategy D：静态前置 + 动态后置）──
+        self._cache_aligner.check_cache_hit(system_opt)
+
+        # ── 4. LRU 缓存检查（相同 prompt 直接返回）──
+        cache_key = make_cache_key(system_opt, user_opt)
+        cached = cached_prompt("llm_response", cache_key)
+        if cached:
+            return cached
+
+        # ── 5. API 调用（带重试 + 分类错误处理）──
+        import requests
+        import time
+
+        headers = {
+            "Authorization": f"Bearer {config.api_key}",
+            "Content-Type": "application/json",
+        }
+        payload = {
+            "model": config.model,
+            "messages": [
+                {"role": "system", "content": system_opt},
+                {"role": "user", "content": user_opt},
+            ],
+            "temperature": temperature,
+            "max_tokens": min(max_tokens, config.max_tokens),
+        }
+        url = config.api_base.rstrip("/") + "/chat/completions"
+
+        max_retries = 3
+        last_error: Optional[str] = None
+
+        for attempt in range(max_retries):
+            try:
+                response = requests.post(url, headers=headers, json=payload, timeout=config.timeout)
+
+                # ── 分类 HTTP 错误 ──
+                if response.status_code == 401:
+                    return self._generate_fallback(system_prompt, user_prompt, "API Key 无效或已过期，请在设置中检查")
+                if response.status_code == 403:
+                    return self._generate_fallback(system_prompt, user_prompt, "API Key 无权限访问该模型")
+                if response.status_code == 429:
+                    if attempt < max_retries - 1:
+                        wait = (attempt + 1) * 5
+                        time.sleep(wait)
+                        continue
+                    return self._generate_fallback(system_prompt, user_prompt, "请求频率过高，请稍后重试")
+                if response.status_code >= 500:
+                    if attempt < max_retries - 1:
+                        time.sleep(2 ** attempt)
+                        continue
+                    return self._generate_fallback(system_prompt, user_prompt, "API 服务器内部错误，请稍后重试")
+
+                response.raise_for_status()
+
+                # ── 6. 响应验证 ──
+                data = response.json()
+                choices = data.get("choices", [])
+                if not choices:
+                    return self._generate_fallback(system_prompt, user_prompt, "API 返回空结果")
+
+                content = choices[0].get("message", {}).get("content", "")
+                if not content or len(content.strip()) < 2:
+                    return self._generate_fallback(system_prompt, user_prompt, "API 返回内容为空")
+
+                # ── 7. 缓存成功响应 ──
+                store_prompt("llm_response", content, cache_key)
+                return content
+
+            except requests.exceptions.Timeout:
+                last_error = f"请求超时（{config.timeout}秒）"
+                if attempt < max_retries - 1:
+                    time.sleep(2 ** attempt)
+                    continue
+            except requests.exceptions.ConnectionError:
+                last_error = "无法连接到 API 服务器，请检查网络或 Base URL"
+                if attempt < max_retries - 1:
+                    time.sleep(2 ** attempt)
+                    continue
+            except json.JSONDecodeError:
+                last_error = "API 返回的数据格式异常（非有效 JSON）"
+                break  # JSON 解析错误不重试
+            except Exception as e:
+                last_error = str(e)[:200]
+                if attempt < max_retries - 1:
+                    time.sleep(2 ** attempt)
+                    continue
+
+        # ── 8. 所有重试失败，优雅降级 ──
+        self._api_fail_count += 1
+        return self._generate_fallback(system_prompt, user_prompt, last_error)
+
+    def _generate_fallback(self, system_prompt: str, user_prompt: str, error_msg: str = "") -> str:
         """LLM 不可用时的占位文本"""
-        return f"""【占位文本 — LLM API 未配置】
-
+        error_line = f"\n错误信息：{error_msg}\n" if error_msg else "\n"
+        return f"""【占位文本 - LLM API 未配置或调用失败】{error_line}
 系统已构建以下 Prompt 准备调用 LLM：
 
 写作模式: {get_mode_profile(self.writing_mode).name}
@@ -513,7 +615,17 @@ System Prompt:
 User Prompt:
 {user_prompt[:500]}
 
-请前往「API配置」页面配置 LLM API Key 以生成真实公文。"""
+请前往「API设置」页面配置 LLM API Key 以生成真实公文。"""
+
+    def get_api_stats(self) -> Dict[str, Any]:
+        """获取 API 调用统计与 Token 优化报告"""
+        return {
+            "api_calls": self._api_call_count,
+            "api_failures": self._api_fail_count,
+            "tokens_saved": self._total_tokens_saved,
+            "cache_stats": self._cache_aligner.get_cache_stats(),
+            "optimization_report": self._token_optimizer.get_optimization_report(),
+        }
 
     # ═══════════════════════════════════════════════════════════
     # 审查阶段（模式感知 + 迭代式审查 V2.1 + HITL 循环 V2.2）

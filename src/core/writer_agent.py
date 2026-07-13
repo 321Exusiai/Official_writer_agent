@@ -200,6 +200,13 @@ class WriterAgent:
             self._get_language_guidelines(),
             "",
             self._get_forbidden_patterns(),
+            "",
+            "# 高级行文与版式策略（Advanced Narrative Strategies）",
+            "1. 【客观叙事】：正文中避免出现解释自己写作意图的“元叙事”句子。让事实、行动和对话自然推进，尽量避免“这句话的潜台词是”、“这不仅是一次……更是……”等自我点评的话语。",
+            "2. 【隐蔽意图】：避免在正文中直接暴露“大纲要求”、“战略锚点”等约束词汇。将这些理念化作真实的活动细节，通过“Show, Don't Tell”隐蔽地展现出来。",
+            "3. 【灵活版式与连贯引用】：在处理大量长篇幅的个人感悟或引用时，建议采取解耦结构。正文只保留辅助叙事推进的短句引用（形成“事实铺垫-简短引用-延伸转化”的连贯咬合）；而对于深度长篇思想感悟，可考虑以侧栏、手记、附录等版式（如“研学手记”）独立呈现，保持新闻的客观与叙事流畅度。",
+            "4. 【拒绝空泛宏大】：用具体的硬核细节（具体机构名、技术名词、真实的见闻等）来支撑起主题，而非用排比句和形容词堆砌空泛的宏大叙事。",
+            ""
         ])
 
         return "\n".join(prompt_parts)
@@ -224,8 +231,9 @@ class WriterAgent:
 1. 严格遵循System Prompt中指定的文种规范和风格要求
 2. 标题格式：发文机关名称 + 事由 + 文种
 3. 字数控制在{self.config.doc_type_profile.typical_length_range[0] if self.config.doc_type_profile else 800}-{self.config.doc_type_profile.typical_length_range[1] if self.config.doc_type_profile else 2000}字之间
-4. 严禁出现该模式禁止的表述（见System Prompt中的禁止列表）
+4. 避免出现该模式不推荐的表述（见System Prompt中的禁止列表）
 5. 如有真实素材，优先使用直接引语和具体数据
+6. 遵循“高级行文策略”，避免解释自身的写作逻辑，像真正的高级人类作者一样用事实、结构和细节说话。
 """
 
     def generate_outline(self) -> str:

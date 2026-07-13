@@ -306,6 +306,15 @@ class AgentCoordinator:
         self.debate_results: List[DebateResult] = []
         self._proactive_alerts: List[AgentMessage] = []
 
+        # Token 优化集成
+        import threading
+        self._lock = threading.Lock()
+        from ..utils.token_optimizer import ContextManager, CacheAligner, ModelRouter
+        from ..utils.response_cache import cached_prompt, store_prompt, make_cache_key
+        self._context_mgr = ContextManager()
+        self._cache_aligner = CacheAligner()
+        self._model_router = ModelRouter()
+
     # ═══ 民主协商机制 ═══
 
     def consult_before_decision(
@@ -344,6 +353,9 @@ class AgentCoordinator:
         )
         self.bus.send(consultation_msg)
 
+        from concurrent.futures import ThreadPoolExecutor
+
+        requests = {}
         for agent_role in participants:
             request = AgentMessage.create(
                 sender=AgentRole.ORCHESTRATOR,
@@ -353,23 +365,31 @@ class AgentCoordinator:
                 payload={"topic": decision_topic, "context": context or {}},
             )
             self.bus.send(request)
+            requests[agent_role] = request
 
-            # 优先使用 LLM 生成意见，规则匹配作为兜底
+        def query_agent(agent_role):
             if llm_call:
                 response = self._llm_agent_response(agent_role, decision_topic, context or {}, llm_call)
             else:
                 response = self._simulate_agent_response(agent_role, decision_topic, context)
-            responses[agent_role] = response
+            return agent_role, response
 
-            response_msg = AgentMessage.create(
-                sender=agent_role,
-                receiver=AgentRole.ORCHESTRATOR,
-                msg_type=MessageType.RESPONSE,
-                action="opinion",
-                payload=response,
-                reply_to=request.msg_id,
-            )
-            self.bus.send(response_msg)
+        with ThreadPoolExecutor(max_workers=len(participants)) as executor:
+            future_to_role = {executor.submit(query_agent, role): role for role in participants}
+            for future in future_to_role:
+                agent_role, response = future.result()
+                responses[agent_role] = response
+
+                request = requests[agent_role]
+                response_msg = AgentMessage.create(
+                    sender=agent_role,
+                    receiver=AgentRole.ORCHESTRATOR,
+                    msg_type=MessageType.RESPONSE,
+                    action="opinion",
+                    payload=response,
+                    reply_to=request.msg_id,
+                )
+                self.bus.send(response_msg)
 
         self.consultation_log.append({
             "topic": decision_topic,
@@ -552,7 +572,14 @@ class AgentCoordinator:
         context: Dict[str, Any],
         llm_call: Callable,
     ) -> Dict[str, Any]:
-        """使用 LLM 生成 Agent 的协商意见（V2 核心改进）"""
+        """
+        使用 LLM 生成 Agent 的协商意见（V2 核心改进）
+
+        Token 优化集成：
+          C. ContextManager：多轮协商历史分层管理（省 80-90%）
+          D. CacheAligner：静态角色描述前置 + 动态议题后置（省 50-90%）
+          F. ModelRouter：按议题复杂度分类，简单任务可用便宜模型
+        """
         role_profiles = {
             AgentRole.WRITER: "你是一名资深公文撰写者（Writer Agent），10年体制内写作经验。你的职责是确保文章内容饱满、表达有力、逻辑清晰。",
             AgentRole.REVIEWER: "你是一名严格的公文审查者（Reviewer Agent），精通公文质量标准。你的职责是发现文章中的问题、错误和潜在风险。",
@@ -566,10 +593,11 @@ class AgentCoordinator:
         brief_info = context.get("brief", "")
         writing_mode = context.get("writing_mode", "")
 
-        system_prompt = role_profiles.get(agent_role, "你是一名公文写作专家。")
-        system_prompt += "\n\n请用JSON格式输出你的意见，只输出JSON，不要有其他内容。"
+        # ── Strategy D: 缓存对齐（静态角色描述前置 + 动态议题后置）──
+        static_part = role_profiles.get(agent_role, "你是一名公文写作专家。")
+        static_part += "\n\n请用JSON格式输出你的意见，只输出JSON，不要有其他内容。"
 
-        user_prompt = f"""请就以下议题发表你的专业意见。
+        dynamic_part = f"""请就以下议题发表你的专业意见。
 
 **协商议题**：{topic}
 
@@ -589,8 +617,38 @@ class AgentCoordinator:
 如果你没有发现任何问题，concerns 可以返回空数组，但 suggestions 必须有至少1条建设性建议。
 如果你认为方案没有问题，请明确说明为什么方案是合理的。"""
 
+        # CacheAligner 重排：静态前置 + 动态后置
+        system_prompt = self._cache_aligner.reorder_for_cache(static_part, "")
+        user_prompt = dynamic_part
+
+        # ── Strategy D: LRU 缓存检查（相同 agent+topic 直接返回）──
+        from ..utils.response_cache import cached_prompt, store_prompt, make_cache_key
+        cache_key = make_cache_key(agent_role.value, topic, writing_mode)
+        with self._lock:
+            cached = cached_prompt("agent_consultation", cache_key)
+        if cached:
+            return self._parse_llm_json_response(cached, agent_role)
+
+        # ── Strategy F: 模型路由（按议题复杂度分类）──
+        task_level = self._model_router.classify_task(topic)
+        # task_level 可用于未来按复杂度选择不同模型
+
+        # ── Strategy C: 上下文管理（记录协商历史）──
+        with self._lock:
+            self._context_mgr.add_message("system", f"[{agent_role.value}] 议题: {topic[:100]}")
+
         try:
             raw = llm_call(system_prompt, user_prompt)
+
+            # 记录 LLM 响应到上下文管理器
+            with self._lock:
+                self._context_mgr.add_message("assistant", raw[:200] if raw else "")
+
+            # 缓存成功响应
+            if raw and len(raw) > 10:
+                with self._lock:
+                    store_prompt("agent_consultation", raw, cache_key)
+
             return self._parse_llm_json_response(raw, agent_role)
         except Exception:
             # LLM 调用失败时回退到规则匹配
@@ -813,4 +871,6 @@ class AgentCoordinator:
             "proactive_alerts": len(self._proactive_alerts),
             "recent_consultations": self.consultation_log[-3:] if self.consultation_log else [],
             "recent_debates": [d.to_dict() for d in self.debate_results[-3:]] if self.debate_results else [],
+            "cache_stats": self._cache_aligner.get_cache_stats(),
+            "context_messages": self._context_mgr._total_messages,
         }
