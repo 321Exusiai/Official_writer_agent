@@ -1,24 +1,53 @@
-# 公文写作智能体
+# 公文写作智能体 V2.2 (Premium Workspace Edition)
 
-基于 Agentic Design Patterns 的多智能体协作公文写作系统。
+基于 Agentic Design Patterns 的多智能体协作公文写作系统。本项目致力于提供专业、高效、合规的公文及校园/政务新闻撰写体验。
+
+![UI Preview](https://img.shields.io/badge/UI-Gradio_Premium-blue.svg)
+![Version](https://img.shields.io/badge/Version-2.2-success.svg)
 
 ---
 
-## 快速开始
+## 🌟 核心特性
 
-### 运行测试
+- **四维模式路由系统**：自动识别并分发“党政规范”、“校园新闻”、“日常行政”、“新媒体”四大核心写作模式，避免单一模板的生搬硬套。
+- **五轮多智能体协作审查 (Reflection Pattern)**：通过 WriterAgent 和 ReviewerAgent 的迭代递进审查（自我反思机制），全方位覆盖格式、事实、逻辑、战略性等指标，自动修复问题。
+- **HITL (Human-in-the-loop) 审查循环**：引入用户反馈机制，允许人工干预审查流，用户可手动选择修改项，深度定制最终文稿。
+- **多维度风格混合技术**：支持根据不同受众（领导、媒体、普通读者）自动生成混合风格（如“正文70%人民日报 + 导语30%新华社”），并支持 0.0-1.0 的强度调节。
+- **高端极简 UI 体验**：使用 Gradio 定制开发的“星月夜”高端动态背景与 iOS 卡片式磨砂玻璃 UI（Premium minimalist iOS card aesthetics）。
+- **纯本地数据持久化**：Finder式侧边栏目录管理与自动 JSON 持久化存储机制，保护所有草稿与项目数据安全。
+
+---
+
+## 🚀 快速开始
+
+### 环境依赖安装
 
 ```bash
-python -m official_writer_agent.tests.test_all
+# 克隆仓库
+git clone <your-repo-url>
+cd official_writer_agent
+
+# 安装依赖
+pip install -r requirements.txt # 或手动安装依赖
+pip install gradio  # Web 界面必要依赖
 ```
 
-### 启动交互式 CLI
+### 启动 Web 交互台
+
+强烈推荐使用全新设计的 Web 交互台体验完整流程：
+
+```bash
+python gradio_app.py
+```
+> **提示**：启动后，将自动打开游览器访问本地服务。您可以在侧边栏新建项目，体验沉浸式写作。
+
+### 启动命令行交互 (CLI)
 
 ```bash
 python -m official_writer_agent.cli
 ```
 
-### 程序化调用（QuickAPI）
+### 程序化调用 (QuickAPI)
 
 ```python
 from official_writer_agent.cli import QuickAPI
@@ -37,63 +66,39 @@ brief = api.generate_brief(
     differentiator="我们的学生不是被动听，而是主动提问与讨论"
 )
 
-# 选择风格与文种
+# 获取写作与审查 Prompts
 style_profile = api.select_style(media="人民日报")
 doc_type_profile = api.select_doc_type(doc_type="通讯")
-
-# 获取写作 Prompt
 prompts = api.get_writing_prompts(
-    brief=brief,
-    style_profile=style_profile,
-    doc_type_profile=doc_type_profile,
-    materials="李同学的感言、与北大老师的讨论记录、行程照片"
-)
-
-print(prompts["system_prompt"])  # 系统提示词
-print(prompts["user_prompt"])    # 用户提示词
-
-# 获取审查 Prompt
-review_prompt = api.get_review_prompt(
-    draft="这是你的初稿...",
-    round_index=1,
-    brief=brief
+    brief=brief, style_profile=style_profile, 
+    doc_type_profile=doc_type_profile, materials="..."
 )
 ```
 
 ---
 
-## 文档索引
+## 📚 知识库与规范支持
 
-| 文档 | 说明 |
+本项目内置了涵盖多种法定公文和新闻采编的规则：
+- **党政机关法定规范**：《党政机关公文处理工作条例》(中办发〔2012〕14号)、《党政机关公文格式》(GB/T 9704-2012)
+- **主流媒体体例**：人民日报、新华社、央视新闻、光明日报等媒体范式。
+- **高校与机构采编标准**：兼容北大、南大、北师大、武大等顶尖高校新闻网审核标准的定制规则库。
+
+---
+
+## 🗂 进阶阅读
+
+| 文档名称 | 说明 |
 |------|------|
-| [PROJECT_DESIGN.md](./PROJECT_DESIGN.md) | 完整项目设计文档（推荐阅读） |
-| 本 README | 快速开始指南 |
+| [PROJECT_DESIGN.md](./PROJECT_DESIGN.md) | 完整项目设计文档（推荐，包含V2.2重构说明） |
 
 ---
 
-## 项目特点
+## 🛠 开发与测试
 
-1. **8 道"灵魂拷问"**：写作前倒逼思考，避免流水账
-2. **4 种央媒风格**：人民日报/新华社/央视新闻/光明日报
-3. **5 种文种识别**：消息/通讯/侧记/调研报告/简报
-4. **五轮结构化审查**：主体性/赋能性/借势性/成长性/战略性
-5. **7 种错误自动诊断**：流水账/主体缺失/空泛表态/...
-6. **内置知识库**：4 篇范文 + 术语库 + 过渡句库
+运行本地所有单元测试：
+```bash
+python -m official_writer_agent.tests.test_all
+```
 
----
-
-## 完整流程
-
-1. **规划**：回答 8 道问题，生成 WritingBrief
-2. **确认**：用户查看、修改、确认简报（HITL）
-3. **配置**：选择媒体风格 + 文种
-4. **写作**：WriterAgent 基于 Prompt 生成初稿
-5. **审查**：ReviewerAgent 五轮审查 + 错误诊断
-6. **终稿确认**：用户查看反馈，可选择修改或确认（HITL）
-7. **输出**：输出终稿 + 写作简报 + 审查报告
-
----
-
-## 下一步
-
-接入 LLM（OpenAI/Claude/通义千问/文心一言）即可投入实际使用！
+接入您喜欢的 LLM（如 OpenAI、Claude、通义千问、文心一言等）的 API 密钥即可正式投入生产环境使用！
