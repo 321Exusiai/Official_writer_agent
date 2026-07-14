@@ -1128,20 +1128,44 @@ def build_ui() -> gr.Blocks:
     .gradio-container .gr-group,
     .gradio-container .gr-form,
     .gradio-container fieldset,
-    .gradio-container .gr-button-secondary,
-    .gradio-container button[variant="secondary"],
     .gradio-container [class*="panel"],
     .gradio-container [class*="box"],
-    .gradio-container [class*="group"],
-    .gradio-container [class*="accordion"] {
-        background: rgba(20, 35, 60, 0.15) !important;
+    .gradio-container [class*="group"] {
+        background: rgba(13, 22, 43, 0.55) !important;
         color: var(--color-ink-body) !important;
-        border: 1px solid rgba(255, 255, 255, 0.08) !important;
-        border-top: 1px solid rgba(255, 255, 255, 0.15) !important;
-        border-left: 1px solid rgba(255, 255, 255, 0.12) !important;
-        border-radius: var(--radius-card);
-        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3) !important;
-        /* Removed backdrop-filter to prevent creating local stacking contexts that trap dropdown menus */
+        border: 1px solid rgba(79, 126, 164, 0.2) !important;
+        border-top: 1px solid rgba(141, 179, 195, 0.25) !important;
+        border-left: 1px solid rgba(141, 179, 195, 0.18) !important;
+        border-radius: var(--radius-card) !important;
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255,255,255,0.06) !important;
+    }
+
+    /* Accordion: special deep-blue glass styling */
+    .gradio-container [class*="accordion"],
+    .gradio-container details {
+        background: rgba(13, 22, 43, 0.6) !important;
+        border: 1px solid rgba(100, 139, 168, 0.25) !important;
+        border-radius: var(--radius-card) !important;
+        box-shadow: 0 4px 24px rgba(0, 0, 0, 0.35) !important;
+        overflow: hidden;
+    }
+
+    /* Accordion header/summary button */
+    .gradio-container details > summary,
+    .gradio-container [class*="accordion"] > button,
+    .gradio-container [class*="accordion-header"] {
+        background: rgba(28, 55, 101, 0.5) !important;
+        color: var(--color-ink) !important;
+        border-bottom: 1px solid rgba(100, 139, 168, 0.2) !important;
+        border-radius: var(--radius-card) var(--radius-card) 0 0 !important;
+        padding: 12px 16px !important;
+        font-weight: 600 !important;
+        letter-spacing: 0.01em;
+        transition: background 0.2s ease !important;
+    }
+    .gradio-container details > summary:hover,
+    .gradio-container [class*="accordion"] > button:hover {
+        background: rgba(40, 64, 111, 0.65) !important;
     }
 
     /* Apply Blur ONLY to major structural containers */
@@ -1261,7 +1285,7 @@ def build_ui() -> gr.Blocks:
         margin-top: 6px;
     }
 
-    /* Luminous Gold Buttons - Ultra Glass */
+    /* Luminous Gold Buttons - Primary */
     .ios-btn-primary {
         background: linear-gradient(135deg, rgba(223, 203, 92, 0.9), rgba(196, 138, 24, 0.9)) !important;
         color: #0D162B !important; 
@@ -1272,7 +1296,6 @@ def build_ui() -> gr.Blocks:
         transition: transform 0.2s cubic-bezier(0.2, 0.8, 0.2, 1), box-shadow 0.2s ease, filter 0.2s ease !important;
         box-shadow: 0 4px 16px rgba(223, 203, 92, 0.3) !important;
         min-height: 44px;
-
     }
     .ios-btn-primary:hover {
         transform: translateY(-2px);
@@ -1284,19 +1307,70 @@ def build_ui() -> gr.Blocks:
         filter: brightness(0.9);
     }
 
-    .ios-btn-danger {
-        background: rgba(220, 38, 38, 0.1) !important;
+    /* Secondary Buttons - Semi-transparent blue glass */
+    .ios-btn-secondary,
+    .gradio-container button.secondary,
+    .gradio-container button[variant="secondary"] {
+        background: rgba(28, 55, 101, 0.45) !important;
+        color: var(--color-sky-pale) !important;
+        border-radius: var(--radius-button) !important;
+        border: 1px solid rgba(100, 139, 168, 0.35) !important;
+        font-weight: 500 !important;
+        font-family: "Inter", "Noto Sans SC", sans-serif !important;
+        transition: all 0.2s ease !important;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2) !important;
+        min-height: 44px;
+    }
+    .ios-btn-secondary:hover,
+    .gradio-container button.secondary:hover,
+    .gradio-container button[variant="secondary"]:hover {
+        background: rgba(40, 64, 111, 0.65) !important;
+        border-color: rgba(141, 179, 195, 0.5) !important;
+        color: var(--color-ink) !important;
+        box-shadow: 0 4px 16px rgba(79, 126, 164, 0.3) !important;
+        transform: translateY(-1px);
+    }
+    .ios-btn-secondary:active,
+    .gradio-container button.secondary:active {
+        transform: translateY(0);
+        filter: brightness(0.9);
+    }
+
+    /* All generic Gradio buttons (untagged) get secondary style by default */
+    .gradio-container button:not(.ios-btn-primary):not(.ios-btn-danger):not([class*="tab"]):not([class*="accordion"]):not(.selected) {
+        background: rgba(28, 55, 101, 0.45) !important;
+        color: var(--color-sky-pale) !important;
+        border-radius: var(--radius-button) !important;
+        border: 1px solid rgba(100, 139, 168, 0.35) !important;
+        font-weight: 500 !important;
+        transition: all 0.2s ease !important;
+        min-height: 40px;
+    }
+    .gradio-container button:not(.ios-btn-primary):not(.ios-btn-danger):not([class*="tab"]):not([class*="accordion"]):not(.selected):hover {
+        background: rgba(40, 64, 111, 0.65) !important;
+        border-color: rgba(141, 179, 195, 0.5) !important;
+        color: var(--color-ink) !important;
+    }
+
+    /* Danger Buttons */
+    .ios-btn-danger,
+    .gradio-container button.stop,
+    .gradio-container button[variant="stop"] {
+        background: rgba(220, 38, 38, 0.12) !important;
         color: #FCA5A5 !important;
         border-radius: var(--radius-button) !important;
-        border: 1px solid rgba(220, 38, 38, 0.4) !important;
+        border: 1px solid rgba(220, 38, 38, 0.35) !important;
         font-weight: 500 !important;
         transition: all 0.2s ease !important;
         min-height: 44px;
-
     }
-    .ios-btn-danger:hover {
-        background: rgba(220, 38, 38, 0.2) !important;
-        box-shadow: 0 4px 16px rgba(220, 38, 38, 0.2);
+    .ios-btn-danger:hover,
+    .gradio-container button.stop:hover,
+    .gradio-container button[variant="stop"]:hover {
+        background: rgba(220, 38, 38, 0.22) !important;
+        border-color: rgba(220, 38, 38, 0.6) !important;
+        box-shadow: 0 4px 16px rgba(220, 38, 38, 0.2) !important;
+        transform: translateY(-1px);
     }
 
     /* Agent Bubbles */
