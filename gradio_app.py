@@ -1305,102 +1305,89 @@ def build_ui() -> gr.Blocks:
 
     /* Luminous Gold Buttons - Primary */
     .ios-btn-primary {
-        background: linear-gradient(135deg, rgba(223, 203, 92, 0.9), rgba(196, 138, 24, 0.9)) !important;
-        color: #0D162B !important; 
+        background: radial-gradient(80% 100% at 50% 0%, rgba(223, 203, 92, 0.4) 0%, rgba(196, 138, 24, 0.1) 50%, rgba(13, 22, 43, 0.9) 100%), #0D162B !important;
+        color: #F8FAFC !important; 
         border-radius: var(--radius-button) !important;
-        border: 1px solid rgba(255,255,255,0.4) !important;
-        font-weight: 700 !important;
-        font-family: "Inter", "Noto Sans SC", sans-serif !important;
-        transition: transform 150ms var(--ease-out-strong), box-shadow 150ms ease, filter 150ms ease !important;
-        box-shadow: 0 4px 16px rgba(223, 203, 92, 0.3) !important;
+        border: 1px solid rgba(223, 203, 92, 0.2) !important;
+        font-weight: 600 !important;
+        transition: transform 150ms var(--ease-out-strong), box-shadow 300ms var(--ease-out-strong), filter 150ms ease, background 300ms var(--ease-out-strong) !important;
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.2), 0 2px 8px rgba(0, 0, 0, 0.3) !important;
         min-height: 44px;
+        text-shadow: 0 1px 2px rgba(0,0,0,0.5);
     }
     .ios-btn-primary:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 8px 24px rgba(223, 203, 92, 0.5) !important;
-        filter: brightness(1.1);
+        transform: translateY(-1px);
+        background: radial-gradient(100% 120% at 50% 50%, rgba(223, 203, 92, 0.5) 0%, rgba(196, 138, 24, 0.15) 50%, rgba(13, 22, 43, 0.95) 100%), #0D162B !important;
+        border-color: rgba(223, 203, 92, 0.5) !important;
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.3), 0 6px 20px rgba(223, 203, 92, 0.25), 0 0 12px rgba(223, 203, 92, 0.15) !important;
     }
     .ios-btn-primary:active {
         transform: scale(0.97) !important;
-        filter: blur(1px) brightness(0.9) !important;
+        filter: blur(0.5px) !important;
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05), 0 1px 2px rgba(0, 0, 0, 0.2) !important;
     }
 
     /* Secondary Buttons - Semi-transparent blue glass */
     .ios-btn-secondary,
     .gradio-container button.secondary,
-    .gradio-container button[variant="secondary"] {
-        background: rgba(28, 55, 101, 0.45) !important;
-        color: var(--color-sky-pale) !important;
+    .gradio-container button[variant="secondary"],
+    .gradio-container button:not(.ios-btn-primary):not(.ios-btn-danger):not([class*="tab"]):not([class*="accordion"]):not(.selected) {
+        background: radial-gradient(80% 100% at 50% 0%, rgba(100, 139, 168, 0.15) 0%, rgba(28, 55, 101, 0.2) 50%, rgba(13, 22, 43, 0.6) 100%), rgba(13, 22, 43, 0.7) !important;
+        color: var(--color-ink-body) !important;
         border-radius: var(--radius-button) !important;
-        border: 1px solid rgba(100, 139, 168, 0.35) !important;
+        border: 1px solid rgba(100, 139, 168, 0.2) !important;
         font-weight: 500 !important;
-        font-family: "Inter", "Noto Sans SC", sans-serif !important;
-        transition: all 150ms var(--ease-out-strong) !important;
-        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2) !important;
-        min-height: 44px;
+        transition: transform 150ms var(--ease-out-strong), box-shadow 300ms var(--ease-out-strong), filter 150ms ease, background 300ms var(--ease-out-strong), border-color 300ms ease !important;
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 2px 6px rgba(0, 0, 0, 0.2) !important;
+        min-height: 40px;
     }
     .ios-btn-secondary:hover,
     .gradio-container button.secondary:hover,
-    .gradio-container button[variant="secondary"]:hover {
-        background: rgba(40, 64, 111, 0.65) !important;
-        border-color: rgba(141, 179, 195, 0.5) !important;
-        color: var(--color-ink) !important;
-        box-shadow: 0 4px 16px rgba(79, 126, 164, 0.3) !important;
+    .gradio-container button[variant="secondary"]:hover,
+    .gradio-container button:not(.ios-btn-primary):not(.ios-btn-danger):not([class*="tab"]):not([class*="accordion"]):not(.selected):hover {
         transform: translateY(-1px);
+        background: radial-gradient(100% 120% at 50% 50%, rgba(141, 179, 195, 0.25) 0%, rgba(40, 64, 111, 0.3) 50%, rgba(13, 22, 43, 0.8) 100%), rgba(13, 22, 43, 0.9) !important;
+        border-color: rgba(141, 179, 195, 0.4) !important;
+        color: var(--color-ink) !important;
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.15), 0 4px 16px rgba(79, 126, 164, 0.2), 0 0 12px rgba(100, 139, 168, 0.1) !important;
     }
     .ios-btn-secondary:active,
     .gradio-container button.secondary:active,
-    .gradio-container button[variant="secondary"]:active {
-        transform: scale(0.97) !important;
-        filter: blur(1px) brightness(0.9) !important;
-    }
-
-    /* All generic Gradio buttons (untagged) get secondary style by default */
-    .gradio-container button:not(.ios-btn-primary):not(.ios-btn-danger):not([class*="tab"]):not([class*="accordion"]):not(.selected) {
-        background: rgba(28, 55, 101, 0.45) !important;
-        color: var(--color-sky-pale) !important;
-        border-radius: var(--radius-button) !important;
-        border: 1px solid rgba(100, 139, 168, 0.35) !important;
-        font-weight: 500 !important;
-        transition: all 150ms var(--ease-out-strong) !important;
-        min-height: 40px;
-    }
-    .gradio-container button:not(.ios-btn-primary):not(.ios-btn-danger):not([class*="tab"]):not([class*="accordion"]):not(.selected):hover {
-        background: rgba(40, 64, 111, 0.65) !important;
-        border-color: rgba(141, 179, 195, 0.5) !important;
-        color: var(--color-ink) !important;
-        transform: translateY(-1px);
-    }
+    .gradio-container button[variant="secondary"]:active,
     .gradio-container button:not(.ios-btn-primary):not(.ios-btn-danger):not([class*="tab"]):not([class*="accordion"]):not(.selected):active {
         transform: scale(0.97) !important;
-        filter: blur(1px) brightness(0.9) !important;
+        filter: blur(0.5px) !important;
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.02), 0 1px 2px rgba(0, 0, 0, 0.2) !important;
     }
 
     /* Danger Buttons */
     .ios-btn-danger,
     .gradio-container button.stop,
     .gradio-container button[variant="stop"] {
-        background: rgba(220, 38, 38, 0.12) !important;
+        background: radial-gradient(80% 100% at 50% 0%, rgba(220, 38, 38, 0.2) 0%, rgba(153, 27, 27, 0.1) 50%, rgba(13, 22, 43, 0.6) 100%), rgba(13, 22, 43, 0.7) !important;
         color: #FCA5A5 !important;
         border-radius: var(--radius-button) !important;
-        border: 1px solid rgba(220, 38, 38, 0.35) !important;
+        border: 1px solid rgba(220, 38, 38, 0.3) !important;
         font-weight: 500 !important;
-        transition: all 150ms var(--ease-out-strong) !important;
+        transition: transform 150ms var(--ease-out-strong), box-shadow 300ms var(--ease-out-strong), filter 150ms ease, background 300ms var(--ease-out-strong) !important;
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 2px 6px rgba(0, 0, 0, 0.2) !important;
         min-height: 44px;
     }
     .ios-btn-danger:hover,
     .gradio-container button.stop:hover,
     .gradio-container button[variant="stop"]:hover {
-        background: rgba(220, 38, 38, 0.22) !important;
-        border-color: rgba(220, 38, 38, 0.6) !important;
-        box-shadow: 0 4px 16px rgba(220, 38, 38, 0.2) !important;
         transform: translateY(-1px);
+        background: radial-gradient(100% 120% at 50% 50%, rgba(220, 38, 38, 0.35) 0%, rgba(153, 27, 27, 0.15) 50%, rgba(13, 22, 43, 0.8) 100%), rgba(13, 22, 43, 0.9) !important;
+        border-color: rgba(220, 38, 38, 0.5) !important;
+        color: #FECACA !important;
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.15), 0 4px 16px rgba(220, 38, 38, 0.25), 0 0 12px rgba(220, 38, 38, 0.15) !important;
     }
     .ios-btn-danger:active,
     .gradio-container button.stop:active,
     .gradio-container button[variant="stop"]:active {
         transform: scale(0.97) !important;
-        filter: blur(1px) brightness(0.9) !important;
+        filter: blur(0.5px) !important;
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.02), 0 1px 2px rgba(0, 0, 0, 0.2) !important;
     }
 
     /* Agent Bubbles */
