@@ -1104,6 +1104,15 @@ def build_ui() -> gr.Blocks:
         --radius-card: 20px;
         --radius-input: 12px;
         --radius-sm: 8px;
+
+        /* Apple-Style Easing & Animation */
+        --ease-out-strong: cubic-bezier(0.23, 1, 0.32, 1);
+        --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+    }
+
+    @keyframes smooth-enter {
+        0% { opacity: 0; transform: scale(0.98); }
+        100% { opacity: 1; transform: scale(1); }
     }
 
     /* Container Background - Apple Music Fluid Style */
@@ -1139,6 +1148,7 @@ def build_ui() -> gr.Blocks:
         border-radius: var(--radius-card) !important;
         padding: 16px !important;
         box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255,255,255,0.06) !important;
+        animation: smooth-enter 300ms var(--ease-out-strong) both;
     }
 
     /* Accordion: special deep-blue glass styling */
@@ -1149,6 +1159,7 @@ def build_ui() -> gr.Blocks:
         border-radius: var(--radius-card) !important;
         box-shadow: 0 4px 24px rgba(0, 0, 0, 0.35) !important;
         overflow: hidden;
+        animation: smooth-enter 300ms var(--ease-out-strong) both;
     }
 
     /* Accordion header/summary button */
@@ -1162,11 +1173,17 @@ def build_ui() -> gr.Blocks:
         padding: 12px 16px !important;
         font-weight: 600 !important;
         letter-spacing: 0.01em;
-        transition: background 0.2s ease !important;
+        transition: background 150ms var(--ease-out-strong), transform 150ms var(--ease-out-strong), filter 150ms var(--ease-out-strong) !important;
     }
     .gradio-container details > summary:hover,
     .gradio-container [class*="accordion"] > button:hover {
         background: rgba(40, 64, 111, 0.65) !important;
+        transform: translateY(-1px);
+    }
+    .gradio-container details > summary:active,
+    .gradio-container [class*="accordion"] > button:active {
+        transform: scale(0.98);
+        filter: blur(1px) brightness(0.9);
     }
 
     /* Apply Blur ONLY to major structural containers */
@@ -1294,7 +1311,7 @@ def build_ui() -> gr.Blocks:
         border: 1px solid rgba(255,255,255,0.4) !important;
         font-weight: 700 !important;
         font-family: "Inter", "Noto Sans SC", sans-serif !important;
-        transition: transform 0.2s cubic-bezier(0.2, 0.8, 0.2, 1), box-shadow 0.2s ease, filter 0.2s ease !important;
+        transition: transform 150ms var(--ease-out-strong), box-shadow 150ms ease, filter 150ms ease !important;
         box-shadow: 0 4px 16px rgba(223, 203, 92, 0.3) !important;
         min-height: 44px;
     }
@@ -1304,8 +1321,8 @@ def build_ui() -> gr.Blocks:
         filter: brightness(1.1);
     }
     .ios-btn-primary:active {
-        transform: translateY(0);
-        filter: brightness(0.9);
+        transform: scale(0.97) !important;
+        filter: blur(1px) brightness(0.9) !important;
     }
 
     /* Secondary Buttons - Semi-transparent blue glass */
@@ -1318,7 +1335,7 @@ def build_ui() -> gr.Blocks:
         border: 1px solid rgba(100, 139, 168, 0.35) !important;
         font-weight: 500 !important;
         font-family: "Inter", "Noto Sans SC", sans-serif !important;
-        transition: all 0.2s ease !important;
+        transition: all 150ms var(--ease-out-strong) !important;
         box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2) !important;
         min-height: 44px;
     }
@@ -1332,9 +1349,10 @@ def build_ui() -> gr.Blocks:
         transform: translateY(-1px);
     }
     .ios-btn-secondary:active,
-    .gradio-container button.secondary:active {
-        transform: translateY(0);
-        filter: brightness(0.9);
+    .gradio-container button.secondary:active,
+    .gradio-container button[variant="secondary"]:active {
+        transform: scale(0.97) !important;
+        filter: blur(1px) brightness(0.9) !important;
     }
 
     /* All generic Gradio buttons (untagged) get secondary style by default */
@@ -1344,13 +1362,18 @@ def build_ui() -> gr.Blocks:
         border-radius: var(--radius-button) !important;
         border: 1px solid rgba(100, 139, 168, 0.35) !important;
         font-weight: 500 !important;
-        transition: all 0.2s ease !important;
+        transition: all 150ms var(--ease-out-strong) !important;
         min-height: 40px;
     }
     .gradio-container button:not(.ios-btn-primary):not(.ios-btn-danger):not([class*="tab"]):not([class*="accordion"]):not(.selected):hover {
         background: rgba(40, 64, 111, 0.65) !important;
         border-color: rgba(141, 179, 195, 0.5) !important;
         color: var(--color-ink) !important;
+        transform: translateY(-1px);
+    }
+    .gradio-container button:not(.ios-btn-primary):not(.ios-btn-danger):not([class*="tab"]):not([class*="accordion"]):not(.selected):active {
+        transform: scale(0.97) !important;
+        filter: blur(1px) brightness(0.9) !important;
     }
 
     /* Danger Buttons */
@@ -1362,7 +1385,7 @@ def build_ui() -> gr.Blocks:
         border-radius: var(--radius-button) !important;
         border: 1px solid rgba(220, 38, 38, 0.35) !important;
         font-weight: 500 !important;
-        transition: all 0.2s ease !important;
+        transition: all 150ms var(--ease-out-strong) !important;
         min-height: 44px;
     }
     .ios-btn-danger:hover,
@@ -1372,6 +1395,12 @@ def build_ui() -> gr.Blocks:
         border-color: rgba(220, 38, 38, 0.6) !important;
         box-shadow: 0 4px 16px rgba(220, 38, 38, 0.2) !important;
         transform: translateY(-1px);
+    }
+    .ios-btn-danger:active,
+    .gradio-container button.stop:active,
+    .gradio-container button[variant="stop"]:active {
+        transform: scale(0.97) !important;
+        filter: blur(1px) brightness(0.9) !important;
     }
 
     /* Agent Bubbles */
@@ -1392,7 +1421,7 @@ def build_ui() -> gr.Blocks:
         border-radius: var(--radius-input) !important;
         border: 1px solid rgba(255,255,255,0.1) !important;
         border-top: 1px solid rgba(0,0,0,0.4) !important; /* Inset feel */
-        transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease !important;
+        transition: border-color 150ms var(--ease-out-strong), box-shadow 150ms var(--ease-out-strong), background 150ms var(--ease-out-strong) !important;
     }
     input:focus, textarea:focus, .gr-input:focus-within {
         background: rgba(0, 0, 0, 0.4) !important;
