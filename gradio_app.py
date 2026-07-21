@@ -706,12 +706,15 @@ class GradioApp:
         except Exception as e:
             return f"❌ 方案更新失败: {e}", ""
 
-    def generate_draft_action(self, raw_materials: str) -> Tuple[str, str, str, str, str]:
+    def generate_draft_action(self, raw_materials: str, progress=gr.Progress()) -> Tuple[str, str, str, str, str]:
         if not self.orchestrator or not self.orchestrator.plan:
             return "", "", "", "请先在「写作大纲方案」阶段确认方案，再开始写作", build_progress_badge("方案")
 
         try:
+            progress(0.2, desc="正在解析并研读原始素材...")
+            progress(0.5, desc="主笔正在起草正文，并交由各角色审核润色中 (此过程通常需要30-60秒，请耐心等待)...")
             self.orchestrator.write(raw_materials)
+            progress(0.9, desc="草稿已成型，正在进行最后整理...")
             draft = self.orchestrator.draft or "生成失败，请检查模型配置或 API Key 是否有效"
 
             agent_log = self.orchestrator.get_agent_log_display()
@@ -735,7 +738,7 @@ class GradioApp:
                 draft,
                 agent_log,
                 multi_ver,
-                "草稿生成完成。已同步生成多格式版本，请前往下一阶段进行审查。",
+                "✅ 草稿已生成！由于系统已移除自动跳页，请点击上方【智能审查与人工介入】进入下一步。",
                 build_progress_badge("生成")
             )
         except Exception as e:
@@ -1108,6 +1111,21 @@ def build_ui() -> gr.Blocks:
         /* Apple-Style Easing & Animation */
         --ease-out-strong: cubic-bezier(0.23, 1, 0.32, 1);
         --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+
+        /* ── Override Gradio's built-in theme variables ──
+           Gradio injects these into every container via its Svelte theme system.
+           By overriding them here we guarantee transparent interiors
+           regardless of which hashed class names Gradio uses internally. */
+        --body-background-fill: transparent !important;
+        --background-fill-primary: transparent !important;
+        --background-fill-secondary: transparent !important;
+        --border-color-primary: transparent !important;
+        --block-background-fill: transparent !important;
+        --block-border-color: transparent !important;
+        --block-shadow: none !important;
+        --panel-background-fill: transparent !important;
+        --panel-border-color: transparent !important;
+        --color-background-primary: transparent !important;
     }
 
     @keyframes smooth-enter {
@@ -1118,12 +1136,31 @@ def build_ui() -> gr.Blocks:
     /* Container Background - Apple Music Fluid Style */
     .gradio-container {
         position: relative;
-        overflow: hidden;
-        z-index: 1; /* Establishes stacking context */
+        /* DO NOT set overflow: hidden — it clips the star background on some browsers */
+        z-index: 1;
         background-color: var(--color-sky-deep) !important;
-        
+        border: none !important;
+        box-shadow: none !important;
+        outline: none !important;
+        padding: 2% 4% !important;
         font-family: "Inter", "Noto Sans SC", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif !important;
         color: var(--color-ink) !important;
+    }
+
+    /* Nuclear reset: clear ALL Gradio internal wrapper borders, backgrounds, shadows.
+       These classes are injected by Gradio's svelte runtime and can't be targeted reliably
+       with a shallow child combinator (>). Use a descendant rule + !important. */
+    .gradio-container .main,
+    .gradio-container .wrap,
+    .gradio-container .contain,
+    .gradio-container .form,
+    .gradio-container .gap,
+    .gradio-container .flex,
+    .gradio-container .block {
+        border: none !important;
+        box-shadow: none !important;
+        outline: none !important;
+        background: transparent !important;
     }
 
     .gradio-container p, .gradio-container span, .gradio-container label,
@@ -1131,35 +1168,28 @@ def build_ui() -> gr.Blocks:
         color: var(--color-ink-body);
     }
 
-    /* Apple-Style Glassmorphism Surfaces (Separated to fix dropdown clipping) */
+    /* 1. RESET GRADIO DEFAULT BOXES (Remove Matryoshka effect) */
     .gradio-container .gr-panel,
-    .gradio-container .gr-box,
     .gradio-container .gr-group,
     .gradio-container .gr-form,
     .gradio-container fieldset,
-    .gradio-container [class*="panel"],
-    .gradio-container [class*="box"],
-    .gradio-container [class*="group"] {
-        background: rgba(13, 22, 43, 0.55) !important;
-        color: var(--color-ink-body) !important;
-        border: 1px solid rgba(79, 126, 164, 0.2) !important;
-        border-top: 1px solid rgba(141, 179, 195, 0.25) !important;
-        border-left: 1px solid rgba(141, 179, 195, 0.18) !important;
-        border-radius: var(--radius-card) !important;
-        padding: 16px !important;
-        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255,255,255,0.06) !important;
-        animation: smooth-enter 300ms var(--ease-out-strong) both;
+    .gradio-container .gr-block,
+    .gradio-container .gr-box {
+        background: transparent !important;
+        border: none !important;
+        box-shadow: none !important;
     }
 
     /* Accordion: special deep-blue glass styling */
     .gradio-container [class*="accordion"],
     .gradio-container details {
         background: rgba(13, 22, 43, 0.6) !important;
+        backdrop-filter: blur(24px) saturate(180%) !important;
+        -webkit-backdrop-filter: blur(24px) saturate(180%) !important;
         border: 1px solid rgba(100, 139, 168, 0.25) !important;
         border-radius: var(--radius-card) !important;
         box-shadow: 0 4px 24px rgba(0, 0, 0, 0.35) !important;
         overflow: hidden;
-        animation: smooth-enter 300ms var(--ease-out-strong) both;
     }
 
     /* Accordion header/summary button */
@@ -1183,18 +1213,19 @@ def build_ui() -> gr.Blocks:
     .gradio-container details > summary:active,
     .gradio-container [class*="accordion"] > button:active {
         transform: scale(0.98);
-        filter: blur(1px) brightness(0.9);
+        filter: brightness(0.85);
     }
 
     /* Apply Blur ONLY to major structural containers */
     .sidebar-pane, .workspace-pane {
         background: rgba(20, 35, 60, 0.15) !important;
+        backdrop-filter: blur(24px) saturate(180%) !important;
+        -webkit-backdrop-filter: blur(24px) saturate(180%) !important;
         border: 1px solid rgba(255, 255, 255, 0.08) !important;
         border-top: 1px solid rgba(255, 255, 255, 0.15) !important;
         border-left: 1px solid rgba(255, 255, 255, 0.12) !important;
         border-radius: var(--radius-card);
         box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3) !important;
-
     }
     
     /* Fix global dropdown Z-index in case Gradio doesn't portal it correctly */
@@ -1222,20 +1253,24 @@ def build_ui() -> gr.Blocks:
         color: var(--color-ink-body) !important;
     }
 
-    /* Starry Cards */
+    /* Specific Glass Cards */
     .ios-card {
-        background: rgba(255, 255, 255, 0.03) !important;
-        border: 1px solid rgba(255, 255, 255, 0.1) !important;
-        border-radius: var(--radius-card);
+        background: rgba(13, 22, 43, 0.55) !important;
+        backdrop-filter: blur(24px) saturate(180%) !important;
+        -webkit-backdrop-filter: blur(24px) saturate(180%) !important;
+        border: 1px solid rgba(79, 126, 164, 0.2) !important;
+        border-top: 1px solid rgba(141, 179, 195, 0.25) !important;
+        border-left: 1px solid rgba(141, 179, 195, 0.18) !important;
+        border-radius: var(--radius-card) !important;
         padding: 16px;
-        margin-bottom: 8px;
-        transition: box-shadow 0.25s;
+        margin-bottom: 12px;
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255,255,255,0.06) !important;
+        transition: box-shadow 300ms var(--ease-out-strong), border-color 300ms var(--ease-out-strong);
     }
     .ios-card:hover {
-        
-        background: rgba(255, 255, 255, 0.06) !important;
-        box-shadow: 0 8px 24px rgba(223, 203, 92, 0.15); /* Moon glow */
-        border-color: rgba(223, 203, 92, 0.4) !important;
+        background: rgba(13, 22, 43, 0.65) !important;
+        box-shadow: 0 8px 32px rgba(223, 203, 92, 0.15), inset 0 1px 0 rgba(255,255,255,0.06) !important; /* Moon glow */
+        border-color: rgba(223, 203, 92, 0.3) !important;
     }
     .ios-card * {
         color: var(--color-ink-body) !important;
@@ -1323,7 +1358,7 @@ def build_ui() -> gr.Blocks:
     }
     .ios-btn-primary:active {
         transform: scale(0.97) !important;
-        filter: blur(0.5px) !important;
+        filter: brightness(0.9) !important;
         box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05), 0 1px 2px rgba(0, 0, 0, 0.2) !important;
     }
 
@@ -1356,7 +1391,7 @@ def build_ui() -> gr.Blocks:
     .gradio-container button[variant="secondary"]:active,
     .gradio-container button:not(.ios-btn-primary):not(.ios-btn-danger):not([class*="tab"]):not([class*="accordion"]):not(.selected):active {
         transform: scale(0.97) !important;
-        filter: blur(0.5px) !important;
+        filter: brightness(0.9) !important;
         box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.02), 0 1px 2px rgba(0, 0, 0, 0.2) !important;
     }
 
@@ -1386,7 +1421,7 @@ def build_ui() -> gr.Blocks:
     .gradio-container button.stop:active,
     .gradio-container button[variant="stop"]:active {
         transform: scale(0.97) !important;
-        filter: blur(0.5px) !important;
+        filter: brightness(0.85) !important;
         box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.02), 0 1px 2px rgba(0, 0, 0, 0.2) !important;
     }
 
@@ -1401,21 +1436,26 @@ def build_ui() -> gr.Blocks:
 
     }
 
-    /* Text Inputs */
-    .gradio-container input, .gradio-container textarea {
-        color: var(--color-ink) !important;
+    /* Unified Input Containers (The actual input fields, NOT the outer wrapper) */
+    .gradio-container input:not([type="checkbox"]):not([type="radio"]), 
+    .gradio-container textarea {
         background: rgba(0, 0, 0, 0.25) !important;
         border-radius: var(--radius-input) !important;
-        border: 1px solid rgba(255,255,255,0.1) !important;
-        border-top: 1px solid rgba(0,0,0,0.4) !important; /* Inset feel */
+        border: 1px solid rgba(255, 255, 255, 0.1) !important;
+        border-top: 1px solid rgba(0, 0, 0, 0.4) !important;
+        box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.2) !important;
         transition: border-color 150ms var(--ease-out-strong), box-shadow 150ms var(--ease-out-strong), background 150ms var(--ease-out-strong) !important;
+        color: var(--color-ink) !important;
     }
-    input:focus, textarea:focus, .gr-input:focus-within {
+    
+    .gradio-container input:not([type="checkbox"]):not([type="radio"]):focus, 
+    .gradio-container textarea:focus {
         background: rgba(0, 0, 0, 0.4) !important;
         border-color: var(--color-accent) !important;
         box-shadow: 0 0 0 2px var(--color-accent-focus), inset 0 2px 4px rgba(0,0,0,0.5) !important;
-        outline: none;
+        outline: none !important;
     }
+
 
     /* Selected Tabs */
     button.selected {
@@ -1442,7 +1482,7 @@ def build_ui() -> gr.Blocks:
         border-radius: var(--radius-button);
         border: 1px solid rgba(255, 255, 255, 0.1);
         white-space: nowrap;
-        transition: all 0.25s ease-out;
+        transition: background 250ms var(--ease-out-strong), border-color 250ms var(--ease-out-strong), color 250ms var(--ease-out-strong), box-shadow 250ms var(--ease-out-strong);
         background: rgba(255, 255, 255, 0.03);
     }
     .step-num {
@@ -1497,11 +1537,87 @@ def build_ui() -> gr.Blocks:
         outline-offset: 2px !important;
     }
 
+    /* New Sidebar Components */
+    .user-identity-bar {
+        background: rgba(13, 22, 43, 0.4) !important;
+        border-radius: var(--radius-button);
+        padding: 4px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        border: 1px solid rgba(141, 179, 195, 0.15);
+    }
+    .user-status-text {
+        font-size: 13px;
+        color: var(--color-ink-muted) !important;
+        padding-left: 4px;
+        margin-top: 4px !important;
+        margin-bottom: 12px !important;
+    }
+    .sidebar-footer {
+        margin-top: 24px !important;
+        padding-top: 16px;
+        border-top: 1px solid rgba(255, 255, 255, 0.08);
+    }
+    .sidebar-footer-btn {
+        background: transparent !important;
+        border: none !important;
+        box-shadow: none !important;
+        color: var(--color-ink-muted) !important;
+        font-size: 13px !important;
+        padding: 8px !important;
+        justify-content: flex-start !important;
+        min-height: 32px !important;
+    }
+    .sidebar-footer-btn:hover {
+        background: rgba(255, 255, 255, 0.05) !important;
+        color: var(--color-ink) !important;
+    }
+
+    /* prefers-reduced-motion: keep opacity/color feedback; remove movement & scale */
     @media (prefers-reduced-motion: reduce) {
-        *, *::before, *::after {
+        /* Remove ALL movement, scaling, and sliding — these cause vestibular discomfort */
+        *,
+        *::before,
+        *::after {
             animation-duration: 0.01ms !important;
             animation-iteration-count: 1 !important;
-            transition-duration: 0.01ms !important;
+        }
+        /* Collapse transitions to opacity/color only — NO transform, NO blur */
+        .ios-btn-primary,
+        .ios-btn-secondary,
+        .ios-btn-danger,
+        .gradio-container button {
+            transition: opacity 150ms ease, background 150ms ease, border-color 150ms ease !important;
+        }
+        .ios-btn-primary:hover,
+        .ios-btn-secondary:hover,
+        .ios-btn-danger:hover,
+        .gradio-container button:hover {
+            transform: none !important;
+        }
+        .ios-btn-primary:active,
+        .ios-btn-secondary:active,
+        .ios-btn-danger:active,
+        .gradio-container button:active {
+            transform: none !important;
+            opacity: 0.75 !important;
+            filter: none !important;
+        }
+        .gradio-container details > summary:hover,
+        .gradio-container [class*="accordion"] > button:hover {
+            transform: none !important;
+        }
+        .gradio-container details > summary:active,
+        .gradio-container [class*="accordion"] > button:active {
+            transform: none !important;
+            filter: brightness(0.85) !important;
+        }
+        .ios-card:hover {
+            transform: none !important;
+        }
+        .step-badge {
+            transition: background 150ms ease, border-color 150ms ease, color 150ms ease !important;
         }
     }
     """
@@ -1531,27 +1647,26 @@ def build_ui() -> gr.Blocks:
             # 左侧资源栏 (Finder Sidebar)
             # ═══════════════════════════════════════════════════════
             with gr.Column(scale=1, elem_classes="sidebar-pane"):
-                gr.Markdown("### 资源管理器")
-
-                # ── 身份卡 ──
-                with gr.Group(elem_classes="ios-card"):
-                    gr.Markdown("**用户身份**")
+                # ── 身份栏 ──
+                with gr.Row(elem_classes="user-identity-bar"):
                     user_input = gr.Textbox(
-                        label="登录用户名",
+                        show_label=False,
                         placeholder="输入姓名以切换或建立新空间",
-                        value=app.current_user_name or ""
+                        value=app.current_user_name or "",
+                        scale=2
                     )
-                    user_login_btn = gr.Button("确认身份", variant="secondary", elem_classes="ios-btn-secondary")
-                    user_status_msg = gr.Markdown(f"当前用户: **{app.current_user_name or '未选择'}**")
+                    user_login_btn = gr.Button("确认身份", variant="secondary", elem_classes="ios-btn-secondary", scale=1)
+                
+                user_status_msg = gr.Markdown(f"当前用户: **{app.current_user_name or '未选择'}**", elem_classes="user-status-text")
 
                 # ── 项目管理器 ──
                 with gr.Accordion("项目工程", open=True):
                     project_selector = gr.Dropdown(
                         choices=app.get_projects_list(),
                         label="当前活动项目",
+                        show_label=True,
                         value=app.get_projects_list()[0] if app.get_projects_list() else None
                     )
-                    
                     with gr.Row():
                         proj_create_trigger = gr.Button("新建项目", variant="secondary", size="sm", elem_classes="ios-btn-secondary")
                         proj_delete_btn = gr.Button("删除项目", variant="stop", size="sm", elem_classes="ios-btn-danger")
@@ -1559,7 +1674,7 @@ def build_ui() -> gr.Blocks:
                     # 删除确认面板
                     with gr.Column(visible=False) as confirm_delete_box:
                         gr.Markdown("### 确认删除")
-                        gr.Markdown("此操作不可撤销，项目中的所有草稿和历史将被永久删除。")
+                        gr.Markdown("此操作不可撤销，项目将被永久删除。")
                         with gr.Row():
                             confirm_delete_yes_btn = gr.Button("确认删除", variant="stop", size="sm", elem_classes="ios-btn-danger")
                             confirm_delete_no_btn = gr.Button("取消", variant="secondary", size="sm", elem_classes="ios-btn-secondary")
@@ -1573,7 +1688,7 @@ def build_ui() -> gr.Blocks:
                             new_proj_cancel_btn = gr.Button("取消", variant="secondary", size="sm")
 
                 # ── 参考素材库 ──
-                with gr.Accordion("参考资料文件夹", open=False):
+                with gr.Accordion("参考资料库", open=False):
                     topic_selector = gr.Dropdown(
                         choices=app.get_topics_list(),
                         label="主题分类",
@@ -1596,16 +1711,17 @@ def build_ui() -> gr.Blocks:
                             url_save_btn = gr.Button("执行导入", variant="primary", size="sm", elem_classes="ios-btn-primary")
                             url_cancel_btn = gr.Button("取消", variant="secondary", size="sm")
 
-                # ── 系统快捷设置 ──
-                with gr.Accordion("系统设置", open=False):
+                # ── 底部快捷操作 & 系统设置 ──
+                with gr.Accordion("系统与个性化", open=False):
                     bg_theme_selector = gr.Dropdown(
                         label="背景美学风格",
                         choices=["经典流光 (Classic Fluid)", "星月夜漩涡 (Starry Night)"],
                         value="星月夜漩涡 (Starry Night)"
                     )
-                    with gr.Row():
-                        goto_api_btn = gr.Button("API 设置", elem_classes="ios-btn-secondary")
-                        goto_profile_btn = gr.Button("用户画像", elem_classes="ios-btn-secondary")
+                
+                with gr.Row(elem_classes="sidebar-footer"):
+                    goto_api_btn = gr.Button("API 设置", elem_classes="ios-btn-secondary sidebar-footer-btn")
+                    goto_profile_btn = gr.Button("用户画像", elem_classes="ios-btn-secondary sidebar-footer-btn")
 
                 global_status_msg = gr.Markdown()
 
@@ -1614,8 +1730,17 @@ def build_ui() -> gr.Blocks:
             # ═══════════════════════════════════════════════════════
             with gr.Column(scale=3, elem_classes="workspace-pane"):
                 
+                # ─── 面板 0: 空状态启动页 ───
+                with gr.Column(visible=True, elem_classes="empty-state-card ws-panel-visible") as splash_screen:
+                    gr.Markdown("""
+                    <div style="text-align: center; padding: 120px 20px;">
+                        <h2 style="font-size: 28px; margin-bottom: 16px;">欢迎来到公文写作智能助手</h2>
+                        <p style="color: var(--color-ink-muted); font-size: 16px;">请在左侧登录并选择或创建一个项目工程，即可开始您的沉浸式写作流程。</p>
+                    </div>
+                    """)
+
                 # ─── 面板 A: 写作项目工作台 ───
-                with gr.Column(visible=True, elem_classes="ws-panel-visible") as project_panel:
+                with gr.Column(visible=False, elem_classes="ws-panel-hidden") as project_panel:
                     # 顶部进度和状态
                     with gr.Row():
                         with gr.Column(scale=2):
@@ -1653,29 +1778,41 @@ def build_ui() -> gr.Blocks:
                                 q_answer_input = gr.Textbox(label="您的回答", lines=4, placeholder="请提供详细素材，供智能写作参考。若无需要可点击跳过...")
                                 
                                 with gr.Row():
+                                    q_btn_submit = gr.Button("提交回答", variant="primary", elem_classes="ios-btn-primary")
+                                
+                                with gr.Row():
                                     q_btn_back = gr.Button("回退", elem_classes="ios-btn-secondary")
                                     q_btn_skip = gr.Button("跳过", elem_classes="ios-btn-secondary")
-                                    q_btn_submit = gr.Button("提交回答", variant="primary", elem_classes="ios-btn-primary")
                                     q_btn_finish = gr.Button("提前完成", elem_classes="ios-btn-secondary")
-                                    q_btn_reset = gr.Button("重头开始(清空进度)", variant="stop", elem_classes="ios-btn-secondary")
+                                
+                                gr.Markdown("<br>")
+                                
+                                with gr.Row():
+                                    q_btn_reset = gr.Button("重头开始(清空进度)", variant="stop", elem_classes="ios-btn-danger")
+                                
+                                with gr.Column(visible=False) as confirm_reset_box:
+                                    gr.Markdown("⚠️ **危险操作**：确定要清空当前问卷的所有进度并重头开始吗？此操作无法撤销。")
+                                    with gr.Row():
+                                        confirm_reset_btn = gr.Button("确认清空", variant="stop", elem_classes="ios-btn-danger")
+                                        cancel_reset_btn = gr.Button("取消", elem_classes="ios-btn-secondary")
                                 
                                 q_event_msg = gr.Markdown()
                             
-                            with gr.Column(visible=True, elem_classes="empty-state-card ws-panel-hidden") as question_empty_state:
-                                gr.Markdown("""
-                                <h3>欢迎来到公文写作助手</h3>
-                                <p>请在左侧登录并选择或创建一个项目，即可开始回答写作需求问卷。</p>
-                                """)
-                            
-                            def sync_question_card_visibility():
+                            def sync_workspace_visibility(proj_name=None):
+                                has_proj = bool(proj_name) if proj_name is not None else bool(app.current_project_id)
                                 return {
-                                    question_card: gr.update(elem_classes="ws-panel-visible" if app.current_project_id else "ws-panel-hidden"),
-                                    question_empty_state: gr.update(elem_classes="ws-panel-hidden" if app.current_project_id else "empty-state-card ws-panel-visible")
+                                    project_panel: gr.update(elem_classes="ws-panel-visible" if has_proj else "ws-panel-hidden"),
+                                    splash_screen: gr.update(elem_classes="ws-panel-hidden" if has_proj else "empty-state-card ws-panel-visible")
                                 }
 
                             demo.load(
-                                fn=sync_question_card_visibility,
-                                outputs=[question_card, question_empty_state]
+                                fn=sync_workspace_visibility,
+                                outputs=[project_panel, splash_screen]
+                            )
+                            project_selector.change(
+                                fn=sync_workspace_visibility,
+                                inputs=[project_selector],
+                                outputs=[project_panel, splash_screen]
                             )
 
                         # Tab 2: 智能方案生成
@@ -1726,10 +1863,10 @@ def build_ui() -> gr.Blocks:
                                         review_issues_list = gr.Markdown()
                                 with gr.Column(scale=1):
                                     with gr.Group(elem_classes="ios-card"):
-                                        gr.Markdown("**格式规范合规度(GB/T 9704-2012)**")
+                                        gr.Markdown("**格式规范合规度(GB/T 9704-2012 国家党政机关公文格式标准)**")
                                         review_format_text = gr.Markdown()
                                         
-                            gr.Markdown("#### 人工介入更新 (HITL)")
+                            gr.Markdown("#### 人工介入更新 (HITL: Human-in-the-loop)")
                             manual_edit_text = gr.Textbox(label="在此处对文稿进行人工细节微调...", lines=8, max_lines=30)
                             with gr.Row():
                                 manual_save_btn = gr.Button("保存手动修改", variant="secondary", elem_classes="ios-btn-secondary")
@@ -1815,13 +1952,12 @@ def build_ui() -> gr.Blocks:
         def login_user_fn(name):
             msg, projects, default_proj = app.switch_or_create_user(name)
             # 登录后仅切换用户空间，不自动加载项目
+            msg = msg + f"\n\n欢迎，{name}。请新建或选择项目开始写作。"
             return (
                 msg,
                 gr.update(value=f"当前用户: **{name}**", visible=True),
                 gr.update(choices=projects, value=None),
                 gr.update(choices=app.get_topics_list(), value=None),
-                # auto_msgs: 清空右侧面板，不加载任何项目
-                gr.update(value=f"欢迎，{name}。请新建或选择项目开始写作。"),
                 gr.update(value="## 请新建项目以开始"),
                 "",  # plan_output_text
                 "",  # draft_editor
@@ -1847,7 +1983,7 @@ def build_ui() -> gr.Blocks:
             inputs=[user_input],
             outputs=[
                 global_status_msg, user_status_msg, project_selector, topic_selector,
-                global_status_msg, active_proj_title, plan_output_text,
+                active_proj_title, plan_output_text,
                 draft_editor, coord_agent_logs, review_summary_text,
                 final_draft_output, final_multi_versions, progress_badge_html,
                 routing_box, routing_q_title, routing_q_desc,
@@ -2057,13 +2193,31 @@ def build_ui() -> gr.Blocks:
             ]
         )
         
+        def show_confirm_reset():
+            return gr.update(visible=True)
+            
+        def hide_confirm_reset():
+            return gr.update(visible=False)
+            
+        q_btn_reset.click(
+            fn=show_confirm_reset,
+            outputs=[confirm_reset_box]
+        )
+        
+        cancel_reset_btn.click(
+            fn=hide_confirm_reset,
+            outputs=[confirm_reset_box]
+        )
+        
         def reset_project_and_refresh():
             proj_name = app.reset_project()
             if proj_name:
-                return select_project_fn(proj_name)
-            return ["未重置"] + [gr.update()] * 18
+                results = list(select_project_fn(proj_name))
+                results.append(gr.update(visible=False))
+                return results
+            return ["未重置"] + [gr.update()] * 18 + [gr.update(visible=False)]
             
-        q_btn_reset.click(
+        confirm_reset_btn.click(
             fn=reset_project_and_refresh,
             outputs=[
                 global_status_msg, active_proj_title, plan_output_text,
@@ -2072,7 +2226,7 @@ def build_ui() -> gr.Blocks:
                 routing_box, routing_q_title, routing_q_desc,
                 routing_options_disp, routing_options_dropdown,
                 current_q_prog, current_q_title, current_q_desc,
-                current_q_hint, manual_edit_text
+                current_q_hint, manual_edit_text, confirm_reset_box
             ]
         )
 
@@ -2103,9 +2257,6 @@ def build_ui() -> gr.Blocks:
                 write_event_msg, progress_badge_html
             ],
             concurrency_limit=1
-        ).then(
-            fn=lambda: gr.update(selected="tab_review"),
-            outputs=[project_tabs]
         )
 
         def safe_write_next():
@@ -2162,16 +2313,7 @@ def build_ui() -> gr.Blocks:
             res = app.finalize_project_action()
             return res
 
-        # 切换到最终 Tab 时自动触发交付计算
-        def on_tab_select(evt: gr.SelectData):
-            if evt.value and "交付" in str(evt.value):
-                return finalize_trigger_fn()
-            return ("", "", "", build_progress_badge("审查"))
 
-        project_tabs.select(
-            fn=on_tab_select,
-            outputs=[final_draft_output, final_multi_versions, workflow_summary_text, progress_badge_html]
-        )
 
         export_finished_btn.click(
             fn=finalize_trigger_fn,
