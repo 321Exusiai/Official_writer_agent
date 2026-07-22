@@ -344,7 +344,7 @@ class Orchestrator:
     # 写作阶段
     # ═══════════════════════════════════════════════════════════
 
-    def write(self, raw_materials: str = "") -> str:
+    def write(self, raw_materials: str = "", progress_callback=None) -> str:
         """
         多智能体协作写作流程（V3 核心改进）
 
@@ -353,13 +353,21 @@ class Orchestrator:
           2. 多智能体协商确定写作方案
           3. 使用 MultiDocGenerator 生成多版本文稿（通讯/消息/简报）
           4. 返回主版本，其他版本存入 multi_versions
+
+        progress_callback: 可选回调，签名 (progress: float, desc: str) -> None
         """
+        def _notify(progress, desc):
+            if progress_callback:
+                progress_callback(progress, desc)
+
         if not self.plan:
             raise ValueError("请先调用generate_plan()生成写作方案")
 
         self.state = OrchestratorState.WRITING
         self.agent_log = []
         self.multi_versions = {}
+
+        _notify(0.1, "正在配置写作智能体...")
 
         # 第1步：Writer 配置
         config = WriterConfig(
@@ -375,7 +383,7 @@ class Orchestrator:
         self._log_agent("系统", f"写作模式: {get_mode_profile(self.writing_mode).name}")
         self._log_agent("系统", f"文种: {self.plan.doc_type_name}, 风格: {self.plan.style_name}")
 
-        # 第2步：多智能体协商（民主协商机制）
+        _notify(0.2, "多智能体协商中（主笔/审稿人/格式专家/知识库）...")
         # 传递完整的 plan 信息，确保语义完整性，避免摘要引入 bias
         context_info = {
             "brief": str(self.brief) if self.brief else "",
@@ -410,11 +418,13 @@ class Orchestrator:
                 self._log_agent(role.value, "无意见")
 
         # 第3步：所有 Agent 主动预警（自检）
+        _notify(0.35, "各智能体自检与预警中...")
         warnings = self.coordinator.collect_proactive_reports()
         for w in warnings:
             self._log_agent(f"{w.get('agent', 'Agent')} 预警", w.get("alert", ""))
 
         # 第4步：生成主版本（Writer Agent）
+        _notify(0.5, "主笔正在起草正文（通常需要30-60秒）...")
         system_prompt = self.writer.build_system_prompt()
         user_prompt = self.writer.build_user_prompt()
 
@@ -425,8 +435,10 @@ class Orchestrator:
             self._log_agent("Writer", "初稿生成失败，返回空内容")
 
         # 第4步：一文多体生成（MultiDocGenerator）
+        _notify(0.8, "正在生成多版本文稿（一文多体）...")
         self._generate_multi_versions()
 
+        _notify(0.95, "写作完成，正在整理结果...")
         self.state = OrchestratorState.REVIEWING
 
         if self._on_draft_ready:

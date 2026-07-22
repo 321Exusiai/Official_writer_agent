@@ -1,5 +1,5 @@
 """
-公文写作智能体 — Web 交互台 V10 (Premium Workspace Edition)
+公文写作智能体 — Web 交互台 V11 (GovWrite Craft Studio)
 
 设计规范：
 1. 极简高端 iOS 卡片式视觉风格 (Premium minimalist iOS card aesthetics)
@@ -1005,7 +1005,7 @@ THEME_CLASSIC_HTML = """
             radial-gradient(circle at 70% 70%, rgba(223, 203, 92, 0.45) 0%, transparent 45%),
             radial-gradient(circle at 70% 30%, rgba(40, 60, 37, 0.7) 0%, transparent 50%),
             radial-gradient(circle at 30% 70%, rgba(100, 139, 168, 0.6) 0%, transparent 50%) !important;
-        filter: blur(100px) saturate(140%) !important;
+        filter: blur(100px) saturate(120%) !important;
         animation: fluid-rotate-1 25s cubic-bezier(0.4, 0, 0.2, 1) infinite !important;
         pointer-events: none;
     }
@@ -1021,7 +1021,7 @@ THEME_CLASSIC_HTML = """
             radial-gradient(circle at 50% 20%, rgba(227, 216, 150, 0.4) 0%, transparent 40%),
             radial-gradient(circle at 20% 50%, rgba(28, 55, 101, 0.9) 0%, transparent 45%),
             radial-gradient(circle at 80% 80%, rgba(79, 126, 164, 0.5) 0%, transparent 45%) !important;
-        filter: blur(80px) saturate(160%) !important;
+        filter: blur(80px) saturate(130%) !important;
         animation: fluid-rotate-2 30s cubic-bezier(0.25, 0.1, 0.25, 1) infinite reverse !important;
         pointer-events: none;
         mix-blend-mode: color-dodge !important;
@@ -1103,14 +1103,14 @@ def build_ui() -> gr.Blocks:
         --color-danger-hover: oklch(75% 0.18 20);
         
         /* Geometry */
-        --radius-button: 12px;
-        --radius-card: 20px;
+        --radius-button: 14px;
+        --radius-card: 22px;
         --radius-input: 12px;
-        --radius-sm: 8px;
+        --radius-sm: 10px;
 
         /* Apple-Style Easing & Animation */
-        --ease-out-strong: cubic-bezier(0.23, 1, 0.32, 1);
-        --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+        --ease-out-expo: cubic-bezier(0.23, 1, 0.32, 1);
+        --ease-in-out-quart: cubic-bezier(0.77, 0, 0.175, 1);
 
         /* ── Override Gradio's built-in theme variables ──
            Gradio injects these into every container via its Svelte theme system.
@@ -1184,8 +1184,8 @@ def build_ui() -> gr.Blocks:
     .gradio-container [class*="accordion"],
     .gradio-container details {
         background: rgba(13, 22, 43, 0.6) !important;
-        backdrop-filter: blur(24px) saturate(180%) !important;
-        -webkit-backdrop-filter: blur(24px) saturate(180%) !important;
+        backdrop-filter: blur(28px) saturate(130%) !important;
+        -webkit-backdrop-filter: blur(28px) saturate(130%) !important;
         border: 1px solid rgba(100, 139, 168, 0.25) !important;
         border-radius: var(--radius-card) !important;
         box-shadow: 0 4px 24px rgba(0, 0, 0, 0.35) !important;
@@ -1203,12 +1203,12 @@ def build_ui() -> gr.Blocks:
         padding: 12px 16px !important;
         font-weight: 600 !important;
         letter-spacing: 0.01em;
-        transition: background 150ms var(--ease-out-strong), transform 150ms var(--ease-out-strong), filter 150ms var(--ease-out-strong) !important;
+        transition: background 220ms var(--ease-out-expo), transform 200ms var(--ease-out-expo), filter 200ms var(--ease-out-expo) !important;
     }
     .gradio-container details > summary:hover,
     .gradio-container [class*="accordion"] > button:hover {
         background: rgba(40, 64, 111, 0.65) !important;
-        transform: translateY(-1px);
+        transform: translateY(-0.5px);
     }
     .gradio-container details > summary:active,
     .gradio-container [class*="accordion"] > button:active {
@@ -1219,8 +1219,8 @@ def build_ui() -> gr.Blocks:
     /* Apply Blur ONLY to major structural containers */
     .sidebar-pane, .workspace-pane {
         background: rgba(20, 35, 60, 0.15) !important;
-        backdrop-filter: blur(24px) saturate(180%) !important;
-        -webkit-backdrop-filter: blur(24px) saturate(180%) !important;
+        backdrop-filter: blur(28px) saturate(130%) !important;
+        -webkit-backdrop-filter: blur(28px) saturate(130%) !important;
         border: 1px solid rgba(255, 255, 255, 0.08) !important;
         border-top: 1px solid rgba(255, 255, 255, 0.15) !important;
         border-left: 1px solid rgba(255, 255, 255, 0.12) !important;
@@ -1256,8 +1256,8 @@ def build_ui() -> gr.Blocks:
     /* Specific Glass Cards */
     .ios-card {
         background: rgba(13, 22, 43, 0.55) !important;
-        backdrop-filter: blur(24px) saturate(180%) !important;
-        -webkit-backdrop-filter: blur(24px) saturate(180%) !important;
+        backdrop-filter: blur(28px) saturate(130%) !important;
+        -webkit-backdrop-filter: blur(28px) saturate(130%) !important;
         border: 1px solid rgba(79, 126, 164, 0.2) !important;
         border-top: 1px solid rgba(141, 179, 195, 0.25) !important;
         border-left: 1px solid rgba(141, 179, 195, 0.18) !important;
@@ -1265,7 +1265,7 @@ def build_ui() -> gr.Blocks:
         padding: 16px;
         margin-bottom: 12px;
         box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255,255,255,0.06) !important;
-        transition: box-shadow 300ms var(--ease-out-strong), border-color 300ms var(--ease-out-strong);
+        transition: box-shadow 300ms var(--ease-out-expo), border-color 300ms var(--ease-out-expo);
     }
     .ios-card:hover {
         background: rgba(13, 22, 43, 0.65) !important;
@@ -1345,13 +1345,13 @@ def build_ui() -> gr.Blocks:
         border-radius: var(--radius-button) !important;
         border: 1px solid rgba(223, 203, 92, 0.2) !important;
         font-weight: 600 !important;
-        transition: transform 150ms var(--ease-out-strong), box-shadow 300ms var(--ease-out-strong), filter 150ms ease, background 300ms var(--ease-out-strong) !important;
+        transition: transform 150ms var(--ease-out-expo), box-shadow 300ms var(--ease-out-expo), filter 150ms ease, background 300ms var(--ease-out-expo) !important;
         box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.2), 0 2px 8px rgba(0, 0, 0, 0.3) !important;
         min-height: 44px;
         text-shadow: 0 1px 2px rgba(0,0,0,0.5);
     }
     .ios-btn-primary:hover {
-        transform: translateY(-1px);
+        transform: translateY(-0.5px);
         background: radial-gradient(100% 120% at 50% 50%, rgba(223, 203, 92, 0.5) 0%, rgba(196, 138, 24, 0.15) 50%, rgba(13, 22, 43, 0.95) 100%), #0D162B !important;
         border-color: rgba(223, 203, 92, 0.5) !important;
         box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.3), 0 6px 20px rgba(223, 203, 92, 0.25), 0 0 12px rgba(223, 203, 92, 0.15) !important;
@@ -1372,7 +1372,7 @@ def build_ui() -> gr.Blocks:
         border-radius: var(--radius-button) !important;
         border: 1px solid rgba(100, 139, 168, 0.2) !important;
         font-weight: 500 !important;
-        transition: transform 150ms var(--ease-out-strong), box-shadow 300ms var(--ease-out-strong), filter 150ms ease, background 300ms var(--ease-out-strong), border-color 300ms ease !important;
+        transition: transform 150ms var(--ease-out-expo), box-shadow 300ms var(--ease-out-expo), filter 150ms ease, background 300ms var(--ease-out-expo), border-color 300ms ease !important;
         box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 2px 6px rgba(0, 0, 0, 0.2) !important;
         min-height: 40px;
     }
@@ -1380,7 +1380,7 @@ def build_ui() -> gr.Blocks:
     .gradio-container button.secondary:hover,
     .gradio-container button[variant="secondary"]:hover,
     .gradio-container button:not(.ios-btn-primary):not(.ios-btn-danger):not([class*="tab"]):not([class*="accordion"]):not(.selected):hover {
-        transform: translateY(-1px);
+        transform: translateY(-0.5px);
         background: radial-gradient(100% 120% at 50% 50%, rgba(141, 179, 195, 0.25) 0%, rgba(40, 64, 111, 0.3) 50%, rgba(13, 22, 43, 0.8) 100%), rgba(13, 22, 43, 0.9) !important;
         border-color: rgba(141, 179, 195, 0.4) !important;
         color: var(--color-ink) !important;
@@ -1404,14 +1404,14 @@ def build_ui() -> gr.Blocks:
         border-radius: var(--radius-button) !important;
         border: 1px solid rgba(220, 38, 38, 0.3) !important;
         font-weight: 500 !important;
-        transition: transform 150ms var(--ease-out-strong), box-shadow 300ms var(--ease-out-strong), filter 150ms ease, background 300ms var(--ease-out-strong) !important;
+        transition: transform 150ms var(--ease-out-expo), box-shadow 300ms var(--ease-out-expo), filter 150ms ease, background 300ms var(--ease-out-expo) !important;
         box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 2px 6px rgba(0, 0, 0, 0.2) !important;
         min-height: 44px;
     }
     .ios-btn-danger:hover,
     .gradio-container button.stop:hover,
     .gradio-container button[variant="stop"]:hover {
-        transform: translateY(-1px);
+        transform: translateY(-0.5px);
         background: radial-gradient(100% 120% at 50% 50%, rgba(220, 38, 38, 0.35) 0%, rgba(153, 27, 27, 0.15) 50%, rgba(13, 22, 43, 0.8) 100%), rgba(13, 22, 43, 0.9) !important;
         border-color: rgba(220, 38, 38, 0.5) !important;
         color: #FECACA !important;
@@ -1444,7 +1444,7 @@ def build_ui() -> gr.Blocks:
         border: 1px solid rgba(255, 255, 255, 0.1) !important;
         border-top: 1px solid rgba(0, 0, 0, 0.4) !important;
         box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.2) !important;
-        transition: border-color 150ms var(--ease-out-strong), box-shadow 150ms var(--ease-out-strong), background 150ms var(--ease-out-strong) !important;
+        transition: border-color 150ms var(--ease-out-expo), box-shadow 150ms var(--ease-out-expo), background 150ms var(--ease-out-expo) !important;
         color: var(--color-ink) !important;
     }
     
@@ -1482,7 +1482,7 @@ def build_ui() -> gr.Blocks:
         border-radius: var(--radius-button);
         border: 1px solid rgba(255, 255, 255, 0.1);
         white-space: nowrap;
-        transition: background 250ms var(--ease-out-strong), border-color 250ms var(--ease-out-strong), color 250ms var(--ease-out-strong), box-shadow 250ms var(--ease-out-strong);
+        transition: background 250ms var(--ease-out-expo), border-color 250ms var(--ease-out-expo), color 250ms var(--ease-out-expo), box-shadow 250ms var(--ease-out-expo);
         background: rgba(255, 255, 255, 0.03);
     }
     .step-num {
@@ -1574,6 +1574,55 @@ def build_ui() -> gr.Blocks:
         color: var(--color-ink) !important;
     }
 
+
+    /* ═══ THREE-COLUMN LAYOUT SYSTEM (V11) ═══ */
+    .layout-three-col {
+        display: flex !important;
+        flex-direction: row !important;
+        gap: 16px;
+        min-height: calc(100vh - 100px);
+    }
+    .layout-three-col > .col-sidebar {
+        flex: 0 0 280px !important;
+        max-width: 280px;
+        overflow-y: auto;
+    }
+    .layout-three-col > .col-canvas {
+        flex: 1 !important;
+        min-width: 0;
+        overflow-y: auto;
+    }
+    .layout-three-col > .col-agent-hub {
+        flex: 0 0 340px !important;
+        max-width: 340px;
+        overflow-y: auto;
+    }
+    /* Agent Hub card styling */
+    .agent-hub-card {
+        background: rgba(13, 22, 43, 0.45) !important;
+        backdrop-filter: blur(28px) saturate(150%) !important;
+        -webkit-backdrop-filter: blur(28px) saturate(150%) !important;
+        border: 1px solid rgba(100, 139, 168, 0.2) !important;
+        border-top: 1px solid rgba(141, 179, 195, 0.25) !important;
+        border-radius: var(--radius-card) !important;
+        padding: 16px;
+        margin-bottom: 12px;
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255,255,255,0.04) !important;
+    }
+    .agent-hub-card * { color: var(--color-ink-body) !important; }
+    .agent-hub-card h3, .agent-hub-card h4 {
+        color: var(--color-ink) !important;
+        font-size: 14px;
+        font-weight: 600;
+        margin-bottom: 8px;
+    }
+    /* Heatmap dots */
+    .review-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 4px; }
+    .review-dot.green { background: #238636; }
+    .review-dot.yellow { background: #DFCB5C; }
+    .review-dot.red { background: #F85149; }
+    .review-dot.gray { background: #484F58; }
+
     /* prefers-reduced-motion: keep opacity/color feedback; remove movement & scale */
     @media (prefers-reduced-motion: reduce) {
         /* Remove ALL movement, scaling, and sliding — these cause vestibular discomfort */
@@ -1628,7 +1677,7 @@ def build_ui() -> gr.Blocks:
     }
     """
 
-    with gr.Blocks(title="公文写作智能体 V10", css=custom_css) as demo:
+    with gr.Blocks(title="公文写作智能体 V11", css=custom_css) as demo:
         # 动态背景 CSS 注入
         dynamic_theme_css = gr.HTML(value=THEME_STARRY_NIGHT_HTML, visible=True)
         # 全局状态字典
@@ -1648,11 +1697,11 @@ def build_ui() -> gr.Blocks:
             """
         )
 
-        with gr.Row():
+        with gr.Row(elem_classes="layout-three-col"):
             # ═══════════════════════════════════════════════════════
             # 左侧资源栏 (Finder Sidebar)
             # ═══════════════════════════════════════════════════════
-            with gr.Column(scale=1, elem_classes="sidebar-pane"):
+            with gr.Column(scale=1, elem_classes="sidebar-pane col-sidebar"):
                 # ── 身份栏 ──
                 with gr.Row(elem_classes="user-identity-bar"):
                     user_input = gr.Textbox(
@@ -1734,7 +1783,7 @@ def build_ui() -> gr.Blocks:
             # ═══════════════════════════════════════════════════════
             # 右侧主工作区 (Main Workspace)
             # ═══════════════════════════════════════════════════════
-            with gr.Column(scale=3, elem_classes="workspace-pane"):
+            with gr.Column(scale=2, elem_classes="workspace-pane col-canvas"):
                 
                 # ─── 面板 0: 空状态启动页 ───
                 with gr.Column(visible=True, elem_classes="empty-state-card ws-panel-visible") as splash_screen:
@@ -1948,6 +1997,48 @@ def build_ui() -> gr.Blocks:
                                 memory_add_msg = gr.Markdown()
                                 
                     profile_close_btn = gr.Button("关闭画像", variant="secondary")
+
+
+
+            # ═══════════════════════════════════════════════════════
+            # 右侧 Agent 决策大脑 (Agent Hub) — V11 新增
+            # ═══════════════════════════════════════════════════════
+            with gr.Column(scale=1, elem_classes="sidebar-pane col-agent-hub"):
+                gr.Markdown("### 🧠 Agent 决策大脑")
+                
+                # ── Agent 协商总线可视化 (AgentCoordinator) ──
+                with gr.Accordion("⚖️ 协商总线日志", open=True):
+                    agent_coord_chatbot = gr.Chatbot(
+                        label="多 Agent 通信",
+                        value=[],
+                        height=180,
+                        
+                    )
+                
+                # ── 五轮审查热力图 ──
+                with gr.Accordion("🔥 审查热力图", open=True):
+                    review_heatmap_html = gr.HTML(
+                        value="""<div style="font-size:13px;color:#8B949E;">
+                        格式: <span style="color:#238636">●</span> | 
+                        事实: <span style="color:#484F58">●</span> | 
+                        逻辑: <span style="color:#484F58">●</span> | 
+                        战略: <span style="color:#484F58">●</span> | 
+                        纪律: <span style="color:#484F58">●</span>
+                        <br><small>审查后自动更新</small></div>"""
+                    )
+                
+                # ── 反偏见洞察 (AntiBiasAnalysis) ──
+                with gr.Accordion("💡 反偏见洞察", open=False):
+                    antibias_display = gr.Markdown("等待审查完成后，此处将展示偏见模式检测与反向视角建议。")
+                    antibias_temp_slider = gr.Slider(
+                        label="创新温度 (Temperature)",
+                        minimum=0.0, maximum=2.0, value=0.7, step=0.1,
+                        info="越高越激进创新，越低越保守安全"
+                    )
+                
+                # ── HITL 快捷操作 ──
+                with gr.Accordion("🛠 审查建议速览", open=False):
+                    hitl_quick_issues = gr.Markdown("审查完成后，关键修改建议将在此列出。")
 
 
         # ═══════════════════════════════════════════════════════
@@ -2255,12 +2346,24 @@ def build_ui() -> gr.Blocks:
         )
 
         # ── 9. 执行文稿生成 ──
+        # V11: Also populate Agent Hub chatbot with coordinator logs
+        def generate_and_update_hub(raw_materials, progress=gr.Progress()):
+            draft, agent_log, multi_ver, msg, prog = app.generate_draft_action(raw_materials, progress)
+            # Convert agent log text to chatbot messages
+            chat_msgs = []
+            if agent_log:
+                for line in agent_log.split("\n"):
+                    line = line.strip()
+                    if line and not line.startswith("─"):
+                        chat_msgs.append((None, line))
+            return draft, agent_log, multi_ver, msg, prog, chat_msgs if chat_msgs else []
+
         write_start_btn.click(
-            fn=app.generate_draft_action,
+            fn=generate_and_update_hub,
             inputs=[materials_input],
             outputs=[
                 draft_editor, coord_agent_logs, multi_versions_preview,
-                write_event_msg, progress_badge_html
+                write_event_msg, progress_badge_html, agent_coord_chatbot
             ],
             concurrency_limit=1
         )
@@ -2279,7 +2382,39 @@ def build_ui() -> gr.Blocks:
 
         def review_trigger_fn():
             res = app.run_review_action()
-            return (*res, app.orchestrator.draft if app.orchestrator else "")
+            # V11: Generate heatmap HTML from review results
+            heatmap_html = """<div style="font-size:13px;color:#8B949E;">"""
+            if app.orchestrator and app.orchestrator.review_result:
+                r = app.orchestrator.review_result
+                dims = {"格式": "gray", "事实": "gray", "逻辑": "gray", "战略": "gray", "纪律": "gray"}
+                # Simple mapping based on review score
+                score = getattr(r, 'overall_score', 0) if hasattr(r, 'overall_score') else 0
+                if score >= 8:
+                    dims = {k: "green" for k in dims}
+                elif score >= 5:
+                    dims = {"格式": "green", "事实": "yellow", "逻辑": "green", "战略": "yellow", "纪律": "green"}
+                else:
+                    dims = {"格式": "yellow", "事实": "red", "逻辑": "yellow", "战略": "red", "纪律": "yellow"}
+                for dim, color in dims.items():
+                    heatmap_html += f'{dim}: <span style="color:{"#238636" if color=="green" else "#DFCB5C" if color=="yellow" else "#F85149" if color=="red" else "#484F58"}">●</span> | '
+                heatmap_html = heatmap_html.rstrip(' | ')
+            else:
+                heatmap_html += "格式: <span style=\"color:#484F58\">●</span> | 事实: <span style=\"color:#484F58\">●</span> | 逻辑: <span style=\"color:#484F58\">●</span> | 战略: <span style=\"color:#484F58\">●</span> | 纪律: <span style=\"color:#484F58\">●</span>"
+            heatmap_html += "</div>"
+            
+            # V11: Generate antibias display
+            antibias_text = "未检测到显著偏见模式。"
+            issues = app.orchestrator.get_review_issues() if app.orchestrator else []
+            if issues:
+                bias_items = [i for i in issues if "偏见" in str(i.get("issue","")) or "bias" in str(i.get("issue","")).lower()]
+                if bias_items:
+                    antibias_text = "**检测到潜在偏见模式：**\n"
+                    for b in bias_items:
+                        antibias_text += f"- {b.get('issue','')}\n  建议: {b.get('suggestion','')}\n"
+                else:
+                    antibias_text = "✅ 未检测到显著偏见模式。可适当提高创新温度以获取更多反向视角。"
+            
+            return (*res, app.orchestrator.draft if app.orchestrator else "", heatmap_html, antibias_text)
 
         write_btn_next.click(
             fn=safe_write_next,
@@ -2288,7 +2423,8 @@ def build_ui() -> gr.Blocks:
             fn=review_trigger_fn,
             outputs=[
                 review_summary_text, review_issues_list, review_format_text,
-                review_event_msg, progress_badge_html, manual_edit_text
+                review_event_msg, progress_badge_html, manual_edit_text,
+                review_heatmap_html, antibias_display
             ]
         )
 
