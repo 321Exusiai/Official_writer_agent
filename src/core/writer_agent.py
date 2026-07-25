@@ -57,11 +57,17 @@ class WriterConfig:
 
 class WriterAgent:
 
-    def __init__(self):
+    def __init__(self, knowledge_base=None):
         self.config: Optional[WriterConfig] = None
+        # 可选集成知识库，用于注入范文参考（修复文档承诺但未实现的功能）
+        self.knowledge_base = knowledge_base
 
     def configure(self, config: WriterConfig):
         self.config = config
+
+    def set_knowledge_base(self, knowledge_base):
+        """注入知识库实例（用于范文参考）"""
+        self.knowledge_base = knowledge_base
 
     def _get_mode(self) -> WritingMode:
         if self.config and self.config.writing_mode:
@@ -209,7 +215,28 @@ class WriterAgent:
             ""
         ])
 
+        # 注入范文参考（来自知识库，修复文档承诺但未集成的功能）
+        exemplar_text = self._get_exemplar_reference()
+        if exemplar_text:
+            prompt_parts.extend([
+                "# 标杆范文参考（仅供学习结构和语言风格，禁止照抄）",
+                exemplar_text,
+                "",
+            ])
+
         return "\n".join(prompt_parts)
+
+    def _get_exemplar_reference(self) -> str:
+        """从知识库获取当前模式的压缩范文摘要"""
+        if not self.knowledge_base:
+            return ""
+        try:
+            mode = self._get_mode()
+            mode_value = mode.value if hasattr(mode, 'value') else str(mode)
+            exemplars_text = self.knowledge_base.get_exemplars_for_prompt(mode_value, max_exemplars=1)
+            return exemplars_text if exemplars_text else ""
+        except Exception:
+            return ""
 
     def build_user_prompt(self) -> str:
         if not self.config:

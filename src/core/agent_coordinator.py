@@ -19,7 +19,6 @@ from dataclasses import dataclass, field
 from typing import List, Dict, Optional, Any, Callable, Tuple
 from enum import Enum
 import json
-import random
 import time
 import uuid
 
@@ -315,6 +314,59 @@ class AgentCoordinator:
         self._cache_aligner = CacheAligner()
         self._model_router = ModelRouter()
 
+        # 持久化状态 — 用于真实预警检测
+        self._raw_materials: str = ""
+        self._writing_mode: str = ""
+        self._draft_word_count: int = 0
+        self._has_style_conflict: bool = False
+
+    def set_context(
+        self,
+        raw_materials: str = "",
+        writing_mode: str = "",
+        draft_word_count: int = 0,
+        has_style_conflict: bool = False,
+    ):
+        """由 Orchestrator 在调用前注入上下文，用于真实预警检测"""
+        self._raw_materials = raw_materials
+        self._writing_mode = writing_mode
+        self._draft_word_count = draft_word_count
+        self._has_style_conflict = has_style_conflict
+
+        # 首次注入时注册内置订阅者（懒初始化，确保 context 已准备好）
+        if not self.bus._subscribers.get(MessageType.DECISION, []) and not self.bus._subscribers.get(MessageType.ALERT, []):
+            self._register_builtin_subscribers()
+
+    def _register_builtin_subscribers(self):
+        """注册内置的 Agent 事件订阅者（实现真正的消息驱动联动）"""
+        # 订阅决策事件 → 自动更新 agent log
+        def on_decision(msg: AgentMessage):
+            payload = msg.payload if isinstance(msg, (dict,)) else getattr(msg, 'payload', {})
+            self.consultation_log.append({
+                "topic": payload.get("topic", ""),
+                "decision": payload.get("decision", ""),
+                "rationale": payload.get("rationale", ""),
+                "timestamp": msg.timestamp,
+            })
+
+        # 订阅预警事件 → 自动加入预警列表
+        def on_alert(msg: AgentMessage):
+            self._proactive_alerts.append(msg)
+
+        # 订阅共识事件 → 自动记录辩论结果
+        def on_consensus(msg: AgentMessage):
+            payload = msg.payload if isinstance(msg, (dict,)) else getattr(msg, 'payload', {})
+            self.consultation_log.append({
+                "type": "consensus",
+                "topic": payload.get("topic", ""),
+                "consensus": payload.get("consensus", ""),
+                "timestamp": msg.timestamp,
+            })
+
+        self.bus.subscribe(MessageType.DECISION, on_decision)
+        self.bus.subscribe(MessageType.ALERT, on_alert)
+        self.bus.subscribe(MessageType.CONSENSUS, on_consensus)
+
     # ═══ 民主协商机制 ═══
 
     def consult_before_decision(
@@ -431,14 +483,15 @@ class AgentCoordinator:
         writer_position: str,
         reviewer_position: str,
         max_rounds: int = 2,
+        llm_call: Callable = None,
     ) -> DebateResult:
         """
-        运行一轮辩论，达成共识
+        运行辩论，达成共识（V2 升级版）
 
         流程：
         1. 双方各自陈述立场
-        2. 各自反驳对方
-        3. 寻找共同点，形成共识
+        2. 各自反驳对方（优先使用 LLM，规则兜底）
+        3. 寻找共同点，形成共识（优先使用 LLM）
         4. Orchestrator 做出最终裁决
 
         Args:
@@ -446,6 +499,7 @@ class AgentCoordinator:
             writer_position: Writer 立场
             reviewer_position: Reviewer 立场
             max_rounds: 最大辩论轮次
+            llm_call: LLM 调用函数，None 时使用规则匹配
 
         Returns:
             辩论结果（含共识）
@@ -464,12 +518,20 @@ class AgentCoordinator:
         debate_msgs.append(opening_msg)
 
         for round_num in range(max_rounds):
-            writer_rebuttal = self._simulate_rebuttal(
-                AgentRole.WRITER, topic, reviewer_position, round_num
-            )
-            reviewer_rebuttal = self._simulate_rebuttal(
-                AgentRole.REVIEWER, topic, writer_position, round_num
-            )
+            if llm_call:
+                writer_rebuttal = self._llm_rebuttal(
+                    AgentRole.WRITER, topic, reviewer_position, round_num, llm_call
+                )
+                reviewer_rebuttal = self._llm_rebuttal(
+                    AgentRole.REVIEWER, topic, writer_position, round_num, llm_call
+                )
+            else:
+                writer_rebuttal = self._simulate_rebuttal(
+                    AgentRole.WRITER, topic, reviewer_position, round_num
+                )
+                reviewer_rebuttal = self._simulate_rebuttal(
+                    AgentRole.REVIEWER, topic, writer_position, round_num
+                )
 
             debate_msgs.append(AgentMessage.create(
                 sender=AgentRole.WRITER,
@@ -489,7 +551,17 @@ class AgentCoordinator:
             writer_position = writer_rebuttal
             reviewer_position = reviewer_rebuttal
 
-        consensus = self._reach_consensus(topic, writer_position, reviewer_position)
+            # 订阅者通知：辩论轮次完成
+            for handler in self.bus._subscribers.get(MessageType.DEBATE, []):
+                try:
+                    handler({"round": round_num + 1, "writer": writer_position, "reviewer": reviewer_position})
+                except Exception:
+                    pass
+
+        if llm_call:
+            consensus = self._llm_consensus(topic, writer_position, reviewer_position, llm_call)
+        else:
+            consensus = self._reach_consensus(topic, writer_position, reviewer_position)
 
         consensus_msg = AgentMessage.create(
             sender=AgentRole.ORCHESTRATOR,
@@ -595,6 +667,9 @@ class AgentCoordinator:
 
         # ── Strategy D: 缓存对齐（静态角色描述前置 + 动态议题后置）──
         static_part = role_profiles.get(agent_role, "你是一名公文写作专家。")
+        # ── Strategy E: 隐式推理（协商场景直接给结果，省70%推理token）──
+        from ..utils.token_optimizer import ImplicitReasoning
+        static_part += "\n\n" + ImplicitReasoning.get_injection("basic")
         static_part += "\n\n请用JSON格式输出你的意见，只输出JSON，不要有其他内容。"
 
         dynamic_part = f"""请就以下议题发表你的专业意见。
@@ -804,20 +879,34 @@ class AgentCoordinator:
         return {"concerns": concerns, "suggestions": suggestions}
 
     def _check_agent_alerts(self, agent_role: AgentRole) -> Optional[Dict[str, Any]]:
-        alerts = {
-            AgentRole.WRITER: {
-                "alert": "Writer: 检测到 raw_materials 为空，将基于简报自行组织内容",
-                "severity": "minor",
-                "agent": "writer",
-            },
-            AgentRole.REVIEWER: {
-                "alert": "Reviewer: 待审稿件未指定写作模式，使用默认模式审查",
-                "severity": "major",
-                "agent": "reviewer",
-            },
-        }
-        if agent_role in alerts and random.random() > 0.7:
-            return alerts[agent_role]
+        """基于真实上下文检测各 Agent 需要主动上报的问题"""
+        if agent_role == AgentRole.WRITER:
+            if not self._raw_materials or len(self._raw_materials.strip()) < 10:
+                return {
+                    "alert": "Writer: 检测到 raw_materials 为空或极短，将基于简报自行组织内容",
+                    "severity": "minor",
+                    "agent": "writer",
+                }
+            if self._draft_word_count > 0 and self._draft_word_count < 100:
+                return {
+                    "alert": f"Writer: 初稿仅 {self._draft_word_count} 字，可能内容不充分",
+                    "severity": "minor",
+                    "agent": "writer",
+                }
+        elif agent_role == AgentRole.REVIEWER:
+            if not self._writing_mode:
+                return {
+                    "alert": "Reviewer: 待审稿件未指定写作模式，使用默认模式审查",
+                    "severity": "major",
+                    "agent": "reviewer",
+                }
+        elif agent_role == AgentRole.STYLE_ADAPTER:
+            if self._has_style_conflict:
+                return {
+                    "alert": "Style Adapter: 检测到风格冲突，建议选用主辅风格混合模式",
+                    "severity": "major",
+                    "agent": "style_adapter",
+                }
         return None
 
     def _simulate_rebuttal(
@@ -846,6 +935,57 @@ class AgentCoordinator:
             f"兼顾创作灵活性（Writer立场）和质量把控（Reviewer立场），"
             f"采用'创意先行、审查把关'的协同模式。"
         )
+
+    def _llm_rebuttal(
+        self,
+        agent_role: AgentRole,
+        topic: str,
+        opponent_position: str,
+        round_num: int,
+        llm_call: Callable,
+    ) -> str:
+        """使用 LLM 生成辩论反驳（V2 核心改进）"""
+        role_name = "资深公文撰写者" if agent_role == AgentRole.WRITER else "严格公文审查者"
+        system_prompt = f"你是一名{role_name}，正在参与一场专业辩论。请针对对方的观点提出有力反驳。"
+        user_prompt = f"""辩论议题：{topic}
+
+对方（{'审查方' if agent_role == AgentRole.WRITER else '撰写方'}）的观点：
+{opponent_position}
+
+这是第 {round_num + 1} 轮反驳。请输出你的反驳观点（不超过200字）："""
+        try:
+            result = llm_call(system_prompt, user_prompt)
+            if result and len(result.strip()) > 5:
+                return result.strip()[:500]
+        except Exception:
+            pass
+        return self._simulate_rebuttal(agent_role, topic, opponent_position, round_num)
+
+    def _llm_consensus(
+        self,
+        topic: str,
+        writer_pos: str,
+        reviewer_pos: str,
+        llm_call: Callable,
+    ) -> str:
+        """使用 LLM 生成共识（V2 核心改进）"""
+        system_prompt = "你是一名公正的调解者，需要在辩论双方之间找到共同点和可行的折中方案。"
+        user_prompt = f"""辩论议题：{topic}
+
+撰写方最终立场：
+{writer_pos}
+
+审查方最终立场：
+{reviewer_pos}
+
+请给出一个兼顾双方关切的共识方案（不超过300字）："""
+        try:
+            result = llm_call(system_prompt, user_prompt)
+            if result and len(result.strip()) > 5:
+                return result.strip()[:500]
+        except Exception:
+            pass
+        return self._reach_consensus(topic, writer_pos, reviewer_pos)
 
     def _orchestrator_decision(self, topic: str, decision: Dict) -> str:
         decisions = {

@@ -307,13 +307,82 @@ class MultiDocGenerator:
         return style_map.get(brief.writing_mode, MediaStyle.XINHUA)
 
     def _extract_consistency_data(self, content: str, data: Dict[str, List[str]]):
-        """从生成内容中提取关键数据用于一致性检查"""
-        pass
+        """
+        从生成内容中提取关键数据用于一致性检查
+
+        提取的数据类型：
+        - key_data: 数字数据（如百分比、金额、人数）
+        - key_quotes: 引号内的引语
+        - key_names: 人名/机构名（含"XX表示""XX指出"等模式）
+        - key_dates: 日期（X年X月X日格式）
+        """
+        import re
+
+        # 提取数字数据（含百分比、万/亿等单位）
+        data_matches = re.findall(
+            r'\d+(?:\.\d+)?(?:%|万|亿|千|百|人次|人|名|个|项|篇|次|场)',
+            content,
+        )
+        for d in data_matches:
+            if d not in data["key_data"]:
+                data["key_data"].append(d)
+
+        # 提取引语（双引号或书名号内容）
+        quote_matches = re.findall(r'[「"\']([^」"\']{5,})[」"\']', content)
+        for q in quote_matches:
+            if q not in data["key_quotes"]:
+                data["key_quotes"].append(q)
+
+        # 提取人名/机构名（"XX说""XX表示""XX指出"等模式）
+        name_matches = re.findall(
+            r'([\u4e00-\u9fa5]{2,8})(?:表示|指出|认为|强调|说|介绍|透露|称)',
+            content,
+        )
+        for n in name_matches:
+            if n not in data["key_names"] and len(n) <= 8:
+                data["key_names"].append(n)
+
+        # 提取日期
+        date_matches = re.findall(
+            r'\d{4}年\d{1,2}月\d{1,2}日|\d{4}年\d{1,2}月|\d{4}年',
+            content,
+        )
+        for d in date_matches:
+            if d not in data["key_dates"]:
+                data["key_dates"].append(d)
 
     def _build_consistency_report(self, data: Dict[str, List[str]]) -> str:
-        """生成一致性检查报告"""
+        """生成一致性检查报告（含冲突检测）"""
         lines = ["版本间一致性检查："]
+
         for key, values in data.items():
             if values:
                 lines.append(f"  {key}：{len(values)}项")
+                # 列出具体内容（最多5项）
+                for v in values[:5]:
+                    lines.append(f"    - {v}")
+                if len(values) > 5:
+                    lines.append(f"    ... 共 {len(values)} 项")
+
+        # 检测潜在冲突：同一类数据中出现矛盾值
+        # 如 key_data 中同时出现 "100人" 和 "200人"
+        if len(data.get("key_data", [])) > 1:
+            data_items = data["key_data"]
+            # 提取纯数字部分对比
+            import re
+            numbers = {}
+            for item in data_items:
+                num_match = re.search(r'\d+(?:\.\d+)?', item)
+                unit_match = re.search(r'(%|万|亿|千|百|人次|人|名|个|项|篇|次|场)', item)
+                if num_match and unit_match:
+                    unit = unit_match.group(1)
+                    num = num_match.group()
+                    if unit not in numbers:
+                        numbers[unit] = set()
+                    numbers[unit].add(num)
+
+            for unit, nums in numbers.items():
+                if len(nums) > 1:
+                    lines.append(f"  ⚠️ 数据冲突警告：{unit}单位下出现不同数值: {', '.join(sorted(nums))}")
+
         return "\n".join(lines)

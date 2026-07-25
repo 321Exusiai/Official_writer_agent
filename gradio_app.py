@@ -426,7 +426,7 @@ class GradioApp:
                 proj.writing_history = []
                 proj.status = ProjectStatus.DRAFT
                 self.orchestrator = Orchestrator()
-                self.pdb.save()
+                self._save_persistent_data()
                 return proj.name
         return None
 

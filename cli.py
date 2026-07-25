@@ -256,7 +256,17 @@ class CLI:
         print("  这个过程需要一点时间，请等一下~")
         print()
 
-        output = self.orchestrator.generate()
+        # 将 questionnaire 的 brief 传递给 orchestrator
+        self.orchestrator.brief = brief
+        self.orchestrator.writing_mode = self.questionnaire.writing_mode
+
+        # 生成写作方案
+        plan = self.orchestrator.generate_plan()
+
+        # 调用 write() 生成草稿
+        raw_materials = getattr(brief, 'raw_answers', '') or ''
+        self.orchestrator.write(raw_materials)
+        output = self.orchestrator.draft or "生成失败，请检查模型配置或 API Key 是否有效"
 
         print("=" * 60)
         print(f"  初稿完成！{self._user_name}，看看效果吧~")

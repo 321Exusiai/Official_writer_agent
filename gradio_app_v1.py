@@ -20,18 +20,16 @@ import gradio as gr
 from dataclasses import dataclass, field, asdict
 
 # 核心算法模块导入
-from src.core.orchestrator import Orchestrator, OrchestratorState, WritingPlan
+from src.core.orchestrator import Orchestrator, OrchestratorState
 from src.core.personalized_db import (
     PersonalizedDB, ProjectStatus, Project, UserProfile, ReferenceArticle,
     QuestionnaireResults, VocabularyCorpus, UserRequirement, AntiBiasAnalysis, UserPreferences
 )
 from src.core.writing_mode import WritingMode, get_mode_profile
-from src.core.style_adapter import MediaStyle, StyleAdapter, STYLE_PROFILES, StyleBlend
-from src.core.document_type import DocumentType, DocumentTypeIdentifier, DOC_TYPE_PROFILES, DocTypeProfile
-from src.core.agent_coordinator import AgentCoordinator, AgentRole
-from src.core.multi_doc_generator import MultiDocGenerator
+from src.core.style_adapter import MediaStyle, StyleAdapter
+from src.core.document_type import DocumentType
 from src.knowledge.knowledge_base import KnowledgeBase
-from src.config.api_config import APIConfigManager, SUPPORTED_PROVIDERS, LLMConfig
+from src.config.api_config import APIConfigManager, SUPPORTED_PROVIDERS
 from src.utils.url_importer import URLDocumentImporter, DocumentFormat, ImportedDocument
 from src.questionnaire.questionnaire import QuestionnairePhase
 
@@ -167,7 +165,6 @@ class GradioApp:
         self.api_manager = APIConfigManager()
         self.knowledge_base = KnowledgeBase()
         self.style_adapter = StyleAdapter()
-        self.doc_identifier = DocumentTypeIdentifier()
         self.orchestrator = Orchestrator()
         
         self.current_user_name: Optional[str] = None
@@ -426,7 +423,7 @@ class GradioApp:
                 proj.writing_history = []
                 proj.status = ProjectStatus.DRAFT
                 self.orchestrator = Orchestrator()
-                self.pdb.save()
+                self._save_persistent_data()
                 return proj.name
         return None
 
@@ -446,9 +443,10 @@ class GradioApp:
         target = next((p for p in user.projects if p.name == name), None)
         if target:
             user.projects.remove(target)
-            # 如果删除的是当前选中的项目，清空 current_project_id
+            # 如果删除的是当前选中的项目，清空 current_project_id 并重置编排器
             if self.current_project_id == target.id:
                 self.current_project_id = None
+                self.orchestrator = Orchestrator()
             self._save_persistent_data()
             return f"已删除项目《{name}》。", self.get_projects_list(), False
         return "未找到项目", self.get_projects_list(), False
@@ -706,13 +704,14 @@ class GradioApp:
         except Exception as e:
             return f"❌ 方案更新失败: {e}", ""
 
-    def generate_draft_action(self, raw_materials: str, progress=gr.Progress()) -> Tuple[str, str, str, str, str]:
+    def generate_draft_action(self, raw_materials: str, temperature: float = 0.7, progress=gr.Progress()) -> Tuple[str, str, str, str, str]:
         if not self.orchestrator or not self.orchestrator.plan:
             return "", "", "", "请先在「写作大纲方案」阶段确认方案，再开始写作", build_progress_badge("方案")
 
         try:
             def _progress_cb(p, desc):
                 progress(p, desc=desc)
+            self.orchestrator.temperature = temperature
             self.orchestrator.write(raw_materials, progress_callback=_progress_cb)
             progress(1.0, desc="草稿生成完成")
             draft = self.orchestrator.draft or "生成失败，请检查模型配置或 API Key 是否有效"
@@ -821,6 +820,100 @@ class GradioApp:
             return summary, issues_text, "重新评估成功！文章质量得到更新。", self.orchestrator.draft
         except Exception as e:
             return f"❌ 失败: {e}", "", "", self.orchestrator.draft
+
+    # ═══════════════════════════════════════════════════════════════
+    # Agent Hub 辅助方法 (V11)
+    # ═══════════════════════════════════════════════════════════════
+    def get_agent_chatbot_messages(self) -> List[Dict[str, str]]:
+        """解析 orchestrator.agent_log 为 chatbot 消息列表 (OpenAI messages 格式)"""
+        if not self.orchestrator or not self.orchestrator.agent_log:
+            return []
+        messages = []
+        for entry in self.orchestrator.agent_log:
+            entry = entry.strip()
+            if not entry:
+                continue
+            if entry.startswith("["):
+                bracket_end = entry.find("]")
+                if bracket_end > 0:
+                    role = entry[1:bracket_end]
+                    message = entry[bracket_end + 1:].strip()
+                    messages.append({"role": "assistant", "content": f"**{role}**: {message}"})
+                else:
+                    messages.append({"role": "assistant", "content": entry})
+            else:
+                messages.append({"role": "assistant", "content": entry})
+        return messages
+
+    def build_review_heatmap(self) -> str:
+        """构建审查热力图 HTML（5 维度红/黄/绿圆点）"""
+        color_map = {"green": "#238636", "yellow": "#DFCB5C", "red": "#F85149", "gray": "#484F58"}
+        dims = {"格式": "gray", "事实": "gray", "逻辑": "gray", "战略": "gray", "纪律": "gray"}
+        if self.orchestrator and self.orchestrator.review_results:
+            dims = {"格式": "green", "事实": "green", "逻辑": "green", "战略": "green", "纪律": "green"}
+            issues = self.orchestrator.get_review_issues()
+            dim_keywords = {
+                "格式": ["格式", "规范"],
+                "事实": ["事实", "准确"],
+                "逻辑": ["逻辑", "一致", "结构"],
+                "战略": ["战略", "主体", "赋能", "借势", "导向", "突出"],
+                "纪律": ["纪律", "瘦身", "简洁", "合规", "渲染", "适配"],
+            }
+            for iss in issues:
+                round_name = iss.get("round_name", "")
+                severity = iss.get("severity", "")
+                for dim_key, keywords in dim_keywords.items():
+                    if any(kw in round_name for kw in keywords):
+                        if severity in ("critical", "major"):
+                            dims[dim_key] = "red"
+                        elif severity in ("minor", "suggestion") and dims[dim_key] != "red":
+                            dims[dim_key] = "yellow"
+                        break
+        parts = [f'{dim}: <span style="color:{color_map[color]}">●</span>' for dim, color in dims.items()]
+        return '<div style="font-size:13px;color:#8B949E;">' + ' | '.join(parts) + '</div>'
+
+    def get_antibias_display(self) -> str:
+        """获取反偏见分析显示文本"""
+        user = self.pdb.get_current_user()
+        if not user:
+            return "暂无偏见分析数据，完成更多写作后系统将自动分析。"
+        anti_bias = getattr(user, "global_anti_bias", None)
+        if anti_bias:
+            lines = []
+            if anti_bias.user_bias_patterns:
+                lines.append("**检测到的偏见模式：**")
+                for p in anti_bias.user_bias_patterns:
+                    lines.append(f"- {p}")
+            if anti_bias.counter_perspectives:
+                lines.append("\n**反向视角建议：**")
+                for p in anti_bias.counter_perspectives:
+                    lines.append(f"- {p}")
+            if anti_bias.innovative_angles:
+                lines.append("\n**创新角度：**")
+                for p in anti_bias.innovative_angles:
+                    lines.append(f"- {p}")
+            if anti_bias.analysis_notes:
+                lines.append(f"\n**分析备注：** {anti_bias.analysis_notes}")
+            return "\n".join(lines) if lines else "暂无偏见分析数据，完成更多写作后系统将自动分析。"
+        return "暂无偏见分析数据，完成更多写作后系统将自动分析。"
+
+    def get_hitl_quick_issues(self) -> str:
+        """获取 HITL 快捷操作建议（前 5 个最重要问题）"""
+        if not self.orchestrator:
+            return "未检测到明显问题，文稿质量良好。"
+        issues = self.orchestrator.get_review_issues()
+        if not issues:
+            return "未检测到明显问题，文稿质量良好。"
+        severity_order = {"critical": 0, "major": 1, "minor": 2, "suggestion": 3}
+        sorted_issues = sorted(issues, key=lambda x: severity_order.get(x.get("severity", "minor"), 2))
+        lines = []
+        for iss in sorted_issues[:5]:
+            severity = iss.get("severity", "unknown")
+            location = iss.get("location", "段落")
+            issue = iss.get("issue", "")
+            suggestion = iss.get("suggestion", "")
+            lines.append(f"- [{severity}] {location}: {issue} -> {suggestion}")
+        return "\n".join(lines)
 
     # ═══════════════════════════════════════════════════════════════
     # 交付输出
@@ -1192,6 +1285,19 @@ def build_ui() -> gr.Blocks:
         overflow: hidden;
     }
 
+    /* Ensure textarea scroll works inside accordions.
+       The parent accordion has overflow:hidden for border-radius,
+       but inner content must still scroll. */
+    .gradio-container [class*="accordion"] > div,
+    .gradio-container details > div:not(.summary) {
+        overflow-y: auto !important;
+        max-height: none !important;
+    }
+    .gradio-container textarea {
+        overflow-y: auto !important;
+        resize: vertical !important;
+    }
+
     /* Accordion header/summary button */
     .gradio-container details > summary,
     .gradio-container [class*="accordion"] > button,
@@ -1214,6 +1320,39 @@ def build_ui() -> gr.Blocks:
     .gradio-container [class*="accordion"] > button:active {
         transform: scale(0.98);
         filter: brightness(0.85);
+    }
+
+    /* iOS-style chevron for Accordion toggle icons
+       Replaces Gradio's default ▼ Unicode triangle with a thin
+       rounded-line SVG chevron that matches iOS visual language. */
+    .gradio-container button.label-wrap .icon {
+        color: transparent !important;
+        font-size: 0 !important;
+        width: 14px !important;
+        height: 14px !important;
+        min-width: 14px !important;
+        display: inline-block !important;
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 14 14' fill='none' stroke='%23A8B8CC' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 5l4 4 4-4'/%3E%3C/svg%3E") !important;
+        background-repeat: no-repeat !important;
+        background-position: center !important;
+        background-size: 14px 14px !important;
+        transition: transform 250ms var(--ease-out-expo), filter 200ms ease !important;
+    }
+    .gradio-container button.label-wrap:hover .icon {
+        filter: brightness(1.4);
+    }
+
+    /* iOS-style chevron for Dropdown arrows
+       Hides Gradio's filled triangle SVG and replaces it with the
+       same thin rounded chevron. */
+    .gradio-container .icon-wrap .dropdown-arrow {
+        display: none !important;
+    }
+    .gradio-container .icon-wrap {
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 14 14' fill='none' stroke='%23A8B8CC' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 5l4 4 4-4'/%3E%3C/svg%3E") !important;
+        background-repeat: no-repeat !important;
+        background-position: center !important;
+        background-size: 12px 12px !important;
     }
 
     /* Apply Blur ONLY to major structural containers */
@@ -1313,16 +1452,14 @@ def build_ui() -> gr.Blocks:
 
     }
 
-    /* Swirling Title Banner */
+    /* Swirling Title Banner - borderless, pure glow */
     .title-banner {
-        background: rgba(255, 255, 255, 0.02) !important;
-        border: 1px solid rgba(223, 203, 92, 0.3);
-        border-top: 1px solid rgba(223, 203, 92, 0.5);
-        border-radius: var(--radius-card);
-        padding: 20px 24px;
-        margin-bottom: 20px;
-
-        box-shadow: 0 8px 32px rgba(223, 203, 92, 0.15); 
+        background: transparent !important;
+        border: none !important;
+        border-radius: 0 !important;
+        padding: 20px 24px 16px !important;
+        margin-bottom: 12px;
+        box-shadow: none !important;
     }
     .title-banner h1 {
         font-family: "Inter", "Noto Sans SC", sans-serif !important;
@@ -1596,6 +1733,22 @@ def build_ui() -> gr.Blocks:
         flex: 0 0 340px !important;
         max-width: 340px;
         overflow-y: auto;
+    }
+    @media (max-width: 1280px) {
+        .layout-three-col > .col-agent-hub {
+            flex: 0 0 280px !important;
+            max-width: 280px;
+        }
+    }
+    @media (max-width: 1024px) {
+        .layout-three-col {
+            flex-direction: column !important;
+        }
+        .layout-three-col > .col-sidebar,
+        .layout-three-col > .col-agent-hub {
+            flex: 1 1 auto !important;
+            max-width: 100% !important;
+        }
     }
     /* Agent Hub card styling */
     .agent-hub-card {
@@ -1900,16 +2053,16 @@ def build_ui() -> gr.Blocks:
                             draft_editor = gr.Textbox(label="草稿（主版本）", lines=16, placeholder="草稿内容将在这里呈现...")
                             
                             with gr.Accordion("多角色协作日志", open=False):
-                                coord_agent_logs = gr.Textbox(label="协作日志", lines=8, max_lines=30, interactive=False)
+                                coord_agent_logs = gr.Textbox(label="协作日志", lines=8, interactive=False)
                             with gr.Accordion("多格式版本草稿", open=False):
-                                multi_versions_preview = gr.Textbox(label="多格式版本", lines=10, max_lines=30, interactive=False)
+                                multi_versions_preview = gr.Textbox(label="多格式版本", lines=10, interactive=False)
                                 
                             write_btn_next = gr.Button("对文稿执行智能审查", variant="primary", elem_classes="ios-btn-primary")
 
                         # Tab 4: 智能审阅修正 (HITL)
                         with gr.Tab("智能审查与人工介入", id="tab_review"):
                             review_event_msg = gr.Markdown()
-                            review_summary_text = gr.Textbox(label="多维审查得分与总结", lines=8, max_lines=30, interactive=False)
+                            review_summary_text = gr.Textbox(label="多维审查得分与总结", lines=8, interactive=False)
                             
                             with gr.Row():
                                 with gr.Column(scale=1):
@@ -1922,7 +2075,7 @@ def build_ui() -> gr.Blocks:
                                         review_format_text = gr.Markdown()
                                         
                             gr.Markdown("#### 人工介入更新 (HITL: Human-in-the-loop)")
-                            manual_edit_text = gr.Textbox(label="在此处对文稿进行人工细节微调...", lines=8, max_lines=30)
+                            manual_edit_text = gr.Textbox(label="在此处对文稿进行人工细节微调...", lines=8)
                             with gr.Row():
                                 manual_save_btn = gr.Button("保存手动修改", variant="secondary", elem_classes="ios-btn-secondary")
                                 re_review_btn = gr.Button("重新执行审查", variant="secondary", elem_classes="ios-btn-secondary")
@@ -1931,9 +2084,9 @@ def build_ui() -> gr.Blocks:
 
                         # Tab 5: 终稿交付完成
                         with gr.Tab("最终成果交付", id="tab_finalize"):
-                            final_draft_output = gr.Textbox(label="最终公文文稿", lines=18, max_lines=50, interactive=True)
-                            final_multi_versions = gr.Textbox(label="多格式版本备份", lines=10, max_lines=30, interactive=False)
-                            workflow_summary_text = gr.Textbox(label="智能协作工作流回溯报告", lines=8, max_lines=30, interactive=False)
+                            final_draft_output = gr.Textbox(label="最终公文文稿", lines=18, interactive=True)
+                            final_multi_versions = gr.Textbox(label="多格式版本备份", lines=10, interactive=False)
+                            workflow_summary_text = gr.Textbox(label="智能协作工作流回溯报告", lines=8, interactive=False)
                             
                             export_finished_btn = gr.Button("导出完成", variant="primary", elem_classes="ios-btn-primary")
 
@@ -2004,19 +2157,19 @@ def build_ui() -> gr.Blocks:
             # 右侧 Agent 决策大脑 (Agent Hub) — V11 新增
             # ═══════════════════════════════════════════════════════
             with gr.Column(scale=1, elem_classes="sidebar-pane col-agent-hub"):
-                gr.Markdown("### 🧠 Agent 决策大脑")
+                gr.Markdown("### Agent 决策大脑")
                 
                 # ── Agent 协商总线可视化 (AgentCoordinator) ──
-                with gr.Accordion("⚖️ 协商总线日志", open=True):
+                with gr.Accordion("协商总线日志", open=True):
                     agent_coord_chatbot = gr.Chatbot(
                         label="多 Agent 通信",
                         value=[],
                         height=180,
-                        
+                        type="messages",
                     )
                 
                 # ── 五轮审查热力图 ──
-                with gr.Accordion("🔥 审查热力图", open=True):
+                with gr.Accordion("审查热力图", open=True):
                     review_heatmap_html = gr.HTML(
                         value="""<div style="font-size:13px;color:#8B949E;">
                         格式: <span style="color:#238636">●</span> | 
@@ -2028,7 +2181,7 @@ def build_ui() -> gr.Blocks:
                     )
                 
                 # ── 反偏见洞察 (AntiBiasAnalysis) ──
-                with gr.Accordion("💡 反偏见洞察", open=False):
+                with gr.Accordion("反偏见洞察", open=False):
                     antibias_display = gr.Markdown("等待审查完成后，此处将展示偏见模式检测与反向视角建议。")
                     antibias_temp_slider = gr.Slider(
                         label="创新温度 (Temperature)",
@@ -2037,7 +2190,7 @@ def build_ui() -> gr.Blocks:
                     )
                 
                 # ── HITL 快捷操作 ──
-                with gr.Accordion("🛠 审查建议速览", open=False):
+                with gr.Accordion("审查建议速览", open=False):
                     hitl_quick_issues = gr.Markdown("审查完成后，关键修改建议将在此列出。")
 
 
@@ -2072,7 +2225,11 @@ def build_ui() -> gr.Blocks:
                 gr.update(value=""),
                 gr.update(value=""),
                 gr.update(value=""),
-                "",  # 额外的 manual_edit_text 补位
+                "",  # manual_edit_text
+                [],  # agent_coord_chatbot
+                app.build_review_heatmap(),  # review_heatmap_html
+                app.get_antibias_display(),  # antibias_display
+                "",  # hitl_quick_issues
             )
 
         user_login_btn.click(
@@ -2086,7 +2243,8 @@ def build_ui() -> gr.Blocks:
                 routing_box, routing_q_title, routing_q_desc,
                 routing_options_disp, routing_options_dropdown,
                 current_q_prog, current_q_title, current_q_desc,
-                current_q_hint, manual_edit_text
+                current_q_hint, manual_edit_text,
+                agent_coord_chatbot, review_heatmap_html, antibias_display, hitl_quick_issues
             ]
         )
 
@@ -2115,7 +2273,8 @@ def build_ui() -> gr.Blocks:
                 gr.update(choices=ui["choices"], value=None),
                 plan,
                 kb,
-                gr.update(value=build_progress_badge("问卷"))
+                gr.update(value=build_progress_badge("问卷")),
+                [],  # agent_coord_chatbot
             )
 
         new_proj_save_btn.click(
@@ -2125,12 +2284,32 @@ def build_ui() -> gr.Blocks:
                 global_status_msg, project_selector, new_proj_box, 
                 active_proj_title, routing_box, routing_q_title, 
                 routing_q_desc, routing_options_disp, routing_options_dropdown,
-                plan_output_text, kb_exemplar_recommend, progress_badge_html
+                plan_output_text, kb_exemplar_recommend, progress_badge_html,
+                agent_coord_chatbot
             ]
         )
 
         # ── 3. 选择项目事件 ──
         def select_project_fn(name):
+            if not name:
+                # 删除项目/登出后下拉框被清空时，显示中性提示而非报错
+                return (
+                    "请选择或新建一个项目开始写作",
+                    gr.update(value="## 请新建或选择项目"),
+                    "", "", "", "", "", "",
+                    gr.update(value=build_progress_badge("")),
+                    gr.update(elem_classes="ios-card ws-panel-hidden"),
+                    gr.update(value="### 场景路由选择"),
+                    gr.update(value=""),
+                    gr.update(value=""),
+                    gr.update(choices=[], value=None),
+                    gr.update(value=""),
+                    gr.update(value="### 等待选择项目"),
+                    gr.update(value=""),
+                    gr.update(value=""),
+                    "",
+                    [],
+                )
             msg, plan, draft, log, rev, fnl, multi, prog_html = app.select_project(name)
             # 项目载入后，第一步加载对应模式问卷
             routing_visible = False
@@ -2173,7 +2352,8 @@ def build_ui() -> gr.Blocks:
                 gr.update(value=q_text),
                 gr.update(value=why_ask),
                 gr.update(value=hint),
-                draft # 手动微调框
+                draft,  # manual_edit_text
+                app.get_agent_chatbot_messages(),  # agent_coord_chatbot
             )
 
         project_selector.change(
@@ -2186,7 +2366,8 @@ def build_ui() -> gr.Blocks:
                 routing_box, routing_q_title, routing_q_desc,
                 routing_options_disp, routing_options_dropdown,
                 current_q_prog, current_q_title, current_q_desc,
-                current_q_hint, manual_edit_text
+                current_q_hint, manual_edit_text,
+                agent_coord_chatbot
             ]
         )
 
@@ -2201,10 +2382,35 @@ def build_ui() -> gr.Blocks:
             outputs=[global_status_msg, confirm_delete_box]
         )
         
+        def delete_project_fn(name):
+            msg, projects, _ = app.delete_project_action(name)
+            cleared = app.current_project_id is None
+            return (
+                msg,
+                gr.update(choices=projects, value=None),
+                gr.update(visible=False),
+                gr.update(value="## 请新建或选择项目") if cleared else gr.update(),
+                "" if cleared else gr.update(),  # plan_output_text
+                "" if cleared else gr.update(),  # draft_editor
+                "" if cleared else gr.update(),  # coord_agent_logs
+                "" if cleared else gr.update(),  # review_summary_text
+                "" if cleared else gr.update(),  # final_draft_output
+                "" if cleared else gr.update(),  # final_multi_versions
+                gr.update(value=build_progress_badge("")) if cleared else gr.update(),
+                "" if cleared else gr.update(),  # manual_edit_text
+                [] if cleared else gr.update(),  # agent_coord_chatbot
+            )
+
         confirm_delete_yes_btn.click(
-            fn=app.delete_project_action,
+            fn=delete_project_fn,
             inputs=[project_selector],
-            outputs=[global_status_msg, project_selector, confirm_delete_box]
+            outputs=[
+                global_status_msg, project_selector, confirm_delete_box,
+                active_proj_title, plan_output_text, draft_editor,
+                coord_agent_logs, review_summary_text, final_draft_output,
+                final_multi_versions, progress_badge_html, manual_edit_text,
+                agent_coord_chatbot
+            ]
         )
         
         confirm_delete_no_btn.click(
@@ -2312,8 +2518,8 @@ def build_ui() -> gr.Blocks:
                 results = list(select_project_fn(proj_name))
                 results.append(gr.update(visible=False))
                 return results
-            return ["未重置"] + [gr.update()] * 18 + [gr.update(visible=False)]
-            
+            return ["未重置"] + [gr.update()] * 19 + [gr.update(visible=False)]
+
         confirm_reset_btn.click(
             fn=reset_project_and_refresh,
             outputs=[
@@ -2323,7 +2529,8 @@ def build_ui() -> gr.Blocks:
                 routing_box, routing_q_title, routing_q_desc,
                 routing_options_disp, routing_options_dropdown,
                 current_q_prog, current_q_title, current_q_desc,
-                current_q_hint, manual_edit_text, confirm_reset_box
+                current_q_hint, manual_edit_text, agent_coord_chatbot,
+                confirm_reset_box
             ]
         )
 
@@ -2335,35 +2542,35 @@ def build_ui() -> gr.Blocks:
         )
 
         # ── 8. 大纲确认并写作 ──
-        def safe_plan_next():
-            if not app.orchestrator or not app.orchestrator.plan:
-                return gr.update(), "请先生成并确认写作大纲方案"
-            return gr.update(selected="tab_write"), ""
+        # 先用当前下拉框选择重新生成方案，确保风格/文种与用户选择一致
+        def safe_plan_next(style_lbl, doc_lbl):
+            if not app.orchestrator or not app.orchestrator.brief:
+                return gr.update(), gr.update(), "请先完成问卷"
+            plan_display, msg = app.regenerate_plan_action(style_lbl, doc_lbl)
+            if "失败" in msg:
+                return gr.update(), gr.update(), msg
+            return gr.update(selected="tab_write"), plan_display, msg
 
         plan_btn_next.click(
             fn=safe_plan_next,
-            outputs=[project_tabs, global_status_msg]
+            inputs=[ui_style_selector, ui_doc_selector],
+            outputs=[project_tabs, plan_output_text, global_status_msg]
         )
 
         # ── 9. 执行文稿生成 ──
         # V11: Also populate Agent Hub chatbot with coordinator logs
-        def generate_and_update_hub(raw_materials, progress=gr.Progress()):
-            draft, agent_log, multi_ver, msg, prog = app.generate_draft_action(raw_materials, progress)
-            # Convert agent log text to chatbot messages
-            chat_msgs = []
-            if agent_log:
-                for line in agent_log.split("\n"):
-                    line = line.strip()
-                    if line and not line.startswith("─"):
-                        chat_msgs.append((None, line))
-            return draft, agent_log, multi_ver, msg, prog, chat_msgs if chat_msgs else []
+        def generate_and_update_hub(raw_materials, temperature, progress=gr.Progress()):
+            draft, agent_log, multi_ver, msg, prog = app.generate_draft_action(raw_materials, temperature, progress)
+            chat_msgs = app.get_agent_chatbot_messages()
+            return draft, agent_log, multi_ver, msg, prog, chat_msgs, app.build_review_heatmap()
 
         write_start_btn.click(
             fn=generate_and_update_hub,
-            inputs=[materials_input],
+            inputs=[materials_input, antibias_temp_slider],
             outputs=[
                 draft_editor, coord_agent_logs, multi_versions_preview,
-                write_event_msg, progress_badge_html, agent_coord_chatbot
+                write_event_msg, progress_badge_html, agent_coord_chatbot,
+                review_heatmap_html
             ],
             concurrency_limit=1
         )
@@ -2382,39 +2589,11 @@ def build_ui() -> gr.Blocks:
 
         def review_trigger_fn():
             res = app.run_review_action()
-            # V11: Generate heatmap HTML from review results
-            heatmap_html = """<div style="font-size:13px;color:#8B949E;">"""
-            if app.orchestrator and app.orchestrator.review_result:
-                r = app.orchestrator.review_result
-                dims = {"格式": "gray", "事实": "gray", "逻辑": "gray", "战略": "gray", "纪律": "gray"}
-                # Simple mapping based on review score
-                score = getattr(r, 'overall_score', 0) if hasattr(r, 'overall_score') else 0
-                if score >= 8:
-                    dims = {k: "green" for k in dims}
-                elif score >= 5:
-                    dims = {"格式": "green", "事实": "yellow", "逻辑": "green", "战略": "yellow", "纪律": "green"}
-                else:
-                    dims = {"格式": "yellow", "事实": "red", "逻辑": "yellow", "战略": "red", "纪律": "yellow"}
-                for dim, color in dims.items():
-                    heatmap_html += f'{dim}: <span style="color:{"#238636" if color=="green" else "#DFCB5C" if color=="yellow" else "#F85149" if color=="red" else "#484F58"}">●</span> | '
-                heatmap_html = heatmap_html.rstrip(' | ')
-            else:
-                heatmap_html += "格式: <span style=\"color:#484F58\">●</span> | 事实: <span style=\"color:#484F58\">●</span> | 逻辑: <span style=\"color:#484F58\">●</span> | 战略: <span style=\"color:#484F58\">●</span> | 纪律: <span style=\"color:#484F58\">●</span>"
-            heatmap_html += "</div>"
-            
-            # V11: Generate antibias display
-            antibias_text = "未检测到显著偏见模式。"
-            issues = app.orchestrator.get_review_issues() if app.orchestrator else []
-            if issues:
-                bias_items = [i for i in issues if "偏见" in str(i.get("issue","")) or "bias" in str(i.get("issue","")).lower()]
-                if bias_items:
-                    antibias_text = "**检测到潜在偏见模式：**\n"
-                    for b in bias_items:
-                        antibias_text += f"- {b.get('issue','')}\n  建议: {b.get('suggestion','')}\n"
-                else:
-                    antibias_text = "✅ 未检测到显著偏见模式。可适当提高创新温度以获取更多反向视角。"
-            
-            return (*res, app.orchestrator.draft if app.orchestrator else "", heatmap_html, antibias_text)
+            heatmap_html = app.build_review_heatmap()
+            antibias_text = app.get_antibias_display()
+            agent_chat = app.get_agent_chatbot_messages()
+            hitl_issues = app.get_hitl_quick_issues()
+            return (*res, app.orchestrator.draft if app.orchestrator else "", heatmap_html, antibias_text, agent_chat, hitl_issues)
 
         write_btn_next.click(
             fn=safe_write_next,
@@ -2424,7 +2603,8 @@ def build_ui() -> gr.Blocks:
             outputs=[
                 review_summary_text, review_issues_list, review_format_text,
                 review_event_msg, progress_badge_html, manual_edit_text,
-                review_heatmap_html, antibias_display
+                review_heatmap_html, antibias_display,
+                agent_coord_chatbot, hitl_quick_issues
             ]
         )
 
@@ -2435,9 +2615,13 @@ def build_ui() -> gr.Blocks:
             outputs=[review_event_msg, draft_editor]
         )
 
+        def re_review_trigger_fn():
+            summary, issues_text, msg, draft = app.re_review_action()
+            return summary, issues_text, msg, draft, app.build_review_heatmap(), app.get_hitl_quick_issues()
+
         re_review_btn.click(
-            fn=app.re_review_action,
-            outputs=[review_summary_text, review_issues_list, review_event_msg, draft_editor]
+            fn=re_review_trigger_fn,
+            outputs=[review_summary_text, review_issues_list, review_event_msg, draft_editor, review_heatmap_html, hitl_quick_issues]
         )
 
         def safe_review_next():
@@ -2445,21 +2629,23 @@ def build_ui() -> gr.Blocks:
                 return gr.update(), "请先生成并审查文稿草稿"
             return gr.update(selected="tab_finalize"), ""
 
+        # ── 提前定义 finalize，供 .then() 引用 ──
+        def finalize_trigger_fn():
+            res = app.finalize_project_action()
+            return (*res, app.get_antibias_display())
+
         review_btn_next.click(
             fn=safe_review_next,
             outputs=[project_tabs, global_status_msg]
+        ).then(
+            fn=finalize_trigger_fn,
+            outputs=[final_draft_output, final_multi_versions, workflow_summary_text, progress_badge_html, antibias_display]
         )
 
-        # ── 12. 交付与完成 ──
-        def finalize_trigger_fn():
-            res = app.finalize_project_action()
-            return res
-
-
-
+        # ── 12. 交付与完成（"导出完成"按钮的显式触发）──
         export_finished_btn.click(
             fn=finalize_trigger_fn,
-            outputs=[final_draft_output, final_multi_versions, workflow_summary_text, progress_badge_html]
+            outputs=[final_draft_output, final_multi_versions, workflow_summary_text, progress_badge_html, antibias_display]
         )
 
         # ── 13. URL 素材导入面板事件 ──
@@ -2536,8 +2722,16 @@ def build_ui() -> gr.Blocks:
         )
 
         # ── 17. 删除参考文档 ──
+        def delete_ref_doc_fn(topic, title):
+            msg, topics, docs = app.delete_ref_doc_action(topic, title)
+            return (
+                msg,
+                gr.update(choices=topics, value=topic if topic in topics else None),
+                gr.update(choices=docs, value=None)
+            )
+
         ref_doc_delete_btn.click(
-            fn=app.delete_ref_doc_action,
+            fn=delete_ref_doc_fn,
             inputs=[topic_selector, ref_doc_selector],
             outputs=[global_status_msg, topic_selector, ref_doc_selector]
         )

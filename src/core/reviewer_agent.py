@@ -449,7 +449,17 @@ class ReviewerAgent:
     def run_review(
         self, draft: str, round_index: int, brief: Any = None
     ) -> ReviewResult:
-        """执行单轮审查"""
+        """
+        执行单轮审查（V2 修复：真正执行规则诊断，不再是空壳）
+
+        Args:
+            draft: 待审稿件
+            round_index: 审查轮次索引
+            brief: 写作简报
+
+        Returns:
+            该轮的审查结果
+        """
         dimensions = self.get_dimensions()
         if round_index >= len(dimensions):
             return ReviewResult(
@@ -459,11 +469,41 @@ class ReviewerAgent:
             )
 
         dim = dimensions[round_index]
+
+        # 真实执行规则诊断（不再空壳）
+        auto_findings = self.diagnose_errors(draft)
+
+        # 模式专属检查
+        subject_check = None
+        if self.mode == WritingMode.STRATEGIC_NARRATIVE:
+            subject_check = self.check_subject_ratio(draft)
+
+        format_check = None
+        if self.mode == WritingMode.ADMINISTRATIVE:
+            format_check = self.check_format_compliance(draft)
+
+        # 将诊断结果转为 ReviewFinding
+        findings = []
+        for f in auto_findings:
+            findings.append(ReviewFinding(
+                round_name=dim['name'],
+                severity=ReviewSeverity(f.get("severity", "minor")),
+                location=f.get("matched_pattern", "auto-detect"),
+                issue=f.get("diagnosis", ""),
+                suggestion=f.get("prescription", ""),
+                original_text=f.get("matched_pattern", ""),
+            ))
+
+        # 计算评分
+        severity_weight = {"critical": 25, "major": 15, "minor": 5, "suggestion": 2}
+        penalty = sum(severity_weight.get(f.severity.value, 5) for f in findings)
+        score = max(0.0, 100.0 - penalty)
+
         result = ReviewResult(
             round_name=dim['name'],
-            passed=True,
-            findings=[],
-            overall_score=100.0,
+            passed=len(findings) == 0,
+            findings=findings,
+            overall_score=score,
         )
         self.review_history.append(result)
         return result

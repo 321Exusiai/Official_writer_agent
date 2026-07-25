@@ -96,16 +96,24 @@ class Orchestrator:
 
     def __init__(self, api_manager=None, knowledge_base=None, style_adapter=None):
         self.questionnaire = Questionnaire()
-        self.style_adapter = StyleAdapter()
+        # 优先使用传入的 style_adapter，否则创建默认实例
+        self.style_adapter = style_adapter if style_adapter is not None else StyleAdapter()
         self.doc_identifier = DocumentTypeIdentifier()
-        self.writer = WriterAgent()
+
+        # 知识库：优先使用传入的，否则懒加载（首次使用时创建）
+        self._knowledge_base = knowledge_base
+
+        self.writer = WriterAgent(knowledge_base=self._get_knowledge_base())
         self.reviewer = ReviewerAgent()
         self.coordinator = AgentCoordinator()
         self.multi_doc_gen = MultiDocGenerator()
-        
-        # 复用 API 配置管理器实例，避免每次调用都重新加载配置
-        from ..config.api_config import APIConfigManager
-        self.api_manager = APIConfigManager()
+
+        # API 配置管理器：优先使用传入的，否则创建默认实例
+        if api_manager is not None:
+            self.api_manager = api_manager
+        else:
+            from ..config.api_config import APIConfigManager
+            self.api_manager = APIConfigManager()
 
         # Token 优化器集成（六大策略）
         from ..utils.token_optimizer import (
@@ -135,7 +143,18 @@ class Orchestrator:
         self.agent_log: List[str] = []
         self.multi_versions: Dict[str, str] = {}
         self.review_summary_display: str = ""
+        self.temperature: float = 0.7
         self._on_complete: Optional[Callable] = None
+
+    def _get_knowledge_base(self):
+        """懒加载知识库实例（避免导入时即加载）"""
+        if self._knowledge_base is None:
+            try:
+                from ..knowledge.knowledge_base import KnowledgeBase
+                self._knowledge_base = KnowledgeBase()
+            except Exception:
+                return None
+        return self._knowledge_base
 
     def on(self, event: str, callback: Callable):
         if event == "question":
@@ -390,6 +409,16 @@ class Orchestrator:
             "plan": self.plan.display(),
             "writing_mode": self.writing_mode.value,
         }
+
+        # 注入上下文用于真实预警检测
+        mode_value = self.writing_mode.value if hasattr(self.writing_mode, 'value') else str(self.writing_mode)
+        self.coordinator.set_context(
+            raw_materials=raw_materials,
+            writing_mode=mode_value,
+            draft_word_count=0,  # 写作前尚无草稿
+            has_style_conflict=False,
+        )
+
         consult_responses = self.coordinator.consult_before_decision(
             decision_topic="写作方案评审",
             participants=[
@@ -423,14 +452,30 @@ class Orchestrator:
         for w in warnings:
             self._log_agent(f"{w.get('agent', 'Agent')} 预警", w.get("alert", ""))
 
-        # 第4步：生成主版本（Writer Agent）
+        # 第3.5步：民主集中制决策 - 综合协商意见做最终裁决
+        _notify(0.38, "Orchestrator 综合各方意见做最终决策...")
+        decision = self.coordinator.make_decision(
+            topic="写作方案最终决策",
+            consultation_responses=consult_responses,
+            proactive_reports=warnings,
+        )
+        self._log_agent("Orchestrator", f"决策: {decision.get('decision', '')}")
+
+        # 将决策中的关注点和建议注入 Writer，确保协商结果真正影响写作
+        decision_context = self._build_decision_context(decision)
+
+        # 第4步：生成主版本（Writer Agent，注入协商决策上下文）
         _notify(0.5, "主笔正在起草正文（通常需要30-60秒）...")
         system_prompt = self.writer.build_system_prompt()
         user_prompt = self.writer.build_user_prompt()
 
+        # 在 user_prompt 末尾追加协商决策摘要，让 Writer 知晓各方意见
+        if decision_context:
+            user_prompt = f"{user_prompt}\n\n【多智能体协商决策摘要】\n{decision_context}"
+
         self.draft = self._call_llm(system_prompt, user_prompt)
         if self.draft:
-            self._log_agent("Writer", f"初稿已生成（{len(self.draft)} 字）")
+            self._log_agent("Writer", f"初稿已生成（{len(self.draft)} 字，已注入协商决策）")
         else:
             self._log_agent("Writer", "初稿生成失败，返回空内容")
 
@@ -445,6 +490,37 @@ class Orchestrator:
             self._on_draft_ready(self.draft)
 
         return self.draft
+
+    def _build_decision_context(self, decision: Dict[str, Any]) -> str:
+        """
+        将民主协商决策结果转换为 Writer 可理解的上下文摘要
+
+        确保协商不是空转：各方意见真正注入到写作过程中
+        """
+        parts = []
+        concerns = decision.get("concerns", [])
+        suggestions = decision.get("suggestions", [])
+        alerts = decision.get("alerts", [])
+
+        if concerns:
+            parts.append("【各方关注点】")
+            for c in concerns[:5]:  # 限制数量避免 token 膨胀
+                parts.append(f"- {c}")
+
+        if suggestions:
+            parts.append("\n【改进建议】")
+            for s in suggestions[:5]:
+                parts.append(f"- {s}")
+
+        if alerts:
+            parts.append("\n【预警提示】")
+            for a in alerts[:3]:
+                parts.append(f"- {a}")
+
+        if decision.get("rationale"):
+            parts.append(f"\n决策依据：{decision['rationale']}")
+
+        return "\n".join(parts)
 
     def _generate_multi_versions(self):
         """使用 MultiDocGenerator 生成多版本文稿"""
@@ -495,23 +571,25 @@ class Orchestrator:
         """记录智能体日志"""
         self.agent_log.append(f"  [{agent}] {message}")
 
-    def _call_llm(self, system_prompt: str, user_prompt: str, temperature: float = 0.7, max_tokens: int = 8000) -> str:
+    def _call_llm(self, system_prompt: str, user_prompt: str, temperature: float = None, max_tokens: int = 8000) -> str:
         """
         调用 LLM API 生成内容（集成六大 Token 优化策略 + 健壮性机制）
 
-        优化集成：
-          A. Prompt 文本压缩（省 50-70%）
-          D. 缓存对齐 + LRU 缓存（省 50-90%）
-          统计：token 节省量追踪
-
-        健壮性：
-          - 配置校验（enable/api_key/api_base）
-          - 重试机制（指数退避，最多 3 次）
-          - 响应验证（非空 + 长度检查）
-          - 分类错误处理（超时/认证/限流/服务器）
-          - 优雅降级（fallback 占位文本）
+        Args:
+            temperature: None 时使用 self.temperature（支持 UI 温度调节，修复语义断裂）
         """
+        # 优先使用传入温度，否则用实例温度（修复 temperature 语义断裂）
+        if temperature is None:
+            temperature = self.temperature
         self._api_call_count += 1
+
+        # ── 0. 任务分级路由（Strategy F：按复杂度分类，记录用于统计）──
+        from ..utils.token_optimizer import ModelRouter
+        task_desc = (system_prompt + user_prompt)[:200]
+        task_level = ModelRouter.classify_task(task_desc)
+        self._task_level_counts = getattr(self, '_task_level_counts', {})
+        level_name = task_level.name if hasattr(task_level, 'name') else str(task_level)
+        self._task_level_counts[level_name] = self._task_level_counts.get(level_name, 0) + 1
 
         # ── 1. 配置校验 ──
         config = self.api_manager.config
@@ -637,30 +715,50 @@ User Prompt:
             "tokens_saved": self._total_tokens_saved,
             "cache_stats": self._cache_aligner.get_cache_stats(),
             "optimization_report": self._token_optimizer.get_optimization_report(),
+            # Strategy F: 任务分级路由统计
+            "task_routing": getattr(self, '_task_level_counts', {}),
         }
 
     # ═══════════════════════════════════════════════════════════
     # 审查阶段（模式感知 + 迭代式审查 V2.1 + HITL 循环 V2.2）
     # ═══════════════════════════════════════════════════════════
 
-    def review(self) -> List[Dict[str, Any]]:
+    def review(self, progress_callback=None, llm_depth_review: bool = True) -> List[Dict[str, Any]]:
         """
-        多智能体协作审查流程（V3 核心改进）
+        多智能体协作审查流程（V3.1 核心改进：辩论 + LLM 审查真正生效）
 
         流程：
-          1. Writer 自检 + Reviewer 审查 + Debater 辩论
-          2. 多轮 LLM 迭代审查
-          3. 生成审查总结
+          1. Writer 自检 + Reviewer 规则审查 + 自动修复
+          2. LLM 深度审查（每轮真正调用 LLM）
+          3. Writer vs Reviewer 分歧时自动触发辩论
+          4. 生成审查总结
+
+        Args:
+            progress_callback: 可选进度回调
+            llm_depth_review: 是否启用 LLM 深度审查（默认 True）
         """
+        def _notify(progress, desc):
+            if progress_callback:
+                progress_callback(progress, desc)
+
         if not self.draft:
             raise ValueError("请先调用write()生成初稿")
 
         self.reviewer.set_mode(self.writing_mode)
         self.review_results = []
 
-        self._log_agent("系统", "开始多轮迭代审查")
+        self._log_agent("系统", "开始多轮迭代审查（规则诊断 + LLM 深度审查）")
 
-        # 第1步：Reviewer 执行迭代审查（规则诊断 + 自动修复）
+        # 更新 coordinator 上下文
+        mode_value = self.writing_mode.value if hasattr(self.writing_mode, 'value') else str(self.writing_mode)
+        self.coordinator.set_context(
+            raw_materials="",  # 审查阶段不再关注原始素材
+            writing_mode=mode_value,
+            draft_word_count=len(self.draft) if self.draft else 0,
+            has_style_conflict=False,
+        )
+
+        # 第1步：规则诊断 + 自动修复
         original_draft = self.draft
         final_draft, iteration_results = self.reviewer.iterate_review(
             draft=original_draft,
@@ -668,21 +766,114 @@ User Prompt:
             brief=self.brief,
         )
 
-        # 更新草稿为修复后的版本
         if final_draft != original_draft:
             self.draft = final_draft
-            self._log_agent("Reviewer", f"自动修复完成，草稿从 {len(original_draft)} 字 → {len(final_draft)} 字")
+            self._log_agent("Reviewer", f"规则修复完成，草稿从 {len(original_draft)} 字 → {len(final_draft)} 字")
 
-        # 第2步：LLM 深度审查（对每轮审查结果用 LLM 生成详细报告）
+        # 第2步：LLM 深度审查 — 真正调用 LLM 对每轮执行审查
+        if llm_depth_review:
+            _notify(0.4, "LLM 深度审查中（对每轮执行AI审查）...")
+            llm_review_results = self._run_llm_deep_review(iteration_results)
+            # 合并 LLM 审查结果
+            for i, llm_result in enumerate(llm_review_results):
+                if i < len(iteration_results):
+                    iteration_results[i]["llm_review"] = llm_result
+
+        # 第3步：检测 Writer 与 Reviewer 分歧，触发辩论
+        _notify(0.7, "检测Agent分歧，必要时启动辩论...")
+        debate_triggered = self._check_and_run_debate(iteration_results)
+        if debate_triggered:
+            self._log_agent("Debater", "辩论完成，已达成共识并记录")
+
+        # 更新最终审查结果
         self.review_results = self.reviewer.review_history
         self.review_summary_display = self._build_review_summary_display(iteration_results)
 
-        self._log_agent("系统", f"审查完成，共 {len(iteration_results)} 轮")
+        self._log_agent("系统", f"审查完成，共 {len(iteration_results)} 轮（含 {'AI深度审查' if llm_depth_review else '规则审查'}）")
 
         if self._on_review_done:
             self._on_review_done(iteration_results)
 
         return iteration_results
+
+    def _run_llm_deep_review(
+        self, iteration_results: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """对每轮审查并行调用 LLM 执行深度审查"""
+        from concurrent.futures import ThreadPoolExecutor
+
+        llm_results = [{} for _ in iteration_results]
+
+        def review_single_round(i: int) -> tuple:
+            ir = iteration_results[i]
+            prompt = ir.get("review_prompt", "")
+            if not prompt or not self.draft:
+                return (i, {"error": "无审查prompt或无草稿"})
+
+            full_prompt = f"{prompt}\n\n请按要求的格式输出审查结果。"
+            try:
+                raw = self._call_llm(
+                    "你是一名严格的公文审查专家，按给定维度和格式输出审查结果。",
+                    full_prompt,
+                    temperature=0.3,
+                    max_tokens=4000,
+                )
+                return (i, {"raw_response": raw, "round": ir["round"]})
+            except Exception as e:
+                return (i, {"error": str(e), "round": ir["round"]})
+
+        with ThreadPoolExecutor(max_workers=min(len(iteration_results), 4)) as executor:
+            futures = {
+                executor.submit(review_single_round, i): i
+                for i in range(len(iteration_results))
+            }
+            for future in futures:
+                i, result = future.result()
+                llm_results[i] = result
+                self._log_agent(
+                    "Reviewer",
+                    f"第{i+1}轮 [{result.get('round', '?')}] LLM审查{'完成' if 'raw_response' in result else '失败'}"
+                )
+
+        return llm_results
+
+    def _check_and_run_debate(
+        self, iteration_results: List[Dict[str, Any]]
+    ) -> bool:
+        """
+        检测审查结果中是否存在 Writer 与 Reviewer 的分歧，
+        如果发现问题较多且未通过，自动触发辩论
+        """
+        total_findings = sum(ir.get("findings_count", 0) for ir in iteration_results)
+        failed_rounds = sum(1 for ir in iteration_results if not ir.get("passed", True))
+
+        # 触发条件：未通过轮次 >= 2 或 发现问题 >= 5
+        if failed_rounds < 2 and total_findings < 5:
+            return False
+
+        # 构建双方立场
+        writer_position = (
+            f"撰写方认为：文稿基本符合要求，{total_findings}个问题中大部分属于格式修正。"
+            f"建议在保持内容完整性的前提下，选择性采纳审查意见。"
+        )
+        reviewer_position = (
+            f"审查方认为：发现{total_findings}个问题，{failed_rounds}轮未通过。"
+            f"这些问题影响文稿质量和合规性，建议全部修正后再定稿。"
+        )
+
+        try:
+            debate_result = self.coordinator.run_debate(
+                topic=f"审查分歧：{total_findings}个问题待决议",
+                writer_position=writer_position,
+                reviewer_position=reviewer_position,
+                max_rounds=1,
+                llm_call=self._call_llm,
+            )
+            self._log_agent("Debater", f"辩论共识: {debate_result.consensus[:150]}")
+            return True
+        except Exception as e:
+            self._log_agent("Debater", f"辩论异常: {e}")
+            return False
 
     def _build_review_summary_display(self, iteration_results: List[Dict[str, Any]]) -> str:
         """构建审查总结的展示文本"""
@@ -702,6 +893,20 @@ User Prompt:
         lines.append("\n【迭代统计】")
         for i, ir in enumerate(iteration_results):
             lines.append(f"  第{i+1}轮 [{ir['round']}]: 发现 {ir['findings_count']} 个问题，修复 {ir['fixes_applied']} 个")
+            if ir.get("llm_review"):
+                llm_data = ir["llm_review"]
+                if "raw_response" in llm_data:
+                    lines.append(f"    🤖 AI深度审查: 已完成（{len(llm_data['raw_response'])}字符）")
+                elif "error" in llm_data:
+                    lines.append(f"    ⚠️ AI审查异常: {llm_data['error'][:80]}")
+
+        # 添加协调统计
+        coordination = self.coordinator.get_coordination_report()
+        lines.append(f"\n【协同统计】")
+        lines.append(f"  消息总数: {coordination['communication_stats']['total_messages']}")
+        lines.append(f"  协商次数: {coordination['consultations']}")
+        lines.append(f"  辩论次数: {coordination['debates']}")
+        lines.append(f"  主动预警: {coordination['proactive_alerts']}")
 
         return "\n".join(lines)
 
@@ -742,19 +947,52 @@ User Prompt:
         )
         return self.draft
 
-    def re_review(self) -> List[Dict[str, Any]]:
-        """在用户手动修改草稿后，重新执行审查"""
+    def re_review(self, llm_depth_review: bool = True) -> List[Dict[str, Any]]:
+        """
+        在用户手动修改草稿后，重新执行审查（V3.1：与 review() 对齐）
+
+        Args:
+            llm_depth_review: 是否启用 LLM 深度审查（默认 True）
+        """
         if not self.draft:
             raise ValueError("当前无草稿可审查")
+
         self.reviewer.set_mode(self.writing_mode)
         self.review_results = []
+
+        # 更新 coordinator 上下文
+        mode_value = self.writing_mode.value if hasattr(self.writing_mode, 'value') else str(self.writing_mode)
+        self.coordinator.set_context(
+            raw_materials="",
+            writing_mode=mode_value,
+            draft_word_count=len(self.draft),
+            has_style_conflict=False,
+        )
+
+        self._log_agent("系统", "重新执行审查（规则诊断 + LLM 深度审查）")
         original_draft = self.draft
         self.draft, iteration_results = self.reviewer.iterate_review(
             draft=original_draft,
             mode=self.writing_mode,
             brief=self.brief,
         )
+
+        if self.draft != original_draft:
+            self._log_agent("Reviewer", f"重新修复完成，{len(original_draft)} 字 -> {len(self.draft)} 字")
+
+        # LLM 深度审查
+        if llm_depth_review:
+            llm_review_results = self._run_llm_deep_review(iteration_results)
+            for i, llm_result in enumerate(llm_review_results):
+                if i < len(iteration_results):
+                    iteration_results[i]["llm_review"] = llm_result
+
+        # 分歧检测与辩论
+        self._check_and_run_debate(iteration_results)
+
         self.review_results = self.reviewer.review_history
+        self.review_summary_display = self._build_review_summary_display(iteration_results)
+
         if self._on_review_done:
             self._on_review_done(iteration_results)
         return iteration_results
@@ -772,6 +1010,9 @@ User Prompt:
 
         mode_profile = get_mode_profile(self.writing_mode)
 
+        # 获取完整的协调统计
+        coordination = self.coordinator.get_coordination_report()
+
         output = {
             "brief": self.brief.to_dict() if self.brief else {},
             "plan": {
@@ -787,6 +1028,8 @@ User Prompt:
             "review_count": len(self.review_results),
             "review_passed": all(r.passed for r in self.review_results) if self.review_results else False,
             "mode_principles": [p["name"] for p in mode_profile.principles],
+            "coordination_report": coordination,
+            "api_stats": self.get_api_stats(),
         }
 
         if self._on_complete:
