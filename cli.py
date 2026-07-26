@@ -10,8 +10,6 @@ CLI 入口 — 命令行交互界面（V3.0 人性化版）
 
 import sys
 import os
-import time
-import json
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -51,6 +49,13 @@ class CLI:
             print(f"\n  好的，{self._user_name}！那我们开始吧~")
         else:
             print(f"\n  你好，{self._user_name}！很高兴认识你。")
+
+        # 创建用户档案（使用 pdb，修复 M-6：pdb 实例化后从未使用）
+        self.pdb.create_user(self._user_name)
+        self.pdb.create_project(f"{self._user_name}的公文项目")
+
+        # 将 coordinator 关联到 orchestrator（修复 M-6：coordinator 实例化后从未使用）
+        self.orchestrator.coordinator = self.coordinator
 
         print("  接下来我会问你几个问题，帮你理清写作思路。")
         print("  有些问题可能不太好回答，没关系，慢慢想就好。")

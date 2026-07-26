@@ -29,7 +29,6 @@ Token 优化器 — 多来源综合方案
   Strategy F: 模型分级路由 (10-100x 节省)
 """
 
-import json
 from dataclasses import dataclass, field
 from typing import List, Dict, Optional, Any, Tuple
 from enum import Enum
@@ -154,7 +153,7 @@ class PromptCompressor:
     def _apply_aggressive_trim(cls, text: str) -> str:
         result = text
         import re
-        result = re.sub(r'[，。；：、""''](?!\S)', '', result)
+        result = re.sub(r"[，。；：、\u201c\u201d\u2018\u2019](?!\S)", '', result)
         result = re.sub(r'\n{3,}', '\n\n', result)
         return result
 
@@ -266,16 +265,25 @@ class ContextManager:
         overflow = self._messages.recent[:-self.RECENT_WINDOW]
         self._messages.recent = self._messages.recent[-self.RECENT_WINDOW:]
 
+        # 修复轮次标签计算：正确记录溢出区间的起始和结束
+        start_msg = self._total_messages - len(overflow)
+        end_msg = self._total_messages - self.RECENT_WINDOW
         new_summary_lines = [
-            f"[轮次{self._total_messages - len(overflow)}-{self._total_messages - self.RECENT_WINDOW}] "
+            f"[轮次{start_msg}-{end_msg}] "
         ]
         for msg in overflow:
             snippet = msg["content"][:80].replace("\n", " ")
             new_summary_lines.append(f"  {msg['role']}: {snippet}...")
 
+        # 修复远期记忆覆盖：将旧摘要追加到 archive 而非直接覆盖
+        new_summary = "\n".join(new_summary_lines)
         if self._messages.summary:
-            self._messages.archive = self._messages.summary
-        self._messages.summary = "\n".join(new_summary_lines)
+            # 旧摘要并入远期存档（保留早期记忆）
+            if self._messages.archive:
+                self._messages.archive = self._messages.archive + "\n\n" + self._messages.summary
+            else:
+                self._messages.archive = self._messages.summary
+        self._messages.summary = new_summary
 
     def build_context(self, system_prompt: str = "") -> List[Dict]:
         messages = []
@@ -455,7 +463,7 @@ class TokenOptimizer:
         self.router = ModelRouter()
         self.stats = TokenStats()
 
-    def estimate_tokens(self, text: str) -> int:
+    def estimate_tokens(self, text) -> int:
         if isinstance(text, int):
             return text * 3 // 4
         return len(text) * 3 // 4

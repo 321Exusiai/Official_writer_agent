@@ -7,42 +7,14 @@
 3. 兼容旧版API（不传mode时默认使用STRATEGIC_NARRATIVE）
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import List, Dict, Optional, Any
 
 from .writing_mode import (
     WritingMode,
-    ALL_PRINCIPLES,
     get_mode_profile,
 )
 from ..utils.response_cache import cached_prompt, store_prompt
-
-
-FIVE_PRINCIPLES_LEGACY = """
-【五大写作原则 — 硬约束（战略叙事模式专用）】
-
-1. 主体性原则：镜头始终对准"我们"
-   - 每句话的主语或叙述重心调整为"我们"
-   - 落笔前自问：这句话是在讲对方，还是在讲我们？
-   - 如果是在讲对方，那么这件事对我们意味着什么？
-
-2. 赋能性原则：每段行程都必须回扣培养理念
-   - 为每个板块设置"战略锚点"——点明"为什么是这里"
-   - 不让任何一段行程成为脱离组织语境的"孤岛"
-
-3. 借势性原则：以外部权威为组织背书
-   - 记录外部权威观点后，主动建立与自身的关联
-   - 借外部之锤，敲自家之钟
-
-4. 成长性原则：用真实证据替代空泛表态
-   - 用真实感言、具体体悟作为"证据"
-   - 严禁使用"大家纷纷表示""深刻感受到"等空泛套话
-   - 如果一段感言去掉后不影响叙事，果断删除
-
-5. 战略性原则：全文服务于组织的长期发展
-   - 结尾含蓄但坚定地传递"我们有方向、有资源、有行动力、有成果"
-   - 读者读完后应产生"应该继续支持"的印象
-"""
 
 
 @dataclass

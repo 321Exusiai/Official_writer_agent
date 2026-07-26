@@ -23,7 +23,6 @@ from .writing_mode import (
     WritingMode,
     get_review_dimensions,
     get_mode_profile,
-    ALL_PRINCIPLES,
 )
 from ..utils.response_cache import cached_prompt
 
@@ -44,6 +43,7 @@ class ReviewFinding:
     suggestion: str
     original_text: str = ""
     suggested_revision: str = ""
+    error_key: str = ""
 
 
 @dataclass
@@ -112,18 +112,20 @@ UNIVERSAL_ERROR_DB = {
         "check_method": "semantic",
     },
     "redundant_repetition": {
-        "patterns": [],
+        "patterns": [
+            "同时同时", "并且并且", "共同共同",
+        ],
         "diagnosis": "存在重复表述，同一信息在多处出现",
         "prescription": "删除重复内容。同一信息在标题、导语、正文中只出现一次即可。",
         "severity": ReviewSeverity.MINOR,
-        "check_method": "structural",
     },
     "wrong_tone": {
-        "patterns": [],
+        "patterns": [
+            "哥们", "小伙伴们", "亲们", "老铁",
+        ],
         "diagnosis": "语气与文种/受众不匹配",
         "prescription": "向上行文用谦敬语气（'恳请''敬请'），向下行文用明确语气（'请认真执行'），平行行文用协商语气（'请予支持'）。",
         "severity": ReviewSeverity.MAJOR,
-        "check_method": "semantic",
     },
 }
 
@@ -473,15 +475,6 @@ class ReviewerAgent:
         # 真实执行规则诊断（不再空壳）
         auto_findings = self.diagnose_errors(draft)
 
-        # 模式专属检查
-        subject_check = None
-        if self.mode == WritingMode.STRATEGIC_NARRATIVE:
-            subject_check = self.check_subject_ratio(draft)
-
-        format_check = None
-        if self.mode == WritingMode.ADMINISTRATIVE:
-            format_check = self.check_format_compliance(draft)
-
         # 将诊断结果转为 ReviewFinding
         findings = []
         for f in auto_findings:
@@ -492,7 +485,35 @@ class ReviewerAgent:
                 issue=f.get("diagnosis", ""),
                 suggestion=f.get("prescription", ""),
                 original_text=f.get("matched_pattern", ""),
+                error_key=f.get("error_key", ""),
             ))
+
+        # 模式专属检查（结果加入 findings，不再丢弃）
+        subject_check = None
+        if self.mode == WritingMode.STRATEGIC_NARRATIVE:
+            subject_check = self.check_subject_ratio(draft)
+            if subject_check and not subject_check.get("healthy", True):
+                findings.append(ReviewFinding(
+                    round_name=dim['name'],
+                    severity=ReviewSeverity("major"),
+                    location="全文",
+                    issue=subject_check.get("suggestion", "主体性占比不足"),
+                    suggestion="将更多'对方做了什么'改为'我们收获了什么'",
+                    error_key="subject_ratio_low",
+                ))
+
+        format_check = None
+        if self.mode == WritingMode.ADMINISTRATIVE:
+            format_check = self.check_format_compliance(draft)
+            for fc in format_check:
+                findings.append(ReviewFinding(
+                    round_name=dim['name'],
+                    severity=ReviewSeverity(fc.get("severity", "minor")),
+                    location="格式",
+                    issue=fc.get("diagnosis", ""),
+                    suggestion=fc.get("prescription", ""),
+                    error_key=fc.get("error_key", ""),
+                ))
 
         # 计算评分
         severity_weight = {"critical": 25, "major": 15, "minor": 5, "suggestion": 2}
@@ -596,16 +617,16 @@ class ReviewerAgent:
         },
         {
             "key": "title_no_wen_zhong",
-            "check": lambda t: any(kw in (t.split("\n")[0] if t else "") for kw in ["通知", "请示", "批复", "函", "纪要", "通报", "报告", "决定", "公告", "通告", "议案", "命令", "意见", "决议", "公报"]),
-            "diagnosis": "标题可能缺少文种词",
-            "prescription": "公文标题必须表明文种（如通知、请示、批等）。格式为'发文机关+关于XX事项的通知/请示/批复'。",
+            "check": lambda t: not any(kw in (t.split("\n")[0] if t else "") for kw in ["通知", "请示", "批复", "函", "纪要", "通报", "报告", "决定", "公告", "通告", "议案", "命令", "意见", "决议", "公报"]),
+            "diagnosis": "标题缺少文种词",
+            "prescription": "公文标题必须表明文种（如通知、请示、批复等）。格式为'发文机关+关于XX事项的通知/请示/批复'。",
             "severity": "critical",
             "scope": "administrative",
         },
         # ── 发文机关 ──
         {
             "key": "missing_issuing_authority",
-            "check": lambda t: t and not any(t.split("\n")[0].startswith(p) for p in ["关于"]) and "关于" not in (t.split("\n")[0] if t else ""),
+            "check": lambda t: t and t.split("\n")[0].startswith("关于") and not any(kw in (t.split("\n")[0] if t else "") for kw in ["教育部", "科技部", "省委", "市委", "省政府", "市政府", "厅", "局", "委员会", "办公厅", "办公室"]),
             "diagnosis": "标题可能缺少发文机关",
             "prescription": "正式公文标题应为'XX单位关于XX事项的XX'格式。",
             "severity": "major",
@@ -899,23 +920,51 @@ class ReviewerAgent:
 
         current_draft = draft
         iteration_results = []
+        reported_patterns: set = set()  # 跟踪已报告的错误模式，避免重复报告
 
         for i in range(min(max_iterations, len(dimensions))):
             dim = dimensions[i]
 
             auto_findings = self.diagnose_errors(current_draft)
+            # 过滤掉前几轮已报告的错误模式，避免同一错误被重复报告 N 次
+            auto_findings = [
+                f for f in auto_findings
+                if f.get("matched_pattern", "") not in reported_patterns
+            ]
 
             subject_check = None
             if mode == WritingMode.STRATEGIC_NARRATIVE:
                 subject_check = self.check_subject_ratio(current_draft)
+                if subject_check and not subject_check.get("healthy", True):
+                    auto_findings.append({
+                        "error_key": "subject_ratio_low",
+                        "diagnosis": subject_check.get("suggestion", "主体性占比不足"),
+                        "prescription": "将更多'对方做了什么'改为'我们收获了什么'",
+                        "severity": "major",
+                        "matched_pattern": "",
+                    })
 
             format_check = None
             if mode == WritingMode.ADMINISTRATIVE:
                 format_check = self.check_format_compliance(current_draft)
+                for fc in format_check:
+                    auto_findings.append({
+                        "error_key": fc.get("error_key", "format_issue"),
+                        "diagnosis": fc.get("diagnosis", ""),
+                        "prescription": fc.get("prescription", ""),
+                        "severity": fc.get("severity", "minor"),
+                        "matched_pattern": "",
+                    })
 
             change_log = []
             if auto_findings:
                 current_draft, change_log = self.apply_fixes(current_draft, auto_findings)
+
+            # 记录本轮已报告的错误模式，后续轮次不再重复报告
+            for f in auto_findings:
+                pat = f.get("matched_pattern", "")
+                if pat:
+                    reported_patterns.add(pat)
 
             round_result = ReviewResult(
                 round_name=dim["name"],
@@ -927,6 +976,7 @@ class ReviewerAgent:
                         location="auto-detect",
                         issue=f.get("diagnosis", ""),
                         suggestion=f.get("prescription", ""),
+                        error_key=f.get("error_key", ""),
                     )
                     for f in auto_findings
                 ],

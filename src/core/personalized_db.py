@@ -701,12 +701,74 @@ class PersonalizedDB:
     # ═══ 持久化 ═══
 
     def export_to_json(self, user_id: Optional[str] = None) -> str:
-        """导出用户数据为JSON"""
+        """导出用户数据为JSON（完整序列化，含所有持久化字段）"""
         target_id = user_id or self.current_user_id
         if not target_id or target_id not in self.profiles:
             return "{}"
 
         profile = self.profiles[target_id]
+
+        def serialize_ref_article(a: ReferenceArticle) -> dict:
+            return {
+                "id": a.id, "title": a.title, "content": a.content,
+                "upload_time": a.upload_time, "style_notes": a.style_notes,
+                "extracted_patterns": a.extracted_patterns,
+            }
+
+        def serialize_anti_bias(ab: AntiBiasAnalysis) -> dict:
+            return {
+                "id": ab.id,
+                "user_bias_patterns": ab.user_bias_patterns,
+                "counter_perspectives": ab.counter_perspectives,
+                "innovative_angles": ab.innovative_angles,
+                "temperature_adjustment": ab.temperature_adjustment,
+                "analysis_notes": ab.analysis_notes,
+                "created_at": ab.created_at,
+            }
+
+        def serialize_user_req(ur: UserRequirement) -> dict:
+            return {
+                "id": ur.id, "description": ur.description, "priority": ur.priority,
+                "anti_bias_analysis": serialize_anti_bias(ur.anti_bias_analysis) if ur.anti_bias_analysis else None,
+                "creative_suggestions": ur.creative_suggestions,
+                "weakness_analysis": ur.weakness_analysis,
+                "created_at": ur.created_at,
+            }
+
+        def serialize_qr(qr: QuestionnaireResults) -> dict:
+            return {
+                "writing_mode": qr.writing_mode, "doc_type": qr.doc_type, "style": qr.style,
+                "purpose": qr.purpose, "primary_audience": qr.primary_audience,
+                "secondary_audiences": qr.secondary_audiences,
+                "deep_meaning": qr.deep_meaning, "strategic_anchor": qr.strategic_anchor,
+                "key_materials": qr.key_materials, "differentiator": qr.differentiator,
+                "raw_answers": qr.raw_answers,
+            }
+
+        def serialize_vocab(vc: VocabularyCorpus) -> dict:
+            return {
+                "id": vc.id, "project_id": vc.project_id,
+                "custom_terms": vc.custom_terms, "custom_phrases": vc.custom_phrases,
+                "forbidden_words": vc.forbidden_words, "required_keywords": vc.required_keywords,
+                "style_vocabulary": vc.style_vocabulary,
+                "created_at": vc.created_at, "updated_at": vc.updated_at,
+            }
+
+        def serialize_project(p: Project) -> dict:
+            return {
+                "id": p.id, "name": p.name, "description": p.description,
+                "status": p.status.value,
+                "created_at": p.created_at, "updated_at": p.updated_at,
+                "questionnaire_results": serialize_qr(p.questionnaire_results) if p.questionnaire_results else None,
+                "style_requirements": [serialize_ref_article(a) for a in p.style_requirements],
+                "vocabulary_corpus": serialize_vocab(p.vocabulary_corpus) if p.vocabulary_corpus else None,
+                "user_requirements": [serialize_user_req(ur) for ur in p.user_requirements],
+                "anti_bias_profile": serialize_anti_bias(p.anti_bias_profile) if p.anti_bias_profile else None,
+                "writing_history": p.writing_history,
+                "revision_count": p.revision_count,
+                "tags": p.tags,
+            }
+
         data = {
             "id": profile.id,
             "name": profile.name,
@@ -716,32 +778,30 @@ class PersonalizedDB:
                 "preferred_writing_modes": profile.preferences.preferred_writing_modes if profile.preferences else [],
                 "preferred_doc_types": profile.preferences.preferred_doc_types if profile.preferences else [],
                 "preferred_styles": profile.preferences.preferred_styles if profile.preferences else [],
-                "typical_length_range": profile.preferences.typical_length_range if profile.preferences else [800, 2000],
+                "typical_length_range": list(profile.preferences.typical_length_range) if profile.preferences else [800, 2000],
+                "writing_frequency": profile.preferences.writing_frequency if profile.preferences else "",
+                "common_themes": profile.preferences.common_themes if profile.preferences else [],
+                "forbidden_patterns": profile.preferences.forbidden_patterns if profile.preferences else [],
+                "preferred_transitions": profile.preferences.preferred_transitions if profile.preferences else [],
             },
-            "projects": [
-                {
-                    "id": p.id,
-                    "name": p.name,
-                    "status": p.status.value,
-                    "questionnaire_results": {
-                        "writing_mode": p.questionnaire_results.writing_mode if p.questionnaire_results else "",
-                        "doc_type": p.questionnaire_results.doc_type if p.questionnaire_results else "",
-                        "style": p.questionnaire_results.style if p.questionnaire_results else "",
-                    } if p.questionnaire_results else None,
-                    "vocabulary_corpus": {
-                        "custom_terms": p.vocabulary_corpus.custom_terms if p.vocabulary_corpus else [],
-                        "forbidden_words": p.vocabulary_corpus.forbidden_words if p.vocabulary_corpus else [],
-                    } if p.vocabulary_corpus else None,
-                }
-                for p in profile.projects
+            "writing_history": [
+                {"id": wh.id, "project_id": wh.project_id, "writing_mode": wh.writing_mode,
+                 "doc_type": wh.doc_type, "style": wh.style, "created_at": wh.created_at,
+                 "word_count": wh.word_count, "review_findings": wh.review_findings,
+                 "common_errors": wh.common_errors, "strengths": wh.strengths}
+                for wh in profile.writing_history
             ],
+            "common_error_patterns": profile.common_error_patterns,
+            "common_strengths": profile.common_strengths,
+            "global_anti_bias": serialize_anti_bias(profile.global_anti_bias) if profile.global_anti_bias else None,
+            "projects": [serialize_project(p) for p in profile.projects],
             "memory_notes": profile.memory_notes,
         }
 
         return json.dumps(data, ensure_ascii=False, indent=2)
 
     def import_from_json(self, json_data: str) -> Optional[UserProfile]:
-        """从JSON导入用户数据"""
+        """从JSON导入用户数据（完整反序列化）"""
         data = json.loads(json_data)
 
         user_id = data.get("id")
@@ -754,6 +814,8 @@ class PersonalizedDB:
             created_at=data.get("created_at", ""),
             last_active=data.get("last_active", ""),
             memory_notes=data.get("memory_notes", ""),
+            common_error_patterns=data.get("common_error_patterns", []),
+            common_strengths=data.get("common_strengths", []),
         )
 
         prefs_data = data.get("preferences", {})
@@ -762,13 +824,50 @@ class PersonalizedDB:
             preferred_doc_types=prefs_data.get("preferred_doc_types", []),
             preferred_styles=prefs_data.get("preferred_styles", []),
             typical_length_range=tuple(prefs_data.get("typical_length_range", [800, 2000])),
+            writing_frequency=prefs_data.get("writing_frequency", ""),
+            common_themes=prefs_data.get("common_themes", []),
+            forbidden_patterns=prefs_data.get("forbidden_patterns", []),
+            preferred_transitions=prefs_data.get("preferred_transitions", []),
         )
+
+        # 反序列化 writing_history
+        for wh_data in data.get("writing_history", []):
+            profile.writing_history.append(WritingHistory(
+                id=wh_data["id"], project_id=wh_data["project_id"],
+                writing_mode=wh_data.get("writing_mode", ""),
+                doc_type=wh_data.get("doc_type", ""),
+                style=wh_data.get("style", ""),
+                created_at=wh_data.get("created_at", ""),
+                word_count=wh_data.get("word_count", 0),
+                review_findings=wh_data.get("review_findings", []),
+                common_errors=wh_data.get("common_errors", []),
+                strengths=wh_data.get("strengths", []),
+            ))
+
+        # 反序列化 global_anti_bias
+        gab_data = data.get("global_anti_bias")
+        if gab_data:
+            profile.global_anti_bias = AntiBiasAnalysis(
+                id=gab_data["id"],
+                user_bias_patterns=gab_data.get("user_bias_patterns", []),
+                counter_perspectives=gab_data.get("counter_perspectives", []),
+                innovative_angles=gab_data.get("innovative_angles", []),
+                temperature_adjustment=gab_data.get("temperature_adjustment", 1.0),
+                analysis_notes=gab_data.get("analysis_notes", ""),
+                created_at=gab_data.get("created_at", ""),
+            )
 
         for proj_data in data.get("projects", []):
             proj = Project(
                 id=proj_data["id"],
                 name=proj_data["name"],
+                description=proj_data.get("description", ""),
                 status=ProjectStatus(proj_data.get("status", "draft")),
+                created_at=proj_data.get("created_at", ""),
+                updated_at=proj_data.get("updated_at", ""),
+                writing_history=proj_data.get("writing_history", []),
+                revision_count=proj_data.get("revision_count", 0),
+                tags=proj_data.get("tags", []),
             )
 
             qr_data = proj_data.get("questionnaire_results")
@@ -777,15 +876,72 @@ class PersonalizedDB:
                     writing_mode=qr_data.get("writing_mode", ""),
                     doc_type=qr_data.get("doc_type", ""),
                     style=qr_data.get("style", ""),
+                    purpose=qr_data.get("purpose", ""),
+                    primary_audience=qr_data.get("primary_audience", ""),
+                    secondary_audiences=qr_data.get("secondary_audiences", []),
+                    deep_meaning=qr_data.get("deep_meaning", ""),
+                    strategic_anchor=qr_data.get("strategic_anchor", ""),
+                    key_materials=qr_data.get("key_materials", ""),
+                    differentiator=qr_data.get("differentiator", ""),
+                    raw_answers=qr_data.get("raw_answers", {}),
                 )
+
+            for a_data in proj_data.get("style_requirements", []):
+                proj.style_requirements.append(ReferenceArticle(
+                    id=a_data["id"], title=a_data.get("title", ""),
+                    content=a_data.get("content", ""),
+                    upload_time=a_data.get("upload_time", ""),
+                    style_notes=a_data.get("style_notes", ""),
+                    extracted_patterns=a_data.get("extracted_patterns", []),
+                ))
 
             vocab_data = proj_data.get("vocabulary_corpus")
             if vocab_data:
                 proj.vocabulary_corpus = VocabularyCorpus(
-                    id=f"vocab_{proj.id}",
-                    project_id=proj.id,
+                    id=vocab_data.get("id", f"vocab_{proj.id}"),
+                    project_id=vocab_data.get("project_id", proj.id),
                     custom_terms=vocab_data.get("custom_terms", []),
+                    custom_phrases=vocab_data.get("custom_phrases", []),
                     forbidden_words=vocab_data.get("forbidden_words", []),
+                    required_keywords=vocab_data.get("required_keywords", []),
+                    style_vocabulary=vocab_data.get("style_vocabulary", {}),
+                    created_at=vocab_data.get("created_at", ""),
+                    updated_at=vocab_data.get("updated_at", ""),
+                )
+
+            for ur_data in proj_data.get("user_requirements", []):
+                ab_data = ur_data.get("anti_bias_analysis")
+                anti_bias = None
+                if ab_data:
+                    anti_bias = AntiBiasAnalysis(
+                        id=ab_data["id"],
+                        user_bias_patterns=ab_data.get("user_bias_patterns", []),
+                        counter_perspectives=ab_data.get("counter_perspectives", []),
+                        innovative_angles=ab_data.get("innovative_angles", []),
+                        temperature_adjustment=ab_data.get("temperature_adjustment", 1.0),
+                        analysis_notes=ab_data.get("analysis_notes", ""),
+                        created_at=ab_data.get("created_at", ""),
+                    )
+                proj.user_requirements.append(UserRequirement(
+                    id=ur_data["id"],
+                    description=ur_data.get("description", ""),
+                    priority=ur_data.get("priority", "normal"),
+                    anti_bias_analysis=anti_bias,
+                    creative_suggestions=ur_data.get("creative_suggestions", []),
+                    weakness_analysis=ur_data.get("weakness_analysis", ""),
+                    created_at=ur_data.get("created_at", ""),
+                ))
+
+            abp_data = proj_data.get("anti_bias_profile")
+            if abp_data:
+                proj.anti_bias_profile = AntiBiasAnalysis(
+                    id=abp_data["id"],
+                    user_bias_patterns=abp_data.get("user_bias_patterns", []),
+                    counter_perspectives=abp_data.get("counter_perspectives", []),
+                    innovative_angles=abp_data.get("innovative_angles", []),
+                    temperature_adjustment=abp_data.get("temperature_adjustment", 1.0),
+                    analysis_notes=abp_data.get("analysis_notes", ""),
+                    created_at=abp_data.get("created_at", ""),
                 )
 
             profile.projects.append(proj)

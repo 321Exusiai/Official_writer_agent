@@ -17,7 +17,7 @@
 """
 
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import List, Dict, Optional, Any, Callable, Tuple
 from enum import Enum
 
@@ -27,7 +27,7 @@ from ..questionnaire.questionnaire import (
 )
 from ..utils.response_cache import cached_prompt, store_prompt, make_cache_key
 from .style_adapter import (
-    StyleAdapter, MediaStyle, StyleProfile, STYLE_PROFILES
+    StyleAdapter, MediaStyle, STYLE_PROFILES
 )
 from .document_type import (
     DocumentTypeIdentifier, DocumentType, DocTypeProfile, DOC_TYPE_PROFILES
@@ -38,11 +38,9 @@ from .agent_coordinator import AgentCoordinator, AgentRole
 from .multi_doc_generator import MultiDocGenerator
 from .writing_mode import (
     WritingMode,
-    ALL_PRINCIPLES,
     get_mode_profile,
-    get_review_dimensions,
-    get_mode_description,
 )
+from ..questionnaire.questionnaire import get_mode_questions as _get_mode_questions
 
 
 class OrchestratorState(Enum):
@@ -156,6 +154,23 @@ class Orchestrator:
                 return None
         return self._knowledge_base
 
+    def _detect_style_conflict(self) -> bool:
+        """检测写作模式与用户风格偏好是否冲突（修复 M-8：不再硬编码 False）"""
+        try:
+            if not self.plan or not self.style_adapter:
+                return False
+            mode_value = self.writing_mode.value if hasattr(self.writing_mode, 'value') else str(self.writing_mode)
+            style_name = getattr(self.plan, 'media_style', '') or getattr(self.plan, 'style_name', '')
+            # 行政公文模式不应搭配文学/创意风格
+            if mode_value == "administrative" and style_name in ("文学性", "创意性", "散文式"):
+                return True
+            # 战略叙事模式不应搭配纯行政风格
+            if mode_value == "strategic_narrative" and style_name in ("行政性", "规范性"):
+                return True
+            return False
+        except Exception:
+            return False
+
     def on(self, event: str, callback: Callable):
         if event == "question":
             self._on_question = callback
@@ -224,13 +239,12 @@ class Orchestrator:
         self.state = OrchestratorState.MODE_QUESTIONING
         self.writing_mode = WritingMode.STRATEGIC_NARRATIVE
 
-        self.questionnaire._mode_questions = getattr(
-            self.questionnaire, '_mode_questions', []
-        ) or []
+        # 加载当前模式的问卷问题（修复 M-7：不再返回 None）
+        self.questionnaire._mode_questions = _get_mode_questions(self.writing_mode)
         self.questionnaire.phase = QuestionnairePhase.MODE_QUESTIONS
         self.questionnaire._mode_question_index = 0
 
-        return None
+        return self.questionnaire.get_current_mode_question()
 
     def answer_question(self, answer: str) -> Optional[Any]:
         """旧版回答问题接口"""
@@ -312,6 +326,8 @@ class Orchestrator:
             doc_type = preferred_doc_type
         else:
             ranked = self.doc_identifier.identify(self.brief)
+            if not ranked:
+                raise ValueError("无法识别文档类型，请检查简报内容或手动指定文档类型")
             doc_type = ranked[0][0].doc_type
         doc_profile = self.doc_identifier.get_profile(doc_type)
 
@@ -416,7 +432,7 @@ class Orchestrator:
             raw_materials=raw_materials,
             writing_mode=mode_value,
             draft_word_count=0,  # 写作前尚无草稿
-            has_style_conflict=False,
+            has_style_conflict=self._detect_style_conflict(),
         )
 
         consult_responses = self.coordinator.consult_before_decision(
@@ -755,7 +771,7 @@ User Prompt:
             raw_materials="",  # 审查阶段不再关注原始素材
             writing_mode=mode_value,
             draft_word_count=len(self.draft) if self.draft else 0,
-            has_style_conflict=False,
+            has_style_conflict=self._detect_style_conflict(),
         )
 
         # 第1步：规则诊断 + 自动修复
@@ -822,7 +838,11 @@ User Prompt:
             except Exception as e:
                 return (i, {"error": str(e), "round": ir["round"]})
 
-        with ThreadPoolExecutor(max_workers=min(len(iteration_results), 4)) as executor:
+        # 空列表时直接返回，避免 max_workers=0 崩溃
+        if not iteration_results:
+            return llm_results
+
+        with ThreadPoolExecutor(max_workers=max(1, min(len(iteration_results), 4))) as executor:
             futures = {
                 executor.submit(review_single_round, i): i
                 for i in range(len(iteration_results))
@@ -869,7 +889,9 @@ User Prompt:
                 max_rounds=1,
                 llm_call=self._call_llm,
             )
-            self._log_agent("Debater", f"辩论共识: {debate_result.consensus[:150]}")
+            # 安全访问 consensus（可能是 str 或 dict）
+            consensus_text = debate_result.consensus if isinstance(debate_result.consensus, str) else str(debate_result.consensus)
+            self._log_agent("Debater", f"辩论共识: {consensus_text[:150]}")
             return True
         except Exception as e:
             self._log_agent("Debater", f"辩论异常: {e}")
@@ -939,7 +961,7 @@ User Prompt:
         self.draft = self.reviewer._apply_fix(
             self.draft,
             {
-                "error_key": finding.round_name,
+                "error_key": finding.error_key,
                 "matched_pattern": finding.original_text,
                 "prescription": finding.suggestion,
                 "severity": finding.severity.value,
@@ -966,7 +988,7 @@ User Prompt:
             raw_materials="",
             writing_mode=mode_value,
             draft_word_count=len(self.draft),
-            has_style_conflict=False,
+            has_style_conflict=self._detect_style_conflict(),
         )
 
         self._log_agent("系统", "重新执行审查（规则诊断 + LLM 深度审查）")

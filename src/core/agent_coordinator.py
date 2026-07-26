@@ -365,6 +365,7 @@ class AgentCoordinator:
 
         self.bus.subscribe(MessageType.DECISION, on_decision)
         self.bus.subscribe(MessageType.ALERT, on_alert)
+        self.bus.subscribe(MessageType.PROACTIVE_REPORT, on_alert)
         self.bus.subscribe(MessageType.CONSENSUS, on_consensus)
 
     # ═══ 民主协商机制 ═══
@@ -551,12 +552,15 @@ class AgentCoordinator:
             writer_position = writer_rebuttal
             reviewer_position = reviewer_rebuttal
 
-            # 订阅者通知：辩论轮次完成
-            for handler in self.bus._subscribers.get(MessageType.DEBATE, []):
-                try:
-                    handler({"round": round_num + 1, "writer": writer_position, "reviewer": reviewer_position})
-                except Exception:
-                    pass
+            # 订阅者通知：辩论轮次完成（传递 AgentMessage 而非裸 dict）
+            debate_notification = AgentMessage.create(
+                sender=AgentRole.ORCHESTRATOR,
+                receiver=AgentRole.ORCHESTRATOR,
+                msg_type=MessageType.DEBATE,
+                action=f"debate_round_{round_num + 1}",
+                payload={"round": round_num + 1, "writer": writer_position, "reviewer": reviewer_position},
+            )
+            self.bus.send(debate_notification)
 
         if llm_call:
             consensus = self._llm_consensus(topic, writer_position, reviewer_position, llm_call)
@@ -989,7 +993,6 @@ class AgentCoordinator:
 
     def _orchestrator_decision(self, topic: str, decision: Dict) -> str:
         decisions = {
-            "default": f"经民主协商，确定{topic}的执行方案",
             "风格": f"确定风格方案：结合用户偏好和质量要求，选择最优风格配置",
             "文种": f"确定文种方案：根据篇幅和素材分析，推荐最匹配文种",
             "质量": f"确定质量标准：启用全维度审查，确保稿件质量",
@@ -999,7 +1002,7 @@ class AgentCoordinator:
             if key in topic:
                 return val
 
-        return decisions["default"]
+        return f"经民主协商，确定{topic}的执行方案"
 
     # ═══ 报告 ═══
 

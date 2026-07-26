@@ -991,6 +991,37 @@ class GradioApp:
         patterns = "、".join(doc.style_patterns) if doc.style_patterns else "暂无智能提取特征"
         return doc.title, doc.content, f"**格式**: {doc.format.value} | **字数**: {doc.word_count}\n**语言特征**: {patterns}"
 
+    def inject_ref_docs_to_materials(self, topic: str, doc_titles: List[str], 
+                                      use_style: bool, current_materials: str) -> Tuple[str, str]:
+        """将选中的参考文档内容注入到写作素材区"""
+        if not topic or not doc_titles or topic not in self.url_topics:
+            return current_materials, "⚠️ 请先选择参考主题和文档"
+        
+        injected_parts = []
+        style_parts = []
+        
+        for title in doc_titles:
+            doc = next((d for d in self.url_topics[topic] if d.title == title), None)
+            if not doc:
+                continue
+            injected_parts.append(f"【参考素材：{doc.title}】\n来源：{doc.source_site or '未知'}\n{doc.content}")
+            if use_style and doc.style_patterns:
+                style_parts.append(f"- {doc.title}: {'、'.join(doc.style_patterns)}")
+        
+        if not injected_parts:
+            return current_materials, "⚠️ 未找到匹配的参考文档"
+        
+        injection = "\n\n".join(injected_parts)
+        if style_parts:
+            injection += f"\n\n【风格特征参考】\n" + "\n".join(style_parts)
+        
+        if current_materials and current_materials.strip():
+            new_materials = f"{current_materials.strip()}\n\n---\n{injection}"
+        else:
+            new_materials = injection
+        
+        return new_materials, f"✅ 已注入 {len(injected_parts)} 篇参考文档到素材区"
+
     def save_ref_doc_edit(self, topic: str, old_title: str, new_title: str, content: str) -> Tuple[str, List[str]]:
         if topic not in self.url_topics or not old_title:
             return "保存失败，未找到源文档", []
@@ -1904,7 +1935,8 @@ def build_ui() -> gr.Blocks:
                     )
                     ref_doc_selector = gr.Dropdown(
                         choices=[],
-                        label="选择参考文档"
+                        label="选择参考文档",
+                        info="选中后将在右侧主工作区显示全文预览"
                     )
                     
                     with gr.Row():
@@ -2046,7 +2078,32 @@ def build_ui() -> gr.Blocks:
 
                         # Tab 3: 智能写作生成
                         with gr.Tab("文稿草稿生成", id="tab_write"):
-                            materials_input = gr.Textbox(label="可贴入本次写作的其他原始语料/素材内容(可选)", lines=5, placeholder="粘贴任何其他零碎记录、会议讲话或新闻参考数据...")
+                            # 参考资料选择器（从已导入的资料库中选择，内容将自动注入写作素材）
+                            with gr.Accordion("📚 参考资料辅助（可选）", open=True):
+                                gr.Markdown(
+                                    "<small>从左侧已导入的参考资料中选择，系统将自动提取其内容与风格特征，"
+                                    "作为本次写作的参考素材注入智能体。可在左侧「参考资料库」导入新网页。</small>"
+                                )
+                                ref_topic_for_write = gr.Dropdown(
+                                    choices=app.get_topics_list(),
+                                    label="选择参考主题",
+                                    interactive=True
+                                )
+                                ref_doc_for_write = gr.Dropdown(
+                                    choices=[],
+                                    label="选择参考文档（可多选）",
+                                    multiselect=True,
+                                    interactive=True,
+                                    info="选中后，其正文内容将自动追加到下方素材区"
+                                )
+                                ref_use_style = gr.Checkbox(
+                                    label="同时提取风格特征供智能体学习",
+                                    value=True,
+                                    info="自动提取参考文档的句式、用语等风格特征"
+                                )
+                                ref_inject_btn = gr.Button("📥 注入参考素材到下方素材区", variant="secondary", size="sm", elem_classes="ios-btn-secondary")
+                            
+                            materials_input = gr.Textbox(label="可贴入本次写作的其他原始语料/素材内容(可选)", lines=5, placeholder="粘贴任何其他零碎记录、会议讲话或新闻参考数据...\n也可点击上方「注入参考素材」自动填入已导入的参考资料内容。")
                             write_start_btn = gr.Button("开始写作（通常需要 30-60 秒）", variant="primary", elem_classes="ios-btn-primary")
                             
                             write_event_msg = gr.Markdown()
@@ -2090,17 +2147,18 @@ def build_ui() -> gr.Blocks:
                             
                             export_finished_btn = gr.Button("导出完成", variant="primary", elem_classes="ios-btn-primary")
 
-                # ─── 面板 B: 参考素材编辑器 ───
+                # ─── 面板 B: 参考素材查看与编辑器 ───
                 with gr.Column(visible=True, elem_classes="ws-panel-hidden") as ref_doc_panel:
-                    gr.Markdown("## 参考资料文件视窗")
+                    gr.Markdown("## 📄 参考资料查看")
                     
                     with gr.Group(elem_classes="ios-card"):
-                        ref_doc_edit_title = gr.Textbox(label="参考文章标题")
+                        ref_doc_edit_title = gr.Textbox(label="参考文章标题", interactive=True)
                         ref_doc_edit_meta = gr.Markdown()
-                        ref_doc_edit_content = gr.Textbox(label="正文内容", lines=15)
+                        ref_doc_edit_content = gr.Textbox(label="正文内容", lines=20, interactive=True)
                         
                         with gr.Row():
-                            ref_doc_edit_save = gr.Button("保存参考文件修改", variant="primary", elem_classes="ios-btn-primary")
+                            ref_doc_edit_save = gr.Button("保存修改", variant="primary", elem_classes="ios-btn-primary")
+                            ref_doc_import_to_write = gr.Button("📥 一键导入到写作素材", variant="secondary", elem_classes="ios-btn-secondary")
                             ref_doc_edit_close = gr.Button("关闭视窗", variant="secondary", elem_classes="ios-btn-secondary")
                             
                     ref_doc_edit_msg = gr.Markdown()
@@ -2557,6 +2615,30 @@ def build_ui() -> gr.Blocks:
             outputs=[project_tabs, plan_output_text, global_status_msg]
         )
 
+        # ── 8b. 写作Tab - 参考资料选择器联动 ──
+        def write_topic_change_fn(topic):
+            if not topic:
+                return gr.update(choices=[], value=None)
+            docs = app.get_docs_list_by_topic(topic)
+            return gr.update(choices=docs, value=None)
+
+        ref_topic_for_write.change(
+            fn=write_topic_change_fn,
+            inputs=[ref_topic_for_write],
+            outputs=[ref_doc_for_write]
+        )
+
+        # ── 8c. 写作Tab - 注入参考素材到素材区 ──
+        def inject_ref_to_materials_fn(topic, doc_titles, use_style, current_materials):
+            new_materials, msg = app.inject_ref_docs_to_materials(topic, doc_titles, use_style, current_materials)
+            return new_materials, msg
+
+        ref_inject_btn.click(
+            fn=inject_ref_to_materials_fn,
+            inputs=[ref_topic_for_write, ref_doc_for_write, ref_use_style, materials_input],
+            outputs=[materials_input, write_event_msg]
+        )
+
         # ── 9. 执行文稿生成 ──
         # V11: Also populate Agent Hub chatbot with coordinator logs
         def generate_and_update_hub(raw_materials, temperature, progress=gr.Progress()):
@@ -2664,13 +2746,14 @@ def build_ui() -> gr.Blocks:
                 msg,
                 gr.update(choices=topics, value=current_topic),
                 gr.update(choices=docs, value=default_doc),
-                gr.update(visible=False) # 关闭表单
+                gr.update(visible=False), # 关闭表单
+                gr.update(choices=topics) # 同步更新写作Tab的主题选择器
             )
 
         url_save_btn.click(
             fn=url_import_fn,
             inputs=[url_input_val, url_topic_val],
-            outputs=[global_status_msg, topic_selector, ref_doc_selector, url_import_box]
+            outputs=[global_status_msg, topic_selector, ref_doc_selector, url_import_box, ref_topic_for_write]
         )
 
         # ── 14. 切换分类主题事件 ──
@@ -2686,14 +2769,14 @@ def build_ui() -> gr.Blocks:
             outputs=[ref_doc_selector]
         )
 
-        # ── 15. 选择并打开参考文档事件 ──
+        # ── 15. 选择参考文档 -> 直接在主工作区显示全文预览 ──
         def select_ref_doc_fn(topic, title):
             if not title:
                 return gr.update(), gr.update(), "", "", ""
             t, c, meta = app.select_ref_doc_detail(topic, title)
             return (
                 gr.update(elem_classes="ws-panel-hidden"), # 隐藏项目工作台
-                gr.update(elem_classes="ws-panel-visible"),  # 显示文档编辑器
+                gr.update(elem_classes="ws-panel-visible"), # 显示参考文档面板
                 t,
                 meta,
                 c
@@ -2708,6 +2791,19 @@ def build_ui() -> gr.Blocks:
         ref_doc_edit_close.click(
             fn=lambda: (gr.update(elem_classes="ws-panel-visible"), gr.update(elem_classes="ws-panel-hidden")),
             outputs=[project_panel, ref_doc_panel]
+        )
+
+        # ── 15b. 主工作区"一键导入到写作素材" ──
+        def ref_panel_import_fn(topic, title):
+            if not topic or not title:
+                return materials_input.value or "", "⚠️ 请先选择参考文档"
+            new_materials, msg = app.inject_ref_docs_to_materials(topic, [title], True, "")
+            return new_materials, msg
+
+        ref_doc_import_to_write.click(
+            fn=ref_panel_import_fn,
+            inputs=[topic_selector, ref_doc_selector],
+            outputs=[materials_input, ref_doc_edit_msg]
         )
 
         # ── 16. 编辑参考文档 ──
@@ -2727,13 +2823,14 @@ def build_ui() -> gr.Blocks:
             return (
                 msg,
                 gr.update(choices=topics, value=topic if topic in topics else None),
-                gr.update(choices=docs, value=None)
+                gr.update(choices=docs, value=None),
+                gr.update(choices=topics) # 同步更新写作Tab的主题选择器
             )
 
         ref_doc_delete_btn.click(
             fn=delete_ref_doc_fn,
             inputs=[topic_selector, ref_doc_selector],
-            outputs=[global_status_msg, topic_selector, ref_doc_selector]
+            outputs=[global_status_msg, topic_selector, ref_doc_selector, ref_topic_for_write]
         )
 
         # ── 18. API 快捷配置面板导航与事件 ──

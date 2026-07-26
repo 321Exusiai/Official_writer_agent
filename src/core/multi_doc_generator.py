@@ -246,8 +246,19 @@ class MultiDocGenerator:
         # 将完整版本内容注入提取 prompt
         full_extraction_prompt = extraction_template.replace("{full_text}", source_content) if source_content else extraction_template
 
+        # 注入一致性数据约束（修复 m-2：consistency_data 参数从未使用）
+        consistency_hint = ""
+        if consistency_data:
+            consistency_parts = []
+            for key, values in consistency_data.items():
+                if values:
+                    consistency_parts.append(f"  {key}: {', '.join(values[:5])}")
+            if consistency_parts:
+                consistency_hint = "\n\n【一致性约束】以下关键数据必须保持一致：\n" + "\n".join(consistency_parts)
+        full_extraction_prompt += consistency_hint
+
         if llm_call:
-            system_prompt = f"你是一名公文编辑，请从详细报道中提取核心内容改写成{profile.name_cn}。直接输出正文，不要加解释。"
+            system_prompt = f"你是一名公文编辑，请从详细报道中提取核心内容改写成{profile.name_cn}。直接输出正文，不要加解释。确保关键数据与人名与原文一致。"
             try:
                 content = llm_call(system_prompt, full_extraction_prompt)
                 word_count = len(content)
@@ -318,9 +329,9 @@ class MultiDocGenerator:
         """
         import re
 
-        # 提取数字数据（含百分比、万/亿等单位）
+        # 提取数字数据（含百分比、金额、万/亿等单位）
         data_matches = re.findall(
-            r'\d+(?:\.\d+)?(?:%|万|亿|千|百|人次|人|名|个|项|篇|次|场)',
+            r'\d+(?:\.\d+)?(?:%|万元?|亿元?|千元?|百元?|元|人次|人|名|个|项|篇|次|场)',
             content,
         )
         for d in data_matches:
@@ -365,10 +376,9 @@ class MultiDocGenerator:
                     lines.append(f"    ... 共 {len(values)} 项")
 
         # 检测潜在冲突：同一类数据中出现矛盾值
-        # 如 key_data 中同时出现 "100人" 和 "200人"
+        # 仅当同一单位下出现完全不同的数字时才报冲突（修复 m-3：减少误报）
         if len(data.get("key_data", [])) > 1:
             data_items = data["key_data"]
-            # 提取纯数字部分对比
             import re
             numbers = {}
             for item in data_items:
@@ -382,7 +392,14 @@ class MultiDocGenerator:
                     numbers[unit].add(num)
 
             for unit, nums in numbers.items():
+                # 仅当同一单位有 2+ 个不同数字时才报告（正常公文中不同数字是正常的）
+                # 只有当数字差异超过 50% 时才视为潜在冲突
                 if len(nums) > 1:
-                    lines.append(f"  ⚠️ 数据冲突警告：{unit}单位下出现不同数值: {', '.join(sorted(nums))}")
+                    num_floats = [float(n) for n in nums if n.replace('.', '').isdigit()]
+                    if len(num_floats) >= 2:
+                        max_val = max(num_floats)
+                        min_val = min(num_floats)
+                        if max_val > 0 and (max_val - min_val) / max_val > 0.5:
+                            lines.append(f"  ⚠️ 数据冲突警告：{unit}单位下出现差异较大的数值: {', '.join(sorted(nums))}")
 
         return "\n".join(lines)
