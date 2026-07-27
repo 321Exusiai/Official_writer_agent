@@ -150,13 +150,13 @@ class Questionnaire:
 
     def _get_routing_why(self, node_key: str) -> str:
         whys = {
-            "root": "不同类型的公文需要完全不同的写作方法论。先搞清楚要写什么，再决定怎么写。",
-            "external_comm": "消息、通讯和侧记是完全不同的文体——篇幅、结构、语言都不同。选对文体比写好内容更重要。",
-            "internal_admin": "行政文书有严格的行文规范——文种错了，格式和用语全都会错。",
-            "activity_record": "班级活动和研学报道的写法完全不同——前者重真实记录，后者重战略叙事。",
-            "report_summary": "工作总结和事故通报的写法天差地别——前者需要展示成绩，后者需要客观陈述。",
+            "root": "写作没有万能模板，写给领导看和写给00后新生看，套路完全不同。先帮我锚定你的目标，我们再决定用哪套笔法。",
+            "external_comm": "消息负责'快'，通讯负责'深'，特写负责'动人'。选对文体，比憋字数重要得多。",
+            "internal_admin": "体制内的行政文书讲究'规矩'。选错文种，写得再文采飞扬也会被直接打回重写。",
+            "activity_record": "办个草坪音乐节和办一场严肃的学术讲座，文风能一样吗？告诉我活动的真实调性，我来调整网感。",
+            "report_summary": "总结要找亮点，通报要挖病根。千万别把检讨书写成了表扬信。",
         }
-        return whys.get(node_key, "不同的选择会导向完全不同的写作方法。")
+        return whys.get(node_key, "不同的场景需要完全不同的沟通策略，告诉我你在哪。")
 
     def submit_routing_choice(self, choice_index: int) -> Dict[str, Any]:
         """提交决策树选择，返回下一步或完成路由"""
@@ -306,25 +306,23 @@ class Questionnaire:
     def _update_brief_from_answer(self, qid: str, answer: str):
         """根据问题ID更新简报字段"""
         field_map = {
-            "sn_purpose": "purpose",
-            "sn_audience": "primary_audience",
-            "sn_deep_meaning": "deep_meaning",
-            "sn_strategic_anchor": "strategic_anchor",
-            "sn_opportunity": "opportunity_context",
-            "sn_materials": "key_materials",
-            "sn_differentiator": "differentiator",
-            "or_subject": "purpose",
-            "or_audience": "primary_audience",
-            "or_data_sources": "key_materials",
-            "or_core_findings": "deep_meaning",
-            "ad_core_item": "purpose",
-            "ad_recipient": "primary_audience",
+            "sn_vision": "strategic_anchor",
+            "sn_logic": "deep_meaning",
+            "sn_people": "key_materials",
+            "sn_value": "differentiator",
+            "or_problem": "purpose",
+            "or_cause": "key_materials",
+            "or_solution": "differentiator",
             "ad_basis": "strategic_anchor",
-            "ad_requirements": "key_materials",
+            "ad_core": "purpose",
+            "ad_route": "primary_audience",
             "info_5w1h": "purpose",
-            "info_audience": "primary_audience",
-            "info_highlight": "deep_meaning",
+            "info_lead": "deep_meaning",
             "info_quotes": "key_materials",
+            "ye_vibe": "deep_meaning",
+            "ye_identity": "differentiator",
+            "ye_interaction": "key_materials",
+            "ye_cta": "purpose",
         }
         field_name = field_map.get(qid)
         if field_name:
@@ -351,24 +349,23 @@ class Questionnaire:
     def get_teaching_note(self) -> str:
         """根据当前问题生成教学提示"""
         notes = {
-            "sn_purpose": "💡 好文章的目的可以用一句话说清——'让___觉得___，从而___'。如果说不清，建议先想清楚再动笔。",
-            "sn_audience": "💡 为具体的人写作。想象他/她坐在你对面，你只有30秒让他/她愿意继续读下去。",
-            "sn_deep_meaning": "💡 '我们做了什么'是新闻，'这件事证明了什么'才是公文。从新闻到公文，差的不是字数，是这一层提炼。",
-            "sn_strategic_anchor": "💡 任何一段行程如果说不清'为什么是这里'，那它就是脱离组织语境的孤岛。",
-            "sn_opportunity": "💡 借势不是攀附，是建立有逻辑的关联。找到'更大叙事'的框架，文章就自动有了格局。",
-            "sn_materials": "💡 真实感言>空泛表态，具体数据>形容词堆砌。没有硬素材——先去采访、收集，不要硬写。",
-            "sn_differentiator": "💡 如果这篇文章换成别的单位署名也毫无违和感——说明你还没有找到'自己的故事'。",
-            "or_subject": "💡 客观报告的第一步是界定范围——明确'要报告什么'和'不报告什么'同样重要。",
-            "or_data_sources": "💡 单一信源的信息不可作为结论依据。至少两个独立来源交叉验证。",
-            "or_core_findings": "💡 '加强管理''提高认识'是空话。'每周检查一次消防设备并登记'才是发现。",
-            "ad_doc_type": "💡 文种错了，后面的格式、用语、行文方向全都会错。这一步不能错。",
-            "ad_direction": "💡 上行文要恭敬（'妥否，请批示'），下行文可以要求（'请遵照执行'），平行文要协商（'请予支持为盼'）。",
-            "ad_core_item": "💡 行政公文必须一事一文。如果想同时说两件事——写两份公文。",
-            "ad_requirements": "💡 模糊的要求=无效的公文。时间、地点、责任人、完成标准——缺一不可。",
-            "info_5w1h": "💡 如果一句话说不清5W1H，说明你还没搞清楚发生了什么。先去核实。",
-            "info_highlight": "💡 读者只关心'这件事跟我有什么关系/有什么特别的'。找不到亮点=没有新闻价值。",
-            "info_structure": "💡 如果读者只看前两段就关掉，他能知道最重要的信息吗？",
-            "info_quotes": "💡 直接引语让文章'活'起来。没有引语的信息稿像没有盐的菜。",
+            "sn_vision": "💡 如果你只写了'办了个活动'，这篇文章就废了。想想这个活动怎么跟'大局'扯上关系。",
+            "sn_logic": "💡 报喜不报忧那是流水账。告诉我你们当时有多惨、有多难，解决的过程才精彩。",
+            "sn_people": "💡 别用'大家纷纷表示'这种套话敷衍我。去抓一个真实的眼神，或者一句带泥土味的抱怨。",
+            "sn_value": "💡 如果这段经验换个学校也能直接套用，那它就毫无价值。找不同！",
+            "or_problem": "💡 客观报告不是写小说。收起所有情绪，像外科医生一样精准描述'病灶'在哪。",
+            "or_cause": "💡 别用'也许是'、'可能是'。用数据说话，或者告诉我谁为这个结论负责。",
+            "or_solution": "💡 '加强领导'这种废话就别提了。如果你是执行者，你希望看到什么具体的指令？",
+            "ad_basis": "💡 体制内不打无准备之仗。每一份红头文件，都要找到它生长的'土壤'和'根'。",
+            "ad_core": "💡 如果你想在一份请示里要钱又要人，大概率会被打回来。一文一事是铁律。",
+            "ad_route": "💡 给上级看要'请示'，给平级看要'商榷'。搞错对象，等于把信投错了邮筒。",
+            "info_5w1h": "💡 别觉得5W1H基础。多少人写了800字，读者连活动在哪天办的都没找到。",
+            "info_lead": "💡 读者很忙，只给你3秒钟。第一句话如果抓不住眼球，后面写出花也没人看。",
+            "info_quotes": "💡 没有引语的新闻就是干巴巴的骨架。去找原话，带着当事人的体温。",
+            "ye_vibe": "💡 不要写'充满激情与活力'这种AI套话！告诉我现场有谁在尖叫？有谁笑得直不起腰？",
+            "ye_identity": "💡 别装老成。用只有你们社团懂的'黑话'或者内部梗，这叫圈层认同感。",
+            "ye_interaction": "💡 完美的活动多无聊啊，一点小意外和大家的随机反应，才是推文里最抓人的点。",
+            "ye_cta": "💡 别让读者看完就跑了。想让他们加群？留言？还是点赞？直接大胆地要求他们！",
         }
 
         if self.phase == QuestionnairePhase.MODE_QUESTIONS:
