@@ -398,10 +398,10 @@ class ReviewerAgent:
 # 审稿任务：{dim['name']}
 
 ## 审查说明
-{dim['description']}
+{dim.get('description', '请按该维度逐段审查，标注问题与修改建议')}
 
 ## 检查清单
-{chr(10).join(f'- {item}' for item in dim['check_items'])}
+{chr(10).join(f'- {item}' for item in dim.get('check_items', ['逐段检查是否符合该维度要求', '标注具体问题位置与修改建议']))}
 
 ## 当前写作模式
 {mode_profile.name}
@@ -538,10 +538,10 @@ class ReviewerAgent:
         dim = dimensions[round_index]
         return f"""
 执行{dim['name']}（权重：{dim['weight']*100:.0f}%）：
-{dim['description']}
+{dim.get('description', '请按该维度逐段审查，标注问题与修改建议')}
 
 检查以下项目：
-{chr(10).join(f'  {i+1}. {item}' for i, item in enumerate(dim['check_items']))}
+{chr(10).join(f'  {i+1}. {item}' for i, item in enumerate(dim.get('check_items', ['逐段检查是否符合该维度要求', '标注具体问题位置与修改建议'])))}
 """
 
     def get_all_round_prompts(self) -> List[str]:

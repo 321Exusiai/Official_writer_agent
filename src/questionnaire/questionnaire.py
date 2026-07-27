@@ -77,7 +77,7 @@ class WritingBrief:
     def is_complete(self) -> bool:
         if not self.writing_mode:
             return False
-        return bool(self.purpose and self.primary_audience)
+        return bool(self.purpose)
 
     def get_missing_fields(self) -> List[str]:
         missing = []
@@ -310,19 +310,25 @@ class Questionnaire:
             "sn_logic": "deep_meaning",
             "sn_people": "key_materials",
             "sn_value": "differentiator",
+            "sn_direction": "purpose",
             "or_problem": "purpose",
             "or_cause": "key_materials",
             "or_solution": "differentiator",
+            "or_method": "deep_meaning",
             "ad_basis": "strategic_anchor",
             "ad_core": "purpose",
             "ad_route": "primary_audience",
+            "ad_doc_type": "deep_meaning",
             "info_5w1h": "purpose",
             "info_lead": "deep_meaning",
             "info_quotes": "key_materials",
+            "info_value": "differentiator",
+            "info_plan": "strategic_anchor",
             "ye_vibe": "deep_meaning",
             "ye_identity": "differentiator",
             "ye_interaction": "key_materials",
             "ye_cta": "purpose",
+            "ye_value": "strategic_anchor",
         }
         field_name = field_map.get(qid)
         if field_name:
@@ -366,6 +372,12 @@ class Questionnaire:
             "ye_identity": "💡 别装老成。用只有你们社团懂的'黑话'或者内部梗，这叫圈层认同感。",
             "ye_interaction": "💡 完美的活动多无聊啊，一点小意外和大家的随机反应，才是推文里最抓人的点。",
             "ye_cta": "💡 别让读者看完就跑了。想让他们加群？留言？还是点赞？直接大胆地要求他们！",
+            "sn_direction": "💡 新闻不是“有闻必录”。你选什么、不选什么、怎么编排，都在传递立场。党性和人民性是统一的，不是对立的。",
+            "or_method": "💡 “没有调查就没有发言权”。如果你说不出调研方法，结论就是空中楼阁。告诉我你走访了谁、发了多少问卷、数据从哪来。",
+            "ad_doc_type": "💡 请示要钱要批文，报告只汇报情况。把请示事项塞进报告里，是公文写作最常见的硬伤，必被退回。",
+            "info_value": "💡 不是所有事都值得写新闻。时新性、重要性、接近性、显著性、趣味性五要素都不强的事，硬写出来也没人看。",
+            "info_plan": "💡 策划案不是写散文。背景、主题、时间、地点、对象、内容、预算、安全预案——八要素缺一不可。主题要对仗，预算要明细，安全预案要有应急联络人。",
+            "ye_value": "💡 纯娱乐的社团推文没有灵魂。好玩是外壳，育人属性才是团属媒体的立身之本。想想这篇推文的“思想落点”在哪。",
         }
 
         if self.phase == QuestionnairePhase.MODE_QUESTIONS:

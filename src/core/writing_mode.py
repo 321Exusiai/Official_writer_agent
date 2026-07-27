@@ -54,13 +54,13 @@ DECISION_TREE = {
             },
             {
                 "label": "校园与社团活动记录",
-                "description": "活动记录——团日活动、音乐节、招新游园、学术讲座",
+                "description": "活动记录——团日活动、音乐节、招新游园、学术讲座、策划案、活动总结",
                 "category": DocumentCategory.ACTIVITY_RECORD,
                 "next": "activity_record",
             },
             {
                 "label": "工作成果汇报与问题调研",
-                "description": "汇报总结——工作总结、调研报告、述职、事故通报",
+                "description": "汇报总结——工作总结、调研报告、述职、事故通报、社会实践报告",
                 "category": DocumentCategory.REPORT_SUMMARY,
                 "next": "report_summary",
             },
@@ -94,29 +94,35 @@ DECISION_TREE = {
 
     # ── 分支 2：内部行政 ──
     "internal_admin": {
-        "question": "你具体要写哪种行政文书？（严格遵守公文条例）",
+        "question": "你要写的是哪种行文方向的公文？（对应《党政机关公文处理工作条例》15种法定公文）",
         "options": [
             {
-                "label": "通知——要求下级机关执行或周知的事项",
-                "description": "会议通知、活动通知、任免通知",
+                "label": "上行文——向上级请求指示或汇报工作",
+                "description": "请示（请求批准，一文一事）、报告（汇报工作/反映情况，不夹带请示事项）",
                 "mode": WritingMode.ADMINISTRATIVE,
-                "subtype": "notice",
+                "subtype": "upward",
             },
             {
-                "label": "请示/批复——向上级请求指示或答复下级",
-                "description": "经费请示、项目请示、人事请示",
+                "label": "下行文——对下级布置工作、答复或奖惩",
+                "description": "通知、通报（表彰/批评/告知）、批复、决定",
                 "mode": WritingMode.ADMINISTRATIVE,
-                "subtype": "request_reply",
+                "subtype": "downward",
             },
             {
-                "label": "函——不相隶属机关商洽工作、询问答复",
-                "description": "商洽函、邀请函、答复函",
+                "label": "平行文——不相隶属机关商洽工作",
+                "description": "函（商洽/询问/答复/求批）、意见（可上行/下行/平行）、议案（政府向同级人大提请）",
                 "mode": WritingMode.ADMINISTRATIVE,
-                "subtype": "letter",
+                "subtype": "parallel",
             },
             {
-                "label": "会议纪要——记载会议主要情况和议定事项",
-                "description": "办公会纪要、专题会纪要",
+                "label": "公布性公文——向社会公布重要或周知事项",
+                "description": "公告（国内外重要事项）、通告（特定范围遵守事项）、公报、命令(令)",
+                "mode": WritingMode.ADMINISTRATIVE,
+                "subtype": "public",
+            },
+            {
+                "label": "会议文书——记载会议情况和议定事项",
+                "description": "纪要、决议（会议讨论通过的重大决策）",
                 "mode": WritingMode.INFORMATIONAL,
                 "subtype": "minutes",
             },
@@ -128,28 +134,34 @@ DECISION_TREE = {
         "question": "这次活动的性质和受众调性是怎样的？",
         "options": [
             {
-                "label": "社团招新/文艺汇演/游园会——网感拉满，充满青春活力",
+                "label": "社团招新/文艺汇演/游园会推文——网感拉满，充满青春活力",
                 "description": "面向同龄人，需要情绪价值，适合新媒体推文",
                 "mode": WritingMode.YOUTH_ENGAGEMENT,
                 "subtype": "club_activity",
             },
             {
-                "label": "常规班会/学术讲座——要素清晰，客观准确",
-                "description": "面向全院师生，兼顾可读性与准确性",
+                "label": "班会/讲座/典礼报道——要素清晰，客观准确",
+                "description": "面向全院师生，兼顾可读性与准确性（含校庆、开学典礼等重大校际活动）",
                 "mode": WritingMode.INFORMATIONAL,
                 "subtype": "campus_activity",
             },
             {
-                "label": "研学考察/社会实践——立意高远，体现思政引领",
+                "label": "研学考察/社会实践报道——立意高远，体现思政引领",
                 "description": "需要拔高意义，将个体实践融入国家宏大叙事",
                 "mode": WritingMode.STRATEGIC_NARRATIVE,
                 "subtype": "study_tour",
             },
             {
-                "label": "校庆/开学典礼等重大校际活动——庄重宏大，品牌塑造",
-                "description": "兼具新闻价值与战略高度",
+                "label": "活动策划案——要素齐全，可操作可落地",
+                "description": "活动前文书：背景、主题、时间地点、对象、内容、经费预算、注意事项、安全预案",
+                "mode": WritingMode.INFORMATIONAL,
+                "subtype": "activity_proposal",
+            },
+            {
+                "label": "活动总结——盘点成效，反思不足，提炼改进",
+                "description": "活动后正式总结（非推文）：活动概述、成效、存在的不足、改进措施、努力方向",
                 "mode": WritingMode.STRATEGIC_NARRATIVE,
-                "subtype": "major_event",
+                "subtype": "activity_summary",
             },
         ],
     },
@@ -182,6 +194,12 @@ DECISION_TREE = {
                 "mode": WritingMode.ADMINISTRATIVE,
                 "subtype": "duty_report",
             },
+            {
+                "label": "社会实践/志愿服务报告——受教育、长才干、作贡献",
+                "description": "三下乡、返家乡、社区实践：有问题意识、有材料支撑、有分析深度的应用实践型成果",
+                "mode": WritingMode.OBJECTIVE_REPORT,
+                "subtype": "practice_report",
+            },
         ],
     },
 }
@@ -207,6 +225,11 @@ PRINCIPLES_STRATEGIC_NARRATIVE = WritingPrinciples(
     tagline='将“信息采集”升华为“意义建构”，用事实说理，将微观实践嵌入宏大叙事。',
     principles=[
         {
+            "name": "党性原则与正确导向",
+            "description": "马克思主义新闻观的根本原则。党性和人民性相统一而非对立，自觉在思想上政治上行动上同党中央保持一致。新闻报道通过对事实的取舍、详略、编排体现价值判断，必须传达正确立场，落实'高举旗帜、引领导向，围绕中心、服务大局'职责使命。",
+            "check": "全文读完后，读者是否会被引向正确的价值判断？是否存在导向偏差或立场模糊？",
+        },
+        {
             "name": "人民性与微观落点",
             "description": "宏大叙事必须有微观落点。用亲历者的真实感言、具体体悟作为“证据”，让读者自己得出结论。严禁“大家纷纷表示”等空泛套话。",
             "check": "这段感言是否具有唯一性？如果是套话，是否应该删除？",
@@ -218,13 +241,13 @@ PRINCIPLES_STRATEGIC_NARRATIVE = WritingPrinciples(
         },
         {
             "name": "政治站位与战略锚点",
-            "description": "行程或工作部署应与国家战略、高校双一流建设形成内在呼应。点明“为什么做这件事”。",
-            "check": "删掉战略锚点句，文章是否就沦为流水账？",
+            "description": "行程或工作部署应与国家战略（中国式现代化、新质生产力、共同富裕等）、高校双一流建设形成内在呼应。点明“为什么做这件事”。事实是新闻的生命，战略锚点必须建立在真实之上。",
+            "check": "删掉战略锚点句，文章是否就沦为流水账？锚点是否有真实事实支撑？",
         },
     ],
     content_rules={
-        "must_write": ["实践与宏观战略的对应关系", "群众/个体的真实获得感", "克服困难的深度逻辑"],
-        "must_skip": ["空洞的口号堆砌", "没有事实支撑的拔高", "枯燥的流程流水账"],
+        "must_write": ["实践与宏观战略的对应关系", "群众/个体的真实获得感", "克服困难的深度逻辑", "正确的价值导向"],
+        "must_skip": ["空洞的口号堆砌", "没有事实支撑的拔高", "枯燥的流程流水账", "立场模糊的中立化表述"],
     },
     forbidden_patterns=["大家纷纷表示", "深刻感受到", "一致认为", "圆满成功", "顺利结束"],
     language_guidelines=[
@@ -241,13 +264,18 @@ PRINCIPLES_OBJECTIVE_REPORT = WritingPrinciples(
     tagline="问题导向、实事求是、交叉验证——让事实自己说话，绝不渲染拔高。",
     principles=[
         {
+            "name": "实事求是与调查研究",
+            "description": "调查研究是党的传家宝、做好各项工作的基本功。从群众中来、到群众中去，不唯书不唯上只唯实。采用座谈、走访、问卷、田野调查等方法获取一手资料，“没有调查就没有发言权”。",
+            "check": "文中的事实是亲身调研所得，还是二手转述？调研方法是否科学？",
+        },
+        {
             "name": "事实交叉验证",
             "description": "所有数据、结论必须有可靠来源。单一信源不可作为核心结论的唯一支撑。",
             "check": "文中的核心判断是否有坚实的数据或访谈支撑？",
         },
         {
-            "name": "系统思维与问题导向",
-            "description": "直面核心问题，不回避矛盾，呈现“不完美的真实”。深挖现象背后的深层原因。",
+            "name": "矛盾分析法",
+            "description": "运用唯物辩证法，直面核心问题，抓主要矛盾和矛盾的主要方面，呈现“不完美的真实”。深挖现象背后的深层原因。",
             "check": "文章是否抓住了主要矛盾，而非绕着问题走？",
         },
         {
@@ -306,8 +334,13 @@ PRINCIPLES_ADMINISTRATIVE = WritingPrinciples(
 PRINCIPLES_INFORMATIONAL = WritingPrinciples(
     mode=WritingMode.INFORMATIONAL,
     name="专业新闻通报原则",
-    tagline="5W1H清晰、倒金字塔结构——还原最纯粹的信息价值。",
+    tagline="新闻价值判断、5W1H齐全、倒金字塔结构--还原最纯粹的信息价值。",
     principles=[
+        {
+            "name": "新闻价值判断",
+            "description": "新闻选择的根本标准。用五要素衡量事实的传播价值：时新性（新近发生、内容新鲜）、重要性（影响多数人、利害攸关）、接近性（地理与心理接近）、显著性（人物/地点知名度）、趣味性（人情味与戏剧性）。重要性与时新性是底线，要素越多价值越高。",
+            "check": "这件事到底值不值得报？五要素里哪一项最强？如果都不强，是否不该写？",
+        },
         {
             "name": "倒金字塔结构",
             "description": "导语即高潮，最重要的信息（新闻眼）放在第一段第一句。逐层递减重要性。",
@@ -339,28 +372,33 @@ PRINCIPLES_INFORMATIONAL = WritingPrinciples(
 
 PRINCIPLES_YOUTH_ENGAGEMENT = WritingPrinciples(
     mode=WritingMode.YOUTH_ENGAGEMENT,
-    name="青年共情与社团活力原则 (网感与边界控制)",
-    tagline="懂年轻人的梗，说人话，抓情绪——为新媒体时代的校园发声，但坚守边界。",
+    name="青年共情与社团活力原则 (思想引领与网感并重)",
+    tagline="懂年轻人的梗，说人话，抓情绪，但娱乐外壳下必有价值内核--高校新媒体是“大思政”阵地。",
     principles=[
         {
-            "name": "网感与视觉留白",
-            "description": "文字轻盈跳跃，多短句，为现场照片和视频留出视觉空间。使用合适的颜文字或梗，增强表现力。",
-            "check": "这段文字如果在手机屏幕上阅读，会让人感到窒息吗？",
+            "name": "思想引领与立德树人",
+            "description": "高校共青团新媒体的首要任务是思想政治引领。坚持党性原则，牢牢把握马克思主义新闻观，把党的声音传播到校园。娱乐是外壳，价值是内核，做到“成风化人、凝心聚力”。严格落实“三审三校”机制，守牢政治底线与风险防范。",
+            "check": "这篇推文除了好玩，想传递什么价值？思想落点在哪？是否走完了三审三校？",
         },
         {
-            "name": "不失分寸 (边界控制)",
-            "description": "像学长学姐一样真诚交流，但严禁强行称兄道弟、过度讨好谄媚（禁称'宝宝们'）。",
-            "check": "这语气是平视的真诚，还是刻意的装嫩？",
+            "name": "青年话语体系与圈层共情",
+            "description": "针对青年“去中心化”“碎片化”“圈层化”特征，用网言网语破圈共情。文字轻盈跳跃，多短句，为现场照片和视频留出视觉空间。用合适的颜文字或内部梗增强表现力，但别用极其抽象的小众烂梗。",
+            "check": "这段文字在手机屏幕上阅读会让人窒息吗？是否用了青年听得懂的话语？",
+        },
+        {
+            "name": "政治边界与去爹味",
+            "description": "像学长学姐一样平视真诚交流，但严禁强行称兄道弟、过度讨好谄媚（禁称'宝宝们'）。坚守政治边界，不迎合庸俗趣味，不降低格调。",
+            "check": "这语气是平视的真诚，还是刻意的装嫩？是否突破了政治底线？",
         },
         {
             "name": "克制情绪，去官腔，去AI味",
-            "description": "情绪由具体细节流露，禁止堆砌感叹号。严禁'领导高度重视'、'圆满成功'等官样文章。禁止'总而言之'等AI套话。",
+            "description": "情绪由具体细节流露，禁止堆砌感叹号。严禁“领导高度重视”、“圆满成功”等官样文章。禁止“总而言之”等AI套话。",
             "check": "有没有爹味、官腔或机器味？",
         },
     ],
     content_rules={
-        "must_write": ["现场最鲜活/搞笑/感人的瞬间", "强互动的问句或行动号召", "社团独特的黑话/标识"],
-        "must_skip": ["领导致辞的冗长总结", "枯燥的流程记录", "无病呻吟的抒情段落", "极其抽象的小众烂梗"],
+        "must_write": ["现场最鲜活/搞笑/感人的瞬间", "强互动的问句或行动号召", "社团独特的黑话/标识", "价值引领的思想落点"],
+        "must_skip": ["领导致辞的冗长总结", "枯燥的流程记录", "无病呻吟的抒情段落", "极其抽象的小众烂梗", "无价值内核的纯娱乐"],
     },
     forbidden_patterns=[
         "领导高度重视", "圆满成功", "取得丰硕成果", "总而言之", "不可否认的是", "充满激情与活力",
@@ -369,9 +407,10 @@ PRINCIPLES_YOUTH_ENGAGEMENT = WritingPrinciples(
     language_guidelines=[
         "采用对话体，多用'你'和'我们'。",
         "语言自带画面感和BGM感。",
-        "用自嘲、幽默或真诚化解严肃。"
+        "用自嘲、幽默或真诚化解严肃。",
+        "娱乐外壳下必须有价值内核，破圈但不破底线。"
     ],
-    benchmark_sources=["优秀高校社团微信公众号推文", "小红书爆款校园笔记", "B站校园共创内容"],
+    benchmark_sources=["优秀高校社团微信公众号推文", "小红书爆款校园笔记", "B站校园共创内容", "共青团中央新媒体矩阵"],
 )
 
 ALL_PRINCIPLES = {
@@ -388,34 +427,39 @@ ALL_PRINCIPLES = {
 
 REVIEW_DIMENSIONS = {
     WritingMode.STRATEGIC_NARRATIVE: [
-        {"name": "政治站位审查", "weight": 0.30},
-        {"name": "事实与微观落点审查", "weight": 0.30},
-        {"name": "语言去AI味审查", "weight": 0.20},
-        {"name": "行文逻辑审查", "weight": 0.20},
+        {"name": "党性原则与导向审查", "weight": 0.25},
+        {"name": "事实与微观落点审查", "weight": 0.25},
+        {"name": "战略锚点与真实性审查", "weight": 0.20},
+        {"name": "语言去AI味审查", "weight": 0.15},
+        {"name": "行文逻辑审查", "weight": 0.15},
     ],
     WritingMode.OBJECTIVE_REPORT: [
-        {"name": "交叉验证与事实审查", "weight": 0.40},
-        {"name": "问题导向审查", "weight": 0.30},
+        {"name": "调查研究方法审查", "weight": 0.15},
+        {"name": "交叉验证与事实审查", "weight": 0.30},
+        {"name": "矛盾分析与问题导向审查", "weight": 0.25},
         {"name": "对策可行性审查", "weight": 0.20},
         {"name": "客观性表达审查", "weight": 0.10},
     ],
     WritingMode.ADMINISTRATIVE: [
-        {"name": "公文格式规范审查", "weight": 0.40},
-        {"name": "行文关系与权限审查", "weight": 0.30},
-        {"name": "用语标准度审查", "weight": 0.20},
+        {"name": "文种选择正确性审查", "weight": 0.20},
+        {"name": "公文格式规范审查", "weight": 0.30},
+        {"name": "行文关系与权限审查", "weight": 0.25},
+        {"name": "用语标准度审查", "weight": 0.15},
         {"name": "指令清晰度审查", "weight": 0.10},
     ],
     WritingMode.INFORMATIONAL: [
-        {"name": "5W1H要素审查", "weight": 0.40},
-        {"name": "倒金字塔结构审查", "weight": 0.30},
-        {"name": "客观数据与引语审查", "weight": 0.20},
+        {"name": "新闻价值判断审查", "weight": 0.20},
+        {"name": "5W1H要素审查", "weight": 0.30},
+        {"name": "倒金字塔结构审查", "weight": 0.25},
+        {"name": "客观数据与引语审查", "weight": 0.15},
         {"name": "冗余过滤审查", "weight": 0.10},
     ],
     WritingMode.YOUTH_ENGAGEMENT: [
-        {"name": "边界感与去爹味审查", "weight": 0.35},
-        {"name": "网感与情绪价值审查", "weight": 0.30},
-        {"name": "视觉留白与排版潜力审查", "weight": 0.20},
-        {"name": "互动号召力审查", "weight": 0.15},
+        {"name": "思想引领与价值落点审查", "weight": 0.25},
+        {"name": "边界感与去爹味审查", "weight": 0.25},
+        {"name": "网感与情绪价值审查", "weight": 0.25},
+        {"name": "视觉留白与排版潜力审查", "weight": 0.15},
+        {"name": "互动号召力审查", "weight": 0.10},
     ],
 }
 
@@ -449,6 +493,12 @@ MODE_QUESTIONS: Dict[WritingMode, List[Dict[str, str]]] = {
             "why_ask": "我们需要总结出规律性认识，完成理论升华，证明我们走在前列。",
             "hint": "不仅是“我们做了”，更是“我们探索出了一套XX机制”。",
         },
+        {
+            "id": "sn_direction",
+            "text": "这篇文章要传达的核心价值判断和舆论导向是什么？读者读完后应被引向什么结论？",
+            "why_ask": "马克思主义新闻观的首要原则是党性原则。新闻报道通过对事实的取舍详略体现价值判断，必须传达正确立场，落实“高举旗帜、引领导向”职责使命。",
+            "hint": "例如：引导读者认识到XX政策的必然性 / 增强对XX道路的信心 / 凝聚改革共识",
+        },
     ],
 
     WritingMode.OBJECTIVE_REPORT: [
@@ -469,6 +519,12 @@ MODE_QUESTIONS: Dict[WritingMode, List[Dict[str, str]]] = {
             "text": "基于上述事实，有何“政治上可取、政策上可推、操作上可行”的建设性方案？",
             "why_ask": "发现问题是为了解决问题。对策必须具体到能够直接落地执行。",
             "hint": "别写“加强重视”，写“由XX部门牵头，每周三进行联合巡检”。",
+        },
+        {
+            "id": "or_method",
+            "text": "你用了哪些调查研究方法获取这些事实？样本量、信源类型和调研方式是怎样的？",
+            "why_ask": "调查研究是党的传家宝、做好各项工作的基本功。“没有调查就没有发言权”，调研方法的科学性直接决定结论的可信度。",
+            "hint": "例如：实地走访3个村镇+问卷500份+座谈12场 / 数据来自统计局原始表+审计底稿+当事人访谈",
         },
     ],
 
@@ -491,6 +547,12 @@ MODE_QUESTIONS: Dict[WritingMode, List[Dict[str, str]]] = {
             "why_ask": "行文关系决定了你的语气。发给上级（请示）、下级（通知）还是平级（函）？",
             "hint": "主送只能有一个主管单位，别越级请示。",
         },
+        {
+            "id": "ad_doc_type",
+            "text": "本文的行文方向是什么？为何选这个文种而非其他（如请示vs报告、通知vs通报）？",
+            "why_ask": "文种选择是公文写作第一关，选错文种写得再好也会被退回。请示与报告、通知与通报是最易混淆的两组。",
+            "hint": "向上级要钱要批文用“请示”，仅汇报情况用“报告”（不夹带请示事项）；布置工作用“通知”，表彰批评用“通报”。",
+        },
     ],
 
     WritingMode.INFORMATIONAL: [
@@ -511,6 +573,18 @@ MODE_QUESTIONS: Dict[WritingMode, List[Dict[str, str]]] = {
             "text": "有哪些直接说明问题的客观数据或当事人原话（直接引语）？",
             "why_ask": "让当事人的嘴替你说话，比你自己堆砌一万个形容词都管用。",
             "hint": "去采访几个人，把他们最原汁原味的评价放上来。",
+        },
+        {
+            "id": "info_value",
+            "text": "这件事的新闻价值五要素里，哪一项最强？为什么值得报道？",
+            "why_ask": "新闻价值（时新性/重要性/接近性/显著性/趣味性）是新闻选择的根本标准。如果五要素都不强，这件事可能不值得写。",
+            "hint": "例如：时新性最强（刚发生）+重要性（影响全校） / 显著性（校领导出席）+接近性（本院师生关心）",
+        },
+        {
+            "id": "info_plan",
+            "text": "如果是活动策划案：活动背景、主题、时间地点、对象、经费预算、安全预案各是什么？（非策划案可跳过）",
+            "why_ask": "活动策划案是学生组织最常写的正式文书。要素齐全、可操作可落地是核心要求，缺任何一项都可能导致审批不通过。",
+            "hint": "背景结合积极向上的价值观；主题对仗凸显立意；预算明细到单项；安全预案含应急联络人。",
         },
     ],
 
@@ -538,6 +612,12 @@ MODE_QUESTIONS: Dict[WritingMode, List[Dict[str, str]]] = {
             "text": "在推文的结尾，你想呼吁大家做什么？",
             "why_ask": "新媒体文章一定有互动目的，别让大家看完就划走了。",
             "hint": "比如：扫码加群暗号XX / 评论区留下你的感受，抽三个送周边！",
+        },
+        {
+            "id": "ye_value",
+            "text": "这篇推文除了好玩，想传递什么价值？思想落点和育人属性在哪？",
+            "why_ask": "高校新媒体是“大思政”阵地，首要任务是思想政治引领。娱乐是外壳，价值是内核，做到“成风化人、凝心聚力”，避免无价值内核的纯娱乐。",
+            "hint": "例如：表面是音乐节，落点是“青春自信与校园文化自信” / 表面是招新，落点是“社团精神传承与成长平台”。",
         },
     ],
 }
@@ -592,3 +672,4 @@ def get_mode_description(mode: WritingMode) -> str:
         desc += f"  - {line}\n"
     desc += f"  - 禁用词：{'、'.join(principles.forbidden_patterns[:5])}等\n"
     return desc
+

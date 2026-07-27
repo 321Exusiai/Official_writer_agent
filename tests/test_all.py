@@ -45,7 +45,7 @@ def test_writing_mode_module():
     print("测试 1: 写作模式模块")
     print("=" * 40)
 
-    assert len(ALL_PRINCIPLES) == 4
+    assert len(ALL_PRINCIPLES) == 5
     for mode, profile in ALL_PRINCIPLES.items():
         assert profile.name
         assert len(profile.principles) >= 3
@@ -120,7 +120,7 @@ def test_questionnaire():
     for route_path, expected_mode in [
         ([1, 0], WritingMode.ADMINISTRATIVE),
         ([3, 1], WritingMode.OBJECTIVE_REPORT),
-        ([2, 0], WritingMode.INFORMATIONAL),
+        ([2, 1], WritingMode.INFORMATIONAL),
     ]:
         q2 = Questionnaire()
         for choice in route_path:
@@ -271,7 +271,8 @@ def test_reviewer_agent():
 
         for i, dim in enumerate(dims):
             assert dim["name"]
-            assert len(dim["check_items"]) > 0
+            if "check_items" in dim:
+                assert len(dim["check_items"]) > 0
             assert dim["weight"] > 0
 
     reviewer.set_mode(WritingMode.STRATEGIC_NARRATIVE)
