@@ -14,6 +14,8 @@ from .writing_mode import (
     WritingMode,
     get_mode_profile,
 )
+from ..config.tool_definitions import get_tool_definitions_for_prompt
+from ..config.system_prompt import get_core_prompt
 from ..utils.response_cache import cached_prompt, store_prompt
 
 
@@ -25,6 +27,10 @@ class WriterConfig:
     raw_materials: str = ""
     audience: str = "external"
     writing_mode: WritingMode = WritingMode.STRATEGIC_NARRATIVE
+    env_state: Any = None  # EnvState 对象，由 orchestrator 构建
+    user_memory: str = ""
+    style_adapter: Any = None  # StyleAdapter 实例，用于风格注入（含强度缩放/混合）
+    style_blend: Any = None    # StyleBlend 混合风格建议（可选）
 
 
 class WriterAgent:
@@ -99,10 +105,53 @@ class WriterAgent:
         return "\n".join(lines)
 
     def _get_core_philosophy(self) -> str:
-        """根据模式获取核心理念"""
+        """根据模式获取核心理念（分类化）"""
         mode = self._get_mode()
-        profile = get_mode_profile(mode)
-        return profile.tagline
+        # 按文体类别分类的核心理念，避免"一刀切"bias
+        philosophy_map = {
+            WritingMode.ADMINISTRATIVE: (
+                "以文辅政——说清楚事情、说清楚意图、格式规范、语言四要求。"
+                "原则：一文一旨、开门见山、直笔不曲。"
+                "公文是工具不是艺术品，不渲染不拔高不抒情。"
+            ),
+            WritingMode.STRATEGIC_NARRATIVE: (
+                "以事叙事、以事明理——回答三个问题："
+                "（1）这件事证明了我们是谁？"
+                "（2）我们正走向何方？"
+                "（3）这件事对组织有什么价值？"
+                "流水账是最大的失败。"
+            ),
+            WritingMode.OBJECTIVE_REPORT: (
+                "实事求是——让事实自己说话，交叉验证、矛盾分析、对策可操作。"
+                "绝不渲染拔高，单一信源不可作为核心结论的唯一支撑。"
+            ),
+            WritingMode.INFORMATIONAL: (
+                "信息优先——5W1H完整、新闻价值判断、倒金字塔结构。"
+                "客观陈述，不渲染不拔高，剥离主观性。"
+            ),
+            WritingMode.YOUTH_ENGAGEMENT: (
+                "思想引领+青年话语——娱乐外壳下必有价值内核（立德树人）。"
+                "用青年听得进的方式说话，去爹味去官腔去AI味。"
+            ),
+        }
+        return philosophy_map.get(mode, get_mode_profile(mode).tagline)
+
+    def _get_format_constraints(self) -> str:
+        """获取格式约束（仅行政公文模式生效）"""
+        mode = self._get_mode()
+        if mode != WritingMode.ADMINISTRATIVE:
+            return ""
+        return (
+            "# 格式约束（严格执行GB/T 9704-2012）\n"
+            "- 标题三要素：发文机关+事由+文种（'XX单位关于XX的通知'）\n"
+            "- 主送机关：使用全称或规范化简称，顶格\n"
+            "- 正文：一文一旨，层次清晰，条理清楚，段落层次（一、（一）、1、（1））\n"
+            "- 成文日期：阿拉伯数字（2025年7月27日，不写07月）\n"
+            "- 引文格式：先引标题全称，后括号注文号\n"
+            "- 数字用法：全文统一（GB/T 15835）\n"
+            "- 结尾用语：请示'妥否，请批示'；函'请予函复'；通知'特此通知'；批复'此复'\n"
+            "- 表达方式：用直笔不用曲笔，不用比喻拟人夸张，不抒情\n"
+        )
 
     def build_system_prompt(self) -> str:
         if not self.config:
@@ -120,18 +169,51 @@ class WriterAgent:
             prompt_parts = [cached]
         else:
             prompt_parts = [
-                "# 角色定义",
-                f"你是一位资深的公文写作专家，当前工作在【{profile.name}】模式下。",
+                "# 全局岗位说明书（系统提示词核心）",
+                get_core_prompt(),
+                "",
+                "# 模式专属配置",
+                f"当前模式：{profile.name}",
                 f"核心理念：{self._get_core_philosophy()}",
                 "",
                 self._get_principles(),
                 "",
                 self._get_content_rules(),
                 "",
-                "# 写作简报（本次任务的核心输入）",
             ]
+            # 行政公文模式注入格式约束
+            format_constraints = self._get_format_constraints()
+            if format_constraints:
+                prompt_parts.extend([format_constraints, ""])
+            prompt_parts.append("# 写作简报（本次任务的核心输入）")
             static_part = "\n".join(prompt_parts)
             store_prompt("writer_system", static_part, cache_key)
+
+        # 环境状态（EnvState 动态注入）
+        # 注意：purpose/audience/doc_type/style/length 在下游"写作简报""文种规范""风格要求"段落有详细版本，
+        # render() 只注入下游没有的维度（模式/子类型/阶段/风格强度/extra），避免重复
+        env_state = getattr(self.config, "env_state", None)
+        if env_state is not None:
+            from ..config.system_prompt import EnvState
+            if isinstance(env_state, EnvState):
+                env_text = env_state.render(
+                    exclude_fields=["purpose", "primary_audience", "doc_type", "length_hint"]
+                )
+                if env_text:
+                    prompt_parts.extend([
+                        "# 环境状态（当前任务上下文）",
+                        env_text,
+                        "",
+                    ])
+
+        # 用户记忆（跨会话个性化注入）
+        memory_text = getattr(self.config, "user_memory", "")
+        if memory_text:
+            prompt_parts.extend([
+                "# 用户记忆（该用户的写作偏好与历史，写作时请自然贴合，不要生硬提及）",
+                memory_text,
+                "",
+            ])
 
         if brief:
             prompt_parts.extend([
@@ -158,43 +240,65 @@ class WriterAgent:
                 f"【结尾模板】{doc.closing_template}",
                 "",
             ])
+            # 注入格式化用语（行政公文模式，来自知识库工具）
+            formulaic_text = self._get_formulaic_reference()
+            if formulaic_text:
+                prompt_parts.extend([
+                    "【工具结果：格式化用语检索】",
+                    formulaic_text,
+                    "【/工具结果】",
+                    "",
+                ])
 
         if style:
-            prompt_parts.extend([
-                "# 风格要求",
-                f"当前风格：{style.name}",
-                f"叙事视角：{style.narrative_perspective}",
-                f"情感基调：{style.emotional_tone}",
-                "",
-                "【参考开头示例】",
-                style.example_opening,
-                "",
-                "【参考结尾示例】",
-                style.example_closing,
-                "",
-            ])
+            # 优先使用 StyleAdapter 风格注入（含强度缩放/混合风格逻辑，修复 N6 死代码）
+            style_adapter = getattr(self.config, "style_adapter", None)
+            if style_adapter is not None:
+                style_blend = getattr(self.config, "style_blend", None)
+                try:
+                    injection = style_adapter.get_system_prompt_injection(style, style_blend)
+                except Exception:
+                    injection = ""
+                if injection:
+                    prompt_parts.extend(["# 风格要求", injection, ""])
+            else:
+                prompt_parts.extend([
+                    "# 风格要求",
+                    f"当前风格：{style.name}",
+                    f"叙事视角：{style.narrative_perspective}",
+                    f"情感基调：{style.emotional_tone}",
+                    "",
+                    "【参考开头示例】",
+                    style.example_opening,
+                    "",
+                    "【参考结尾示例】",
+                    style.example_closing,
+                    "",
+                ])
 
         prompt_parts.extend([
             self._get_language_guidelines(),
             "",
             self._get_forbidden_patterns(),
             "",
-            "# 高级行文与版式策略（Advanced Narrative Strategies）",
-            "1. 【客观叙事】：正文中避免出现解释自己写作意图的“元叙事”句子。让事实、行动和对话自然推进，尽量避免“这句话的潜台词是”、“这不仅是一次……更是……”等自我点评的话语。",
-            "2. 【隐蔽意图】：避免在正文中直接暴露“大纲要求”、“战略锚点”等约束词汇。将这些理念化作真实的活动细节，通过“Show, Don't Tell”隐蔽地展现出来。",
-            "3. 【灵活版式与连贯引用】：在处理大量长篇幅的个人感悟或引用时，建议采取解耦结构。正文只保留辅助叙事推进的短句引用（形成“事实铺垫-简短引用-延伸转化”的连贯咬合）；而对于深度长篇思想感悟，可考虑以侧栏、手记、附录等版式（如“研学手记”）独立呈现，保持新闻的客观与叙事流畅度。",
-            "4. 【拒绝空泛宏大】：用具体的硬核细节（具体机构名、技术名词、真实的见闻等）来支撑起主题，而非用排比句和形容词堆砌空泛的宏大叙事。",
-            ""
         ])
 
-        # 注入范文参考（来自知识库，修复文档承诺但未集成的功能）
+        # 注入范文参考（来自知识库工具）
         exemplar_text = self._get_exemplar_reference()
         if exemplar_text:
             prompt_parts.extend([
-                "# 标杆范文参考（仅供学习结构和语言风格，禁止照抄）",
+                "【工具结果：范文检索】",
+                "以下内容由知识库工具返回，仅供学习结构和语言风格，禁止照抄：",
                 exemplar_text,
+                "【/工具结果】",
                 "",
             ])
+
+        # 注入可用工具清单（工具定义，来自 tool_definitions）
+        prompt_parts.extend([
+            get_tool_definitions_for_prompt(phases=["pre_writing", "during_writing"]),
+            "",
+        ])
 
         return "\n".join(prompt_parts)
 
@@ -207,6 +311,21 @@ class WriterAgent:
             mode_value = mode.value if hasattr(mode, 'value') else str(mode)
             exemplars_text = self.knowledge_base.get_exemplars_for_prompt(mode_value, max_exemplars=1)
             return exemplars_text if exemplars_text else ""
+        except Exception:
+            return ""
+
+    def _get_formulaic_reference(self) -> str:
+        """从知识库获取当前文种的格式化用语（仅行政公文模式）"""
+        mode = self._get_mode()
+        if mode != WritingMode.ADMINISTRATIVE:
+            return ""
+        if not self.knowledge_base:
+            return ""
+        try:
+            doc = self.config.doc_type_profile
+            if not doc:
+                return ""
+            return self.knowledge_base.get_formulaic_for_prompt(doc.name_cn)
         except Exception:
             return ""
 

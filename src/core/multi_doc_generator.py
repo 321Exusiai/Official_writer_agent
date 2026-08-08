@@ -172,6 +172,9 @@ class MultiDocGenerator:
             return [DocumentType.NEWS_BRIEF, DocumentType.BULLETIN]
 
         mode = brief.writing_mode
+        if mode == WritingMode.ADMINISTRATIVE.value:
+            # 按篇幅从长到短排列（_sort_by_length 对未登记的行政文种保持稳定输入顺序）
+            return [DocumentType.REPORT, DocumentType.REQUEST, DocumentType.NOTIFICATION]
         if mode == WritingMode.OBJECTIVE_REPORT.value:
             return [DocumentType.RESEARCH_REPORT, DocumentType.BULLETIN]
         if mode == WritingMode.INFORMATIONAL.value:
@@ -185,8 +188,9 @@ class MultiDocGenerator:
         return sorted(doc_types, key=lambda dt: order_map.get(dt, 0), reverse=True)
 
     def _get_doc_profile(self, dt: DocumentType) -> DocTypeProfile:
-        from .document_type import DOC_TYPE_PROFILES
-        return DOC_TYPE_PROFILES[dt]
+        # 统一走 get_profile()：已配置的直接返回，未配置的（未来新增文种）动态兜底
+        from .document_type import DocumentTypeIdentifier
+        return DocumentTypeIdentifier().get_profile(dt)
 
     def _generate_full_version(
         self,

@@ -24,7 +24,7 @@ from .writing_mode import (
     get_review_dimensions,
     get_mode_profile,
 )
-from ..utils.response_cache import cached_prompt
+from ..utils.response_cache import cached_prompt, store_prompt
 
 
 class ReviewSeverity(Enum):
@@ -53,6 +53,7 @@ class ReviewResult:
     findings: List[ReviewFinding] = field(default_factory=list)
     overall_score: float = 0.0
     summary: str = ""
+    draft_version: int = 0
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -246,6 +247,80 @@ ADMIN_ERROR_DB = {
         "prescription": "删除套话。行政公文直接以'根据……'或事项本身开头。",
         "severity": ReviewSeverity.MINOR,
     },
+    # —— 公文语言四要求诊断 ——
+    "ambiguous_wording": {
+        "patterns": ["有关单位", "相关部门", "适当时候", "酌情处理", "尽快办理", "相应措施"],
+        "diagnosis": "用词产生歧义，违反公文语言'准确'要求——一词一句只能有一种解释",
+        "prescription": "将模糊词替换为具体表述：'有关单位'→'XX部门'，'尽快'→'X月X日前'，'酌情'→具体标准",
+        "severity": ReviewSeverity.MAJOR,
+        "check_method": "pattern",
+    },
+    "inappropriate_tone": {
+        "patterns": [],
+        "diagnosis": "语气与行文关系不匹配，违反公文语言'得体'要求",
+        "prescription": "上行文用谦请语气（'拟''建议''恳请'），下行文用明确语气（'要求''务必'），平行文用协商语气（'请予支持'）",
+        "severity": ReviewSeverity.MAJOR,
+        "check_method": "semantic",
+    },
+    "flowered_language": {
+        "patterns": ["宏伟蓝图", "壮丽篇章", "辉煌成就", "灿烂前景", "磅礴力量", "壮阔征程"],
+        "diagnosis": "使用了华丽辞藻，违反公文语言'朴实'要求",
+        "prescription": "将华丽辞藻替换为朴实表述（如'宏伟蓝图'→'发展规划'，'辉煌成就'→'工作成果'）",
+        "severity": ReviewSeverity.MINOR,
+        "check_method": "pattern",
+    },
+    # —— 表达方式约束诊断 ——
+    "literary_metaphor_in_doc": {
+        "patterns": ["犹如", "仿佛", "宛如", "好似", "恰似", "犹如一幅", "宛如一首", "仿佛置身"],
+        "diagnosis": "法定公文使用文学性比喻，违反'直笔不曲'表达方式约束",
+        "prescription": "删除所有文学性比喻词，改用直白叙述和说明。公文是工具不是艺术品",
+        "severity": ReviewSeverity.MAJOR,
+        "check_method": "pattern",
+    },
+    "lyrical_in_doc": {
+        "patterns": ["令人心潮澎湃", "让人感慨万千", "不禁热泪盈眶", "令人振奋", "让人动容", "心潮起伏"],
+        "diagnosis": "法定公文使用抒情描写，违反'不用描写和抒情'表达方式约束",
+        "prescription": "删除抒情性描写，改为客观陈述事实",
+        "severity": ReviewSeverity.MAJOR,
+        "check_method": "pattern",
+    },
+    # —— 行文规则诊断 ——
+    "qingshi_yiwen_duoshi": {
+        "patterns": [],
+        "diagnosis": "请示一文多事，违反《党政机关公文处理工作条例》",
+        "prescription": "请示必须一文一事。将多个事项拆分为多份请示",
+        "severity": ReviewSeverity.CRITICAL,
+        "check_method": "semantic",
+    },
+    "baogao_jiadai_qingshi": {
+        "patterns": ["妥否，请批示", "请予批准", "恳请批复", "请审批"],
+        "diagnosis": "报告中夹带请示事项，违反《党政机关公文处理工作条例》",
+        "prescription": "报告只用于汇报，不用于请求批准。删除请示性内容，如需请示另行发文",
+        "severity": ReviewSeverity.CRITICAL,
+        "check_method": "pattern",
+    },
+    "han_for_subordinate": {
+        "patterns": [],
+        "diagnosis": "函用于上下级之间，文种错用",
+        "prescription": "函仅用于不相隶属机关。上下级之间：上行用请示/报告，下行用通知/批复",
+        "severity": ReviewSeverity.CRITICAL,
+        "check_method": "semantic",
+    },
+    # —— 格式细节诊断 ——
+    "date_with_zero": {
+        "patterns": [r"\d{4}年0\d月0\d日", r"\d{4}年0\d月\d{1,2}日", r"\d{4}年\d{1,2}月0\d日"],
+        "diagnosis": "成文日期编虚位（如2025年07月27日），不符合GB/T 9704-2012",
+        "prescription": "成文日期用阿拉伯数字，不编虚位（2025年7月27日，非07月27日）",
+        "severity": ReviewSeverity.MAJOR,
+        "check_method": "pattern",
+    },
+    "number_inconsistent": {
+        "patterns": [],
+        "diagnosis": "数字用法不统一，不符合GB/T 15835",
+        "prescription": "同一篇公文中数字用法应统一：'3个方面''5个问题'或'三个方面''五个问题'，择一并坚持",
+        "severity": ReviewSeverity.MINOR,
+        "check_method": "semantic",
+    },
 }
 
 # ═══════════════════════════════════════════════════════════════
@@ -338,11 +413,68 @@ INFO_ERROR_DB = {
     },
 }
 
+# ═══════════════════════════════════════════════════════════════
+# YOUTH_ENGAGEMENT 专属错误诊断库（青年推文/社团新媒体）
+# ═══════════════════════════════════════════════════════════════
+
+YOUTH_ERROR_DB = {
+    "empty_slogan": {
+        "patterns": ["砥砺前行", "不负韶华", "不忘初心", "扬帆起航", "筑梦", "追梦", "共赴山海"],
+        "diagnosis": "使用了空泛口号，缺乏具体内容支撑",
+        "prescription": "删除空泛口号，用具体活动内容、真实感受替代。'砥砺前行'→'从今天这场活动里，我们……'",
+        "severity": ReviewSeverity.MAJOR,
+        "check_method": "pattern",
+    },
+    "officialese_tone": {
+        "patterns": ["隆重召开", "胜利闭幕", "圆满成功", "深刻领会", "切实增强", "进一步提高"],
+        "diagnosis": "使用了官腔套话，不符合青年话语体系",
+        "prescription": "删除官腔表述，改用青年化、具体化的表达。'圆满成功'→直接说活动做了什么、大家什么反应。",
+        "severity": ReviewSeverity.MAJOR,
+        "check_method": "pattern",
+    },
+    "dad_flavor_address": {
+        "patterns": ["亲爱的同学们", "同学们，我们要", "大家一定要", "希望同学们", "谨记"],
+        "diagnosis": "爹味称呼/说教语气，与青年共情原则相悖",
+        "prescription": "避免居高临下的说教与训导语气。用'我们''大家'的平等视角，让内容本身说话。",
+        "severity": ReviewSeverity.MAJOR,
+        "check_method": "pattern",
+    },
+    "ai_cliche": {
+        "patterns": ["总而言之", "综上所述", "值得一提的是", "不可否认的是", "毋庸置疑", "让我们共同期待"],
+        "diagnosis": "使用了AI套话/模板化过渡语",
+        "prescription": "删除AI套话。直接呈现内容与情绪，用具体场景和真实声音结尾。",
+        "severity": ReviewSeverity.MINOR,
+        "check_method": "pattern",
+    },
+    "no_thought_landing": {
+        "patterns": [],
+        "diagnosis": "推文只有热闹场面，缺少思想落点",
+        "prescription": "青年推文应'娱乐外壳下必有价值内核'：在热闹之后点出活动的思想意义、成长收获或价值导向，让读者带走一句话。",
+        "severity": ReviewSeverity.CRITICAL,
+        "check_method": "semantic",
+    },
+    "no_emotional_resonance": {
+        "patterns": [],
+        "diagnosis": "缺乏情绪价值与共鸣点",
+        "prescription": "增加具象的现场细节、真实的声音（同学原话、表情、动作），用细节引发共鸣，而非口号堆砌。",
+        "severity": ReviewSeverity.MAJOR,
+        "check_method": "semantic",
+    },
+    "platform_mismatch": {
+        "patterns": [],
+        "diagnosis": "内容形式与发布平台不匹配",
+        "prescription": "公众号推文用标题+分层排版+金句；微博用短句强节奏；视频文案配合画面分镜。避免把公文格式搬到新媒体。",
+        "severity": ReviewSeverity.MINOR,
+        "check_method": "semantic",
+    },
+}
+
 ALL_ERROR_DBS = {
     WritingMode.STRATEGIC_NARRATIVE: {**UNIVERSAL_ERROR_DB, **STRATEGIC_ERROR_DB},
     WritingMode.OBJECTIVE_REPORT: {**UNIVERSAL_ERROR_DB, **OBJECTIVE_ERROR_DB},
     WritingMode.ADMINISTRATIVE: {**UNIVERSAL_ERROR_DB, **ADMIN_ERROR_DB},
     WritingMode.INFORMATIONAL: {**UNIVERSAL_ERROR_DB, **INFO_ERROR_DB},
+    WritingMode.YOUTH_ENGAGEMENT: {**UNIVERSAL_ERROR_DB, **YOUTH_ERROR_DB},
 }
 
 
@@ -377,9 +509,12 @@ class ReviewerAgent:
         return ALL_ERROR_DBS.get(self.mode, ALL_ERROR_DBS[WritingMode.STRATEGIC_NARRATIVE])
 
     def build_review_prompt(
-        self, draft: str, round_index: int, brief: Any = None
+        self, draft: str, round_index: int, brief: Any = None, env_state: str = ""
     ) -> str:
-        """为指定轮次构建审查Prompt（模式感知版）"""
+        """为指定轮次构建审查Prompt（模式感知版）
+
+        env_state: 环境状态渲染文本（模式/文种/阶段等），由调用方传入，缺省时仅用模式信息
+        """
         dimensions = self.get_dimensions()
         if round_index >= len(dimensions):
             return ""
@@ -417,8 +552,15 @@ class ReviewerAgent:
 ### 总体判断
 [通过/未通过]
 """
+            store_prompt("reviewer_round", static_parts, cache_key)
 
         prompt = static_parts
+
+        if env_state:
+            prompt += f"""
+## 环境状态（当前任务上下文）
+{env_state}
+"""
 
         if brief:
             prompt += f"""
@@ -560,8 +702,6 @@ class ReviewerAgent:
         error_db = self.get_error_db()
         findings = []
         for error_key, error_info in error_db.items():
-            if error_info.get("check_method") == "structural":
-                continue
             for pattern in error_info.get("patterns", []):
                 if pattern in text:
                     findings.append({
@@ -580,7 +720,7 @@ class ReviewerAgent:
         仅对 STRATEGIC_NARRATIVE 模式有效
         """
         we_indicators = ["我们", "同学们", "师生", "团队", "学院", "我方"]
-        they_indicators = ["北大", "清华", "对方", "他们", "教授", "专家"]
+        they_indicators = ["对方", "他们", "教授", "专家", "据", "称"]
 
         we_count = sum(text.count(w) for w in we_indicators)
         they_count = sum(text.count(w) for w in they_indicators)
@@ -742,13 +882,9 @@ class ReviewerAgent:
             scope = rule["scope"]
 
             # 范围筛选
-            if scope == "strategic_narrative" and mode_value not in ("strategic_narrative",):
-                continue
             if scope == "administrative" and mode_value not in ("administrative",):
                 continue
             if scope == "informational" and mode_value not in ("informational",):
-                continue
-            if scope == "objective" and mode_value not in ("objective_report",):
                 continue
 
             try:
@@ -758,6 +894,7 @@ class ReviewerAgent:
                         "diagnosis": rule["diagnosis"],
                         "prescription": rule["prescription"],
                         "severity": rule["severity"],
+                        "matched_pattern": rule["key"],
                     })
             except Exception:
                 continue
@@ -778,8 +915,6 @@ class ReviewerAgent:
         results = []
 
         # 提取到循环外，避免每轮重复计算
-        auto_findings = self.diagnose_errors(draft)
-
         subject_check = None
         if mode == WritingMode.STRATEGIC_NARRATIVE:
             subject_check = self.check_subject_ratio(draft)
@@ -789,6 +924,7 @@ class ReviewerAgent:
             format_check = self.check_format_compliance(draft)
 
         for i, dim in enumerate(dimensions):
+            auto_findings = self.diagnose_errors(draft)
             results.append({
                 "round": dim["name"],
                 "weight": dim["weight"],
@@ -821,8 +957,6 @@ class ReviewerAgent:
         Returns:
             修复后的文本
         """
-        import re
-
         pattern = finding.get("matched_pattern")
         error_key = finding.get("error_key", "")
         prescription = finding.get("prescription", "")
@@ -892,6 +1026,7 @@ class ReviewerAgent:
         mode: WritingMode,
         brief: Any = None,
         max_iterations: Optional[int] = None,
+        env_state: str = "",
     ) -> Tuple[str, List[Dict[str, Any]]]:
         """
         执行迭代式审查（V2.1 核心方法）
@@ -907,6 +1042,7 @@ class ReviewerAgent:
             mode: 写作模式
             brief: 写作简报
             max_iterations: 最大迭代次数，默认使用模式维度数
+            env_state: 环境状态渲染文本（透传给 build_review_prompt）
 
         Returns:
             (final_draft, [per_round_results])
@@ -925,6 +1061,8 @@ class ReviewerAgent:
         for i in range(min(max_iterations, len(dimensions))):
             dim = dimensions[i]
 
+            draft_snapshot = current_draft  # 保存修复前的草稿快照，便于回溯
+
             auto_findings = self.diagnose_errors(current_draft)
             # 过滤掉前几轮已报告的错误模式，避免同一错误被重复报告 N 次
             auto_findings = [
@@ -941,7 +1079,7 @@ class ReviewerAgent:
                         "diagnosis": subject_check.get("suggestion", "主体性占比不足"),
                         "prescription": "将更多'对方做了什么'改为'我们收获了什么'",
                         "severity": "major",
-                        "matched_pattern": "",
+                        "matched_pattern": "subject_ratio_low",
                     })
 
             format_check = None
@@ -953,7 +1091,7 @@ class ReviewerAgent:
                         "diagnosis": fc.get("diagnosis", ""),
                         "prescription": fc.get("prescription", ""),
                         "severity": fc.get("severity", "minor"),
-                        "matched_pattern": "",
+                        "matched_pattern": f"format_{fc.get('error_key', '')}",
                     })
 
             change_log = []
@@ -968,7 +1106,7 @@ class ReviewerAgent:
 
             round_result = ReviewResult(
                 round_name=dim["name"],
-                passed=len(auto_findings) == 0 or len(change_log) > 0,
+                passed=len(auto_findings) == 0,
                 findings=[
                     ReviewFinding(
                         round_name=dim["name"],
@@ -980,18 +1118,24 @@ class ReviewerAgent:
                     )
                     for f in auto_findings
                 ],
-                overall_score=100.0 - len(auto_findings) * (100.0 / max(len(dimensions), 1)),
+                overall_score=max(0.0, 100.0 - len(auto_findings) * (100.0 / max(len(dimensions), 1))),
+                draft_version=i + 1,
             )
             self.review_history.append(round_result)
 
             # 每轮都构建 prompt，因为每轮的草稿内容不同（经过自动修复）
             # 这些 prompt 可用于后续 LLM 调用或展示
-            review_prompt = self.build_review_prompt(current_draft, i, brief)
+            review_prompt = self.build_review_prompt(current_draft, i, brief, env_state)
 
             iteration_results.append({
                 "round": dim["name"],
                 "weight": dim["weight"],
+                "draft_snapshot": draft_snapshot,
                 "findings_count": len(auto_findings),
+                "auto_findings_summary": [
+                    {"diagnosis": f.get("diagnosis", ""), "prescription": f.get("prescription", ""), "severity": f.get("severity", "")}
+                    for f in auto_findings
+                ],
                 "fixes_applied": len(change_log),
                 "change_log": change_log,
                 "subject_check": subject_check,
@@ -1010,7 +1154,7 @@ class ReviewerAgent:
 
 def _remove_pattern(text: str, pattern: str) -> str:
     """移除文本中的指定模式"""
-    return text.replace(pattern, "")
+    return text.replace(pattern, "", 1)
 
 
 def _rewrite_passive_to_active(text: str, trigger_word: str) -> str:
@@ -1023,4 +1167,4 @@ def _rewrite_passive_to_active(text: str, trigger_word: str) -> str:
         "介绍了": "我们了解到",
         "展示了": "我们观摩了",
     }
-    return text.replace(trigger_word, replacements.get(trigger_word, ""))
+    return text.replace(trigger_word, replacements.get(trigger_word, trigger_word))

@@ -35,8 +35,10 @@ from dataclasses import dataclass, field
 from typing import List, Dict, Optional, Any
 from datetime import datetime
 from enum import Enum
+from collections import Counter
 import json
 import uuid
+import time
 
 
 class ProjectStatus(Enum):
@@ -291,7 +293,7 @@ class PersonalizedDB:
         project = self.get_project(project_id)
         if not project:
             return False
-        if name:
+        if name is not None and name.strip():
             project.name = name
         if description is not None:
             project.description = description
@@ -386,8 +388,9 @@ class PersonalizedDB:
                 article_content = article_content or doc.content
                 source_site = source_site or doc.source_site
                 style_notes = style_notes or "\n".join(doc.style_patterns)
-            except Exception as e:
-                style_notes = f"自动抓取失败：{str(e)}"
+            except Exception:
+                fetch_fail_note = "自动抓取失败：无法从该URL获取内容，请手动填写标题和正文"
+                style_notes = f"{style_notes}\n{fetch_fail_note}" if style_notes else fetch_fail_note
 
         article = ReferenceArticle(
             id=f"ref_{uuid.uuid4().hex[:8]}",
@@ -418,7 +421,6 @@ class PersonalizedDB:
             article = self.add_url_reference(project_id, url, auto_fetch=True)
             articles.append(article)
             if delay > 0:
-                import time
                 time.sleep(delay)
         return articles
 
@@ -430,9 +432,13 @@ class PersonalizedDB:
         if len(content) < 500:
             return patterns
 
-        sentences = content.split("。")
-        if len(sentences) > 10:
-            patterns.append("多使用短句（平均{}字/句）".format(int(len(content) / len(sentences))))
+        sentences = [s for s in content.split("。") if s.strip()]
+        if sentences:
+            avg_len = len(content) / len(sentences)
+            if avg_len < 30:
+                patterns.append("多使用短句（平均{}字/句）".format(int(avg_len)))
+            elif avg_len > 60:
+                patterns.append("多使用长句（平均{}字/句）".format(int(avg_len)))
 
         opening = content[:200]
         if any(kw in opening for kw in ["近日", "日前", "X月X日"]):
@@ -613,47 +619,74 @@ class PersonalizedDB:
         else:
             user.memory_notes = note
 
-    def get_memory_summary(self, project_id: Optional[str] = None) -> str:
-        """获取记忆摘要"""
+    def get_memory_summary(self, project_id: Optional[str] = None, focus: str = "full") -> str:
+        """获取记忆摘要（结构化分类，支持按场景聚焦注入）
+
+        Args:
+            project_id: 项目ID，传入时附带项目级记忆
+            focus: 注入场景
+                - "full": 全部记忆（写作场景默认）
+                - "errors": 仅常见错误/弱点/记忆笔记（审查场景，针对性核对）
+                - "prefs": 仅偏好类（常用模式/优势/项目信息）
+        """
         user = self.get_current_user()
         if not user:
             return "无用户数据"
 
-        lines = ["【用户记忆摘要】", ""]
-        lines.append(f"用户：{user.name}")
-        lines.append(f"项目数：{len(user.projects)}")
-        lines.append(f"活跃时间：{user.last_active}")
-        lines.append("")
+        sections = self._build_memory_sections(user, project_id)
+        if focus == "errors":
+            keys = ["常见错误", "记忆笔记"]
+        elif focus == "prefs":
+            keys = ["用户概览", "偏好", "项目记忆"]
+        else:
+            keys = list(sections.keys())
 
+        lines = []
+        for key in keys:
+            body = sections.get(key, "")
+            if body:
+                lines.append(body)
+        return "\n".join(lines) if lines else "无用户数据"
+
+    def _build_memory_sections(self, user, project_id: Optional[str] = None) -> Dict[str, str]:
+        """把记忆按类型分类组装，便于按场景选择性注入（修复 1.3 结构化）"""
+        sections: Dict[str, str] = {}
+
+        overview = [f"用户：{user.name}", f"项目数：{len(user.projects)}", f"活跃时间：{user.last_active}"]
+        sections["用户概览"] = "\n".join(overview)
+
+        prefs_lines = []
         if user.preferences and user.preferences.preferred_writing_modes:
-            lines.append(f"常用写作模式：{', '.join(user.preferences.preferred_writing_modes)}")
-
+            prefs_lines.append(f"常用写作模式：{', '.join(user.preferences.preferred_writing_modes)}")
         if user.common_strengths:
-            lines.append(f"常见优势：{', '.join(user.common_strengths)}")
+            prefs_lines.append(f"常见优势：{', '.join(user.common_strengths)}")
+        if prefs_lines:
+            sections["偏好"] = "\n".join(prefs_lines)
+
+        error_lines = []
+        if user.common_error_patterns:
+            errs = [e.get("name", "") for e in user.common_error_patterns if e.get("name")]
+            if errs:
+                error_lines.append(f"常见错误/弱点：{'；'.join(errs)}")
+        if user.memory_notes:
+            error_lines.append(f"记忆笔记：{user.memory_notes}")
+        if error_lines:
+            sections["常见错误"] = "\n".join(error_lines)
 
         if project_id:
             project = self.get_project(project_id)
             if project:
-                lines.append("")
-                lines.append(f"【项目记忆：{project.name}】")
-                lines.append(f"状态：{project.status.value}")
-                lines.append(f"修改次数：{project.revision_count}")
-
+                proj_lines = [f"【项目记忆：{project.name}】", f"状态：{project.status.value}", f"修改次数：{project.revision_count}"]
                 if project.questionnaire_results:
-                    lines.append(f"写作模式：{project.questionnaire_results.writing_mode}")
-                    lines.append(f"文种：{project.questionnaire_results.doc_type}")
-
+                    proj_lines.append(f"写作模式：{project.questionnaire_results.writing_mode}")
+                    proj_lines.append(f"文种：{project.questionnaire_results.doc_type}")
                 if project.vocabulary_corpus:
                     corpus = project.vocabulary_corpus
-                    lines.append(f"自定义术语：{', '.join(corpus.custom_terms[:5])}")
-                    lines.append(f"禁用词：{', '.join(corpus.forbidden_words[:5])}")
+                    proj_lines.append(f"自定义术语：{', '.join(corpus.custom_terms[:5])}")
+                    proj_lines.append(f"禁用词：{', '.join(corpus.forbidden_words[:5])}")
+                sections["项目记忆"] = "\n".join(proj_lines)
 
-        if user.memory_notes:
-            lines.append("")
-            lines.append(f"【记忆笔记】")
-            lines.append(user.memory_notes)
-
-        return "\n".join(lines)
+        return sections
 
     # ═══ 智能推荐 ═══
 
@@ -681,7 +714,7 @@ class PersonalizedDB:
             recommendation["suggested_style"] = qr.style
 
         if user.preferences.preferred_styles:
-            most_used = max(set(user.preferences.preferred_styles), key=user.preferences.preferred_styles.count)
+            most_used = Counter(user.preferences.preferred_styles).most_common(1)[0][0]
             if most_used != qr.style:
                 recommendation["creative_suggestions"].append(
                     f"您常用{most_used}风格，本次可尝试{qr.style}以丰富写作多样性"
@@ -800,9 +833,20 @@ class PersonalizedDB:
 
         return json.dumps(data, ensure_ascii=False, indent=2)
 
+    @staticmethod
+    def _parse_project_status(status_value: Any) -> ProjectStatus:
+        """解析项目状态枚举，非法值回退到 DRAFT"""
+        try:
+            return ProjectStatus(status_value)
+        except (ValueError, TypeError):
+            return ProjectStatus.DRAFT
+
     def import_from_json(self, json_data: str) -> Optional[UserProfile]:
         """从JSON导入用户数据（完整反序列化）"""
-        data = json.loads(json_data)
+        try:
+            data = json.loads(json_data)
+        except (json.JSONDecodeError, TypeError):
+            return None
 
         user_id = data.get("id")
         if not user_id:
@@ -833,7 +877,7 @@ class PersonalizedDB:
         # 反序列化 writing_history
         for wh_data in data.get("writing_history", []):
             profile.writing_history.append(WritingHistory(
-                id=wh_data["id"], project_id=wh_data["project_id"],
+                id=wh_data.get("id", f"wh_{uuid.uuid4().hex[:8]}"), project_id=wh_data.get("project_id", ""),
                 writing_mode=wh_data.get("writing_mode", ""),
                 doc_type=wh_data.get("doc_type", ""),
                 style=wh_data.get("style", ""),
@@ -848,7 +892,7 @@ class PersonalizedDB:
         gab_data = data.get("global_anti_bias")
         if gab_data:
             profile.global_anti_bias = AntiBiasAnalysis(
-                id=gab_data["id"],
+                id=gab_data.get("id", f"ab_{uuid.uuid4().hex[:8]}"),
                 user_bias_patterns=gab_data.get("user_bias_patterns", []),
                 counter_perspectives=gab_data.get("counter_perspectives", []),
                 innovative_angles=gab_data.get("innovative_angles", []),
@@ -859,10 +903,10 @@ class PersonalizedDB:
 
         for proj_data in data.get("projects", []):
             proj = Project(
-                id=proj_data["id"],
-                name=proj_data["name"],
+                id=proj_data.get("id", f"proj_{uuid.uuid4().hex[:8]}"),
+                name=proj_data.get("name", ""),
                 description=proj_data.get("description", ""),
-                status=ProjectStatus(proj_data.get("status", "draft")),
+                status=self._parse_project_status(proj_data.get("status", "draft")),
                 created_at=proj_data.get("created_at", ""),
                 updated_at=proj_data.get("updated_at", ""),
                 writing_history=proj_data.get("writing_history", []),
@@ -888,7 +932,7 @@ class PersonalizedDB:
 
             for a_data in proj_data.get("style_requirements", []):
                 proj.style_requirements.append(ReferenceArticle(
-                    id=a_data["id"], title=a_data.get("title", ""),
+                    id=a_data.get("id", f"ref_{uuid.uuid4().hex[:8]}"), title=a_data.get("title", ""),
                     content=a_data.get("content", ""),
                     upload_time=a_data.get("upload_time", ""),
                     style_notes=a_data.get("style_notes", ""),
@@ -914,7 +958,7 @@ class PersonalizedDB:
                 anti_bias = None
                 if ab_data:
                     anti_bias = AntiBiasAnalysis(
-                        id=ab_data["id"],
+                        id=ab_data.get("id", f"ab_{uuid.uuid4().hex[:8]}"),
                         user_bias_patterns=ab_data.get("user_bias_patterns", []),
                         counter_perspectives=ab_data.get("counter_perspectives", []),
                         innovative_angles=ab_data.get("innovative_angles", []),
@@ -923,7 +967,7 @@ class PersonalizedDB:
                         created_at=ab_data.get("created_at", ""),
                     )
                 proj.user_requirements.append(UserRequirement(
-                    id=ur_data["id"],
+                    id=ur_data.get("id", f"ur_{uuid.uuid4().hex[:8]}"),
                     description=ur_data.get("description", ""),
                     priority=ur_data.get("priority", "normal"),
                     anti_bias_analysis=anti_bias,
@@ -935,7 +979,7 @@ class PersonalizedDB:
             abp_data = proj_data.get("anti_bias_profile")
             if abp_data:
                 proj.anti_bias_profile = AntiBiasAnalysis(
-                    id=abp_data["id"],
+                    id=abp_data.get("id", f"ab_{uuid.uuid4().hex[:8]}"),
                     user_bias_patterns=abp_data.get("user_bias_patterns", []),
                     counter_perspectives=abp_data.get("counter_perspectives", []),
                     innovative_angles=abp_data.get("innovative_angles", []),

@@ -13,6 +13,7 @@ import os
 import json
 from typing import List, Dict, Optional, Tuple, Any
 from enum import Enum
+from datetime import datetime
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "src"))
 
@@ -165,7 +166,7 @@ class GradioApp:
         self.api_manager = APIConfigManager()
         self.knowledge_base = KnowledgeBase()
         self.style_adapter = StyleAdapter()
-        self.orchestrator = Orchestrator()
+        self.orchestrator = self._new_orchestrator()
         
         self.current_user_name: Optional[str] = None
         self.current_project_id: Optional[str] = None
@@ -176,6 +177,21 @@ class GradioApp:
         
         # 尝试载入本地持久化数据
         self._load_persistent_data()
+
+    def _new_orchestrator(self):
+        """创建编排器实例，并注入用户记忆（偏好/历史/常见错误）与持久化数据库实例"""
+        orch = Orchestrator()
+        # 注入与 UI 侧同一的持久化实例，保证工具能读到项目数据（修复假状态）
+        orch.set_personalized_db(self.pdb)
+        try:
+            memory_text = self.pdb.get_memory_summary(
+                self.current_project_id if self.current_project_id else None
+            )
+            if memory_text and memory_text != "无用户数据":
+                orch.set_user_memory(memory_text)
+        except Exception:
+            pass
+        return orch
 
     def _load_persistent_data(self):
         """载入本地 JSON 数据库"""
@@ -223,8 +239,11 @@ class GradioApp:
                 "current_user_id": self.pdb.current_user_id,
                 "url_topics": url_topics_serialized,
             }
-            with open(DB_FILE_PATH, "w", encoding="utf-8") as f:
+            # 原子写入：先写临时文件再替换，避免写入中途异常导致数据库损坏
+            tmp_path = DB_FILE_PATH + ".tmp"
+            with open(tmp_path, "w", encoding="utf-8") as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
+            os.replace(tmp_path, DB_FILE_PATH)
             print("[持久化] 数据已成功同步到磁盘。")
         except Exception as e:
             print(f"[持久化] 数据库保存失败: {e}")
@@ -290,7 +309,7 @@ class GradioApp:
         try:
             project = self.pdb.create_project(name, description=desc)
             self.current_project_id = project.id
-            self.orchestrator = Orchestrator()
+            self.orchestrator = self._new_orchestrator()
             
             # 路由开始
             result = self.orchestrator.start_routing()
@@ -319,7 +338,7 @@ class GradioApp:
                 True # 开启场景卡片
             )
         except Exception as e:
-            return "创建失败，请检查项目名称是否合规", self.get_projects_list(), "", "", "", "", "", "", False
+            return f"创建失败: {e}", self.get_projects_list(), "", "", "", "", "", "", False
 
     def select_project(self, name: str) -> Tuple[str, str, str, str, str, str, str, str]:
         """选择项目时，同步其所有草稿、问卷和最终产出"""
@@ -338,7 +357,7 @@ class GradioApp:
             return f"已选中并持有项目: {name}", "", "", "", "", "", "", ""
         
         # 试图从项目恢复状态
-        self.orchestrator = Orchestrator()
+        self.orchestrator = self._new_orchestrator()
         
         # 恢复问卷简报
         brief = None
@@ -422,7 +441,7 @@ class GradioApp:
                 proj.questionnaire_results = None
                 proj.writing_history = []
                 proj.status = ProjectStatus.DRAFT
-                self.orchestrator = Orchestrator()
+                self.orchestrator = self._new_orchestrator()
                 self._save_persistent_data()
                 return proj.name
         return None
@@ -446,7 +465,7 @@ class GradioApp:
             # 如果删除的是当前选中的项目，清空 current_project_id 并重置编排器
             if self.current_project_id == target.id:
                 self.current_project_id = None
-                self.orchestrator = Orchestrator()
+                self.orchestrator = self._new_orchestrator()
             self._save_persistent_data()
             return f"已删除项目《{name}》。", self.get_projects_list(), False
         return "未找到项目", self.get_projects_list(), False
@@ -498,7 +517,8 @@ class GradioApp:
                 ui = self._get_routing_ui_state()
                 return "请先新建项目来初始化写作场景", "", "", "", gr.update(elem_classes="ios-card ws-panel-visible"), gr.update(elem_classes="ws-panel-hidden"), "", "", "", "", ui["title"], ui["options_text"], gr.update(choices=ui["choices"], value=None)
         
-        options = self.orchestrator.questionnaire.get_routing_question().get("options", [])
+        routing_q = self.orchestrator.questionnaire.get_routing_question() or {}
+        options = routing_q.get("options", [])
         choice_label = (choice_label or "").strip()
         custom_text = (custom_text or "").strip()
         
@@ -520,12 +540,23 @@ class GradioApp:
                     return "请从下拉列表中选择一个场景", "", "", "", gr.update(elem_classes="ios-card ws-panel-visible"), gr.update(elem_classes="ws-panel-hidden"), "", "", "", "", ui["title"], ui["options_text"], gr.update(choices=ui["choices"], value=None)
         
         # 执行路由
+        custom_note = ""
         if is_custom:
             if not custom_text:
                 ui = self._get_routing_ui_state()
                 return "选择了自定义场景，请在输入框中对该写作场景进行简短描述。", "", "", "", gr.update(elem_classes="ios-card ws-panel-visible"), gr.update(elem_classes="ws-panel-hidden"), "", "", "", "", ui["title"], ui["options_text"], gr.update(choices=ui["choices"], value=None)
-            # Fallback 路由：默认选择第一个
-            print(f"[DEBUG] Executing fallback routing with choice_index=0")
+            # 自定义场景描述不再被丢弃——写入写作简报，后续写作与审查都会用到；
+            # 路由本身按默认场景进入流程（决策树不支持按自由文本路由）
+            try:
+                if self.orchestrator and self.orchestrator.brief:
+                    base = self.orchestrator.brief.key_materials or ""
+                    self.orchestrator.brief.key_materials = (
+                        (base + "\n" if base else "") + f"【自定义场景描述】{custom_text}"
+                    )
+                    custom_note = "（已记录你的场景描述，将并入写作简报）"
+            except Exception:
+                pass
+            print(f"[DEBUG] Custom routing recorded: {custom_text[:60]}")
             result = self.orchestrator.submit_routing_choice(0)
         else:
             print(f"[DEBUG] Executing routing with choice_index={choice_idx}")
@@ -547,7 +578,7 @@ class GradioApp:
                 progress_html = build_progress_badge("问卷")
                 
                 return (
-                    f"✅ 锚定成功！我们将采用【{get_mode_profile(self.orchestrator.writing_mode).name}】笔法。为了写出带感的好文章，请回答这几个关键问题：",
+                    f"✅ 锚定成功！我们将采用【{get_mode_profile(self.orchestrator.writing_mode).name}】笔法。{custom_note} 为了写出带感的好文章，请回答这几个关键问题：",
                     prog_text,
                     f"### {q_text}",
                     why_ask,
@@ -606,7 +637,8 @@ class GradioApp:
         
         if action == "submit":
             if not answer_val:
-                return "回答不能为空，请填写后提交或选择跳过。", "", f"### {self.orchestrator.get_current_mode_question().get('question','')}", self.orchestrator.get_current_mode_question().get('why_ask',''), self.orchestrator.get_current_mode_question().get('hint',''), "", "", progress_html, gr.update(elem_classes="ws-panel-visible"), ""
+                cur_q = self.orchestrator.get_current_mode_question() or {}
+                return "回答不能为空，请填写后提交或选择跳过。", "", f"### {cur_q.get('question','')}", cur_q.get('why_ask',''), cur_q.get('hint',''), "", "", progress_html, gr.update(elem_classes="ws-panel-visible"), ""
             has_next, next_q = self.orchestrator.submit_mode_answer(answer_val)
             msg = "您的输入已被记入公文简报！"
             
@@ -618,7 +650,9 @@ class GradioApp:
         elif action == "back":
             prev = self.orchestrator.questionnaire.go_back()
             if prev:
-                next_q = prev
+                # go_back 返回值缺少 why_ask/hint 键，从当前题目补全以保证 UI 上下文完整
+                cur_q = self.orchestrator.get_current_mode_question() or {}
+                next_q = {**cur_q, **prev}
                 msg = f"回退成功。您上一题的回答是：{prev.get('previous_answer', '')}"
             else:
                 msg = "已是第一题，无法继续回退。"
@@ -723,7 +757,7 @@ class GradioApp:
             proj = self.pdb.get_project(self.current_project_id)
             if proj:
                 history_record = {
-                    "timestamp": json.dumps(serialize_dataclass(self.orchestrator.plan.estimated_length)), # 占位
+                    "timestamp": datetime.now().isoformat(),
                     "draft": draft,
                     "style": self.orchestrator.plan.style_name,
                     "doc_type": self.orchestrator.plan.doc_type_name,
@@ -741,7 +775,7 @@ class GradioApp:
                 build_progress_badge("生成")
             )
         except Exception as e:
-            return "", "", "", "文稿生成失败，请检查 API 设置是否已配置且有效", build_progress_badge("方案")
+            return "", "", "", f"文稿生成失败，请检查 API 设置是否已配置且有效: {e}", build_progress_badge("方案")
 
     # ═══════════════════════════════════════════════════════════════
     # 智能迭代审查与人工介入
@@ -760,7 +794,10 @@ class GradioApp:
             issues = self.orchestrator.get_review_issues()
             issues_text = ""
             for i, iss in enumerate(issues):
-                issues_text += f"**{i+1}.** [{iss.get('severity')}] 在 {iss.get('location', '段落')} 处: {iss.get('issue')}\n建议: {iss.get('suggestion')}\n\n"
+                source = iss.get("source", "规则引擎")
+                source_tag = "🤖 AI深度审查" if source == "AI深度审查" else "🔍 规则引擎"
+                ver_tag = f"（第{iss.get('draft_version', i+1)}版）" if iss.get("draft_version") else ""
+                issues_text += f"**{i+1}.** {source_tag}{ver_tag} [{iss.get('severity')}] 在 {iss.get('location', '段落')} 处: {iss.get('issue')}\n建议: {iss.get('suggestion')}\n\n"
 
             if not issues_text:
                 issues_text = "未检测到明显偏见或流水账问题。"
@@ -787,7 +824,7 @@ class GradioApp:
                 build_progress_badge("审查")
             )
         except Exception as e:
-            return "审查异常，请确认草稿内容格式正确", "", "", "审查异常，请确认草稿内容格式正确", build_progress_badge("审查")
+            return f"审查异常，请确认草稿内容格式正确: {e}", "", "", f"审查异常，请确认草稿内容格式正确: {e}", build_progress_badge("审查")
 
     def manual_update_draft(self, edited_text: str) -> Tuple[str, str]:
         if not self.orchestrator or not edited_text.strip():
@@ -813,7 +850,10 @@ class GradioApp:
             issues = self.orchestrator.get_review_issues()
             issues_text = ""
             for i, iss in enumerate(issues):
-                issues_text += f"**{i+1}.** [{iss.get('severity')}] {iss.get('issue')}\n"
+                source = iss.get("source", "规则引擎")
+                source_tag = "🤖 AI深度审查" if source == "AI深度审查" else "🔍 规则引擎"
+                ver_tag = f"（第{iss.get('draft_version', i+1)}版）" if iss.get("draft_version") else ""
+                issues_text += f"**{i+1}.** {source_tag}{ver_tag} [{iss.get('severity')}] {iss.get('issue')}\n"
             if not issues_text:
                 issues_text = "🎉 重新审查完毕，没有遗留问题。"
                 
@@ -990,7 +1030,9 @@ class GradioApp:
             location = iss.get("location", "段落")
             issue = iss.get("issue", "")
             suggestion = iss.get("suggestion", "")
-            lines.append(f"- [{severity}] {location}: {issue} -> {suggestion}")
+            source = iss.get("source", "规则引擎")
+            source_tag = "🤖 " if source == "AI深度审查" else "🔍 "
+            lines.append(f"- {source_tag}[{severity}] {location}: {issue} -> {suggestion}")
         return "\n".join(lines)
 
     # ═══════════════════════════════════════════════════════════════
@@ -1034,7 +1076,13 @@ class GradioApp:
         topic = topic.strip() or "默认主题"
         if not url:
             return "请输入网页URL地址", self.get_topics_list(), topic, [], ""
-            
+
+        # 校验 URL scheme，仅允许 http/https，防止 file:// 等协议带来安全风险
+        from urllib.parse import urlparse
+        parsed = urlparse(url)
+        if parsed.scheme not in ('http', 'https'):
+            return "仅支持 http/https 链接", self.get_topics_list(), topic, [], ""
+
         try:
             importer = URLDocumentImporter()
             doc = importer.import_from_url(url)
@@ -1129,6 +1177,351 @@ class GradioApp:
         return "文档不存在", self.get_topics_list(), []
 
     # ═══════════════════════════════════════════════════════════════
+    # 扩展素材管理 (Reference Library Extensions)
+    # ═══════════════════════════════════════════════════════════════
+    def search_ref_docs(self, query: str, topic: str, fmt: str, source: str, sort_by: str) -> List[List[Any]]:
+        """搜索并过滤参考文档，返回供 HTML 表格渲染的二维数组"""
+        results = []
+        # 如果 topic 是 "全部主题"，则遍历所有；否则只找当前主题
+        topics_to_search = self.url_topics.keys() if topic == "全部主题" or not topic else [topic]
+        
+        for t in topics_to_search:
+            docs = self.url_topics.get(t, [])
+            for doc in docs:
+                # 过滤
+                if query and query.lower() not in doc.title.lower() and query.lower() not in doc.content.lower():
+                    continue
+                if fmt and fmt != "全部格式" and doc.format.value != fmt:
+                    continue
+                if source and source != "全部来源" and doc.source_site != source:
+                    continue
+                
+                # 构建行 [文档ID(用 主题:::标题 表示唯一), 标题, 格式, 字数, 日期, 来源, 所属主题]
+                doc_id = f"{t}:::{doc.title}"
+                date_str = doc.published_date[:10] if doc.published_date else "未知"
+                results.append([doc_id, doc.title, doc.format.value, doc.word_count, date_str, doc.source_site or "未知", t])
+        
+        # 排序
+        if sort_by == "最新发布":
+            results.sort(key=lambda x: x[4], reverse=True)
+        elif sort_by == "字数最多":
+            results.sort(key=lambda x: x[3], reverse=True)
+        elif sort_by == "字数最少":
+            results.sort(key=lambda x: x[3])
+        else: # 默认按相关度/原顺序
+            pass
+            
+        return results
+
+    def get_all_sources_list(self) -> List[str]:
+        """提取所有参考文档中的独立来源"""
+        sources = set()
+        for docs in self.url_topics.values():
+            for doc in docs:
+                if doc.source_site:
+                    sources.add(doc.source_site)
+        return ["全部来源"] + sorted(list(sources))
+
+    def get_all_formats_list(self) -> List[str]:
+        """提取所有文档格式"""
+        return ["全部格式"] + [f.value for f in DocumentFormat]
+
+    def batch_delete_ref_docs(self, doc_ids_str: str) -> Tuple[str, List[str], List[str]]:
+        """批量删除文档"""
+        if not doc_ids_str:
+            return "未选择任何文档", self.get_topics_list(), []
+        
+        doc_ids = [did.strip() for did in doc_ids_str.split(",") if did.strip()]
+        deleted_count = 0
+        for doc_id in doc_ids:
+            if ":::" not in doc_id: continue
+            topic, title = doc_id.split(":::", 1)
+            if topic in self.url_topics:
+                docs = self.url_topics[topic]
+                target = next((d for d in docs if d.title == title), None)
+                if target:
+                    docs.remove(target)
+                    deleted_count += 1
+                    if not docs:
+                        del self.url_topics[topic]
+        
+        if deleted_count > 0:
+            self._save_persistent_data()
+            return f"成功删除 {deleted_count} 篇文档", self.get_topics_list(), []
+        return "未能删除任何文档", self.get_topics_list(), []
+
+    def get_doc_detail_markdown(self, doc_id: str) -> Tuple[str, str]:
+        """获取带有多维度的详细文档信息（Markdown 格式）"""
+        if not doc_id or ":::" not in doc_id:
+            return "", "请选择文档查看详情"
+            
+        topic, title = doc_id.split(":::", 1)
+        if topic not in self.url_topics:
+            return "", "找不到文档对应的主题"
+            
+        doc = next((d for d in self.url_topics[topic] if d.title == title), None)
+        if not doc:
+            return "", "文档已被删除或不存在"
+            
+        patterns = "、".join(doc.style_patterns) if doc.style_patterns else "暂无智能提取特征"
+        meta_md = f"""### {doc.title}
+**作者/机构**: {doc.author or '未知'} | **发布日期**: {doc.published_date or '未知'} | **来源**: {doc.source_site or '未知'}
+**格式**: {doc.format.value} | **字数**: {doc.word_count} | **所属主题**: {topic}
+**语言特征**: {patterns}"""
+        
+        if doc.url:
+            meta_md += f" | **原文链接**: [{doc.url}]({doc.url})"
+            
+        return doc.title, meta_md
+
+    def create_topic(self, name: str) -> Tuple[str, List[str]]:
+        name = name.strip()
+        if not name:
+            return "主题名不能为空", self.get_topics_list()
+        if name in self.url_topics:
+            return "主题已存在", self.get_topics_list()
+        self.url_topics[name] = []
+        self._save_persistent_data()
+        return f"主题【{name}】创建成功", self.get_topics_list()
+
+    def rename_topic(self, old_name: str, new_name: str) -> Tuple[str, List[str]]:
+        new_name = new_name.strip()
+        if old_name not in self.url_topics:
+            return "原主题不存在", self.get_topics_list()
+        if not new_name or new_name in self.url_topics:
+            return "新主题名无效或已存在", self.get_topics_list()
+        self.url_topics[new_name] = self.url_topics.pop(old_name)
+        self._save_persistent_data()
+        return f"已重命名为【{new_name}】", self.get_topics_list()
+
+    def delete_topic(self, name: str) -> Tuple[str, List[str]]:
+        if name in self.url_topics:
+            doc_count = len(self.url_topics[name])
+            del self.url_topics[name]
+            self._save_persistent_data()
+            return f"主题【{name}】及其 {doc_count} 篇文档已删除", self.get_topics_list()
+        return "主题不存在", self.get_topics_list()
+
+    # ═══════════════════════════════════════════════════════════════
+    # 其他后端模块扩展方法
+    # ═══════════════════════════════════════════════════════════════
+    def get_doc_type_recommendation(self) -> str:
+        """根据当前 brief 获取推荐文种"""
+        if not self.orchestrator or not self.orchestrator.brief:
+            return "完成上一阶段问卷后，系统将自动推荐合适文种。"
+        
+        try:
+            # 懒加载 DocumentTypeIdentifier 以避免作用域问题
+            from src.core.document_type import DocumentTypeIdentifier
+            if not hasattr(self.orchestrator, 'doc_identifier') or self.orchestrator.doc_identifier is None:
+                self.orchestrator.doc_identifier = DocumentTypeIdentifier()
+                
+            recommendations = self.orchestrator.doc_identifier.identify(self.orchestrator.brief)
+            if not recommendations:
+                return "暂无文种推荐"
+                
+            res = "### 💡 智能文种推荐\n"
+            for i, (profile, score) in enumerate(recommendations[:3]):
+                confidence = score * 100
+                res += f"**{i+1}. {profile.name_cn}** (匹配度: {confidence:.0f}%)\n"
+                res += f"> 结构模板：{profile.structure_mode}\n\n"
+            return res
+        except Exception as e:
+            return f"推荐失败: {e}"
+
+    def get_recommended_doc_enum(self) -> Optional[DocumentType]:
+        """
+        根据问卷路由 subtype 与识别结果，返回适合下拉框默认值的文种枚举。
+        subtype 是用户路由阶段的确定性强信号，优先映射；识别结果兜底。
+        均无法映射到下拉框 10 个选项时返回 None（保持下拉框当前值）。
+        """
+        if not self.orchestrator or not self.orchestrator.brief:
+            return None
+
+        # 1) 路由 subtype 优先映射（仅映射到下拉框选项范围内的文种）
+        subtype_to_doc = {
+            "news_brief": DocumentType.NEWS_BRIEF,
+            "feature": DocumentType.FEATURE,
+            "sidelight": DocumentType.SIDELIGHT,
+            "research_report": DocumentType.RESEARCH_REPORT,
+            "bulletin": DocumentType.BULLETIN,
+            "minutes": DocumentType.MEETING_MINUTES,
+            # 行文方向：下行/上行/平行文分别映射到下拉框中语义最接近的文种
+            "upward": DocumentType.REQUEST,
+            "downward": DocumentType.NOTIFICATION,
+            "parallel": DocumentType.LETTER,
+        }
+        doc = subtype_to_doc.get((self.orchestrator.brief.subtype or "").strip())
+        if doc is not None:
+            return doc
+
+        # 2) 识别结果兜底：取第一个存在于下拉框选项中的推荐
+        try:
+            from src.core.document_type import DocumentTypeIdentifier
+            if not hasattr(self.orchestrator, 'doc_identifier') or self.orchestrator.doc_identifier is None:
+                self.orchestrator.doc_identifier = DocumentTypeIdentifier()
+            recommendations = self.orchestrator.doc_identifier.identify(self.orchestrator.brief)
+            for profile, score in recommendations:
+                if score > 0 and profile.doc_type in DOC_TYPE_ENUM_TO_LABEL:
+                    return profile.doc_type
+        except Exception:
+            pass
+        return None
+
+    def get_style_detail_display(self, style_lbl: str, intensity: float) -> Tuple[str, str]:
+        """获取风格特征详情和混合建议"""
+        if not style_lbl:
+            return "请选择主要风格", "无混合建议"
+            
+        style_enum = None
+        for k, v in STYLE_LABEL_TO_ENUM.items():
+            if k == style_lbl:
+                style_enum = v
+                break
+                
+        if not style_enum:
+            return "未知的风格", "无混合建议"
+            
+        try:
+            from src.core.style_adapter import STYLE_PROFILES
+            profile = STYLE_PROFILES.get(style_enum)
+            if not profile:
+                return "无此风格详情", ""
+                
+            # 根据强度调整显示
+            intensity_desc = "标准" if 0.4 <= intensity <= 0.7 else "强烈" if intensity > 0.7 else "微弱"
+            
+            detail = f"""### {profile.name} 特征详情 (当前强度: {intensity_desc})
+- **情感基调**: {profile.tone}
+- **语言特征**: {', '.join(profile.language_features)}
+- **禁止模式**: {', '.join(profile.forbidden_patterns)}
+- **文学度**: {profile.literary_level} | **数据密度**: {profile.data_density} | **政策关联度**: {profile.policy_relevance}"""
+
+            blend = "无需混合建议"
+            if self.orchestrator and self.orchestrator.brief and self.orchestrator.brief.secondary_audiences:
+                try:
+                    b = self.style_adapter.suggest_blend(self.orchestrator.brief.primary_audience, self.orchestrator.brief.purpose, self.orchestrator.brief.secondary_audiences)
+                    blend = f"### 风格混合建议\n{b.display()}\n*建议原因*: {b.reasoning}"
+                except Exception:
+                    pass
+            
+            return detail, blend
+        except Exception as e:
+            return f"获取详情失败: {e}", ""
+
+    def get_token_stats_display(self) -> str:
+        """获取交付阶段的 Token 与成本统计"""
+        if not self.orchestrator:
+            return "无统计数据"
+        try:
+            stats = self.orchestrator.get_api_stats()
+            opt_report = stats.get("optimization_report", "暂无优化报告")
+            calls = stats.get("api_calls", 0)
+            fails = stats.get("api_failures", 0)
+            return f"### 📊 API 请求与成本优化统计\n- 总调用成功次数: {calls}\n- 失败重试次数: {fails}\n\n{opt_report}"
+        except Exception as e:
+            return f"统计获取失败: {e}"
+
+    def get_review_history_display(self) -> str:
+        """获取审查历史的时间线展示"""
+        if not self.orchestrator or not hasattr(self.orchestrator.reviewer, 'review_history'):
+            return "暂无审查历史"
+            
+        history = self.orchestrator.reviewer.review_history
+        if not history:
+            return "尚未执行多维审查"
+            
+        res = "### 🔍 多维度智能审查轨迹\n"
+        for i, h in enumerate(history):
+            status = "✅ 通过" if h.passed else f"⚠️ 发现 {len(h.findings)} 处问题"
+            res += f"**轮次 {i+1}：{h.round_name}** | 得分：{h.overall_score:.1f} | 状态：{status}\n"
+            if h.findings:
+                for f in h.findings[:2]:  # 最多展示2条代表性发现
+                    res += f"> - [{f.severity.value}] {f.issue}\n"
+                if len(h.findings) > 2:
+                    res += f"> - ...及其他 {len(h.findings)-2} 处建议\n"
+            res += "\n"
+        return res
+
+    def get_kb_diagnostics_display(self, text: str) -> str:
+        """获取知识库对当前草稿的诊断结果"""
+        if not text:
+            return "请先在上方输入内容或生成草稿。"
+            
+        try:
+            diags = self.knowledge_base.diagnose_text(text)
+            if not diags:
+                return "✅ 知识库合规性检查通过，未发现常见错敏词。"
+                
+            res = "### 🚨 知识库诊断结果\n"
+            for d in diags:
+                res += f"- **检测项**: `{d.get('error_key', '未知')}`\n  - **诊断**: {d.get('diagnosis', '')}\n  - **建议**: {d.get('prescription', '')}\n\n"
+            return res
+        except Exception as e:
+            return f"诊断失败: {e}"
+
+    def get_vocab_corpus_summary(self) -> str:
+        """获取词汇语料库摘要"""
+        if not self.current_project_id:
+            return "请先创建并选择项目"
+            
+        try:
+            proj = self.pdb.get_project(self.current_project_id)
+            if not proj: return "项目不存在"
+            if not proj.vocabulary_corpus:
+                return "尚未创建项目专属词汇语料库"
+            vc = proj.vocabulary_corpus
+            res = f"**个性化词汇语料库**\n\n"
+            res += f"- 必用关键词 ({len(vc.required_keywords)}): {', '.join(vc.required_keywords) if vc.required_keywords else '无'}\n"
+            res += f"- 禁用违禁词 ({len(vc.forbidden_words)}): {', '.join(vc.forbidden_words) if vc.forbidden_words else '无'}\n"
+            res += f"- 自定义术语 ({len(vc.custom_terms)}): {', '.join(vc.custom_terms) if vc.custom_terms else '无'}\n"
+            return res
+        except Exception as e:
+            return f"获取失败: {e}"
+
+    def add_vocab_keyword(self, word: str) -> Tuple[str, str]:
+        if not word.strip() or not self.current_project_id: return "无效输入或未选择项目", self.get_vocab_corpus_summary()
+        self.pdb.add_required_keyword(self.current_project_id, word.strip())
+        self._save_persistent_data()
+        return f"已添加必用词: {word}", self.get_vocab_corpus_summary()
+        
+    def add_vocab_forbidden(self, word: str) -> Tuple[str, str]:
+        if not word.strip() or not self.current_project_id: return "无效输入或未选择项目", self.get_vocab_corpus_summary()
+        self.pdb.add_forbidden_word(self.current_project_id, word.strip())
+        self._save_persistent_data()
+        return f"已添加禁用词: {word}", self.get_vocab_corpus_summary()
+
+    def get_agent_coordination_report(self) -> str:
+        """获取 Agent Hub 多智能体协商详情卡片"""
+        if not self.orchestrator or not self.orchestrator.coordinator:
+            return "多智能体尚未初始化"
+        try:
+            report = self.orchestrator.coordinator.get_coordination_report()
+            stats = report.get('communication_stats', {})
+            total = stats.get('total_messages', 0)
+            
+            res = f"### ⚡ 多智能体协商过程全景监控\n**总消息流转**: {total} 条\n\n"
+            
+            debates = report.get('recent_debates', [])
+            if debates:
+                res += "#### ⚔️ 核心分歧与共识\n"
+                for d in debates:
+                    res += f"**讨论点**: {d.get('topic')}\n"
+                    res += f"- 🖊️ Writer 视角: {d.get('writer')}\n"
+                    res += f"- 🔍 Reviewer 视角: {d.get('reviewer')}\n"
+                    res += f"- 🤝 达成共识 (经 {d.get('rounds')} 轮): {d.get('consensus')}\n\n"
+                    
+            consults = report.get('recent_consultations', [])
+            if consults:
+                res += "#### 🏛️ 专家智囊团会商摘要\n"
+                for c in consults:
+                    res += f"- 议题 `{c.get('topic', '未知')}` : 收获 {len(c.get('responses', {}))} 份专家意见，Orchestrator 采纳策略：{c.get('decision', '未知')}\n"
+                    
+            return res
+        except Exception as e:
+            return f"获取协商报告失败: {e}"
+
+    # ═══════════════════════════════════════════════════════════════
     # API配置管理 (LLM API settings)
     # ═══════════════════════════════════════════════════════════════
     def save_llm_config_action(self, prov: str, url: str, key: str, mdl: str, temp: float, tokens: int) -> str:
@@ -1145,14 +1538,26 @@ class GradioApp:
             self.api_manager.save()
             return "LLM 接口参数保存并已默认开启！"
         except Exception as e:
-            return "保存失败，请检查网络连接后重试"
+            return f"保存失败，请检查网络连接后重试: {e}"
 
     def test_llm_connection_action(self) -> str:
         try:
             res = self.api_manager.test_connection()
             if res.get("success"):
                 return f"连接成功 — 模型响应正常：{res.get('message')}"
+            # 优先使用结构化状态码，字符串匹配仅作 fallback
+            status_code = res.get("status_code")
             err_msg = res.get('message', '未知错误')
+            if status_code:
+                if status_code in (401, 403):
+                    return "认证失败 — API Key 无效或已过期，请检查密钥"
+                if status_code == 404:
+                    return "端点不存在 — API Base URL 或模型名称可能有误"
+                if status_code == 429:
+                    return "请求频率过高，请稍后重试"
+                if status_code >= 500:
+                    return "API 服务器内部错误，请稍后重试"
+            # fallback: 字符串匹配
             if 'timeout' in str(err_msg).lower():
                 return "连接超时 — 请检查 API 地址是否正确，或网络是否需要代理"
             if '401' in str(err_msg) or '403' in str(err_msg):
@@ -1161,7 +1566,20 @@ class GradioApp:
                 return "端点不存在 — API Base URL 或模型名称可能有误"
             return f"连接失败 — {err_msg}"
         except Exception as e:
-            return f"连接测试异常 — 请确认 API 地址可访问：{str(e)[:200]}"
+            # 优先从异常对象提取 HTTP 状态码（如 requests.HTTPError 携带的 response）
+            resp = getattr(e, "response", None)
+            status_code = getattr(resp, "status_code", None) if resp is not None else None
+            if status_code in (401, 403):
+                return "认证失败 — API Key 无效或已过期，请检查密钥"
+            if status_code == 404:
+                return "端点不存在 — API Base URL 或模型名称可能有误"
+            if status_code == 429:
+                return "请求频率过高，请稍后重试"
+            # fallback: 字符串匹配
+            err_str = str(e)
+            if 'timeout' in err_str.lower():
+                return "连接超时 — 请检查 API 地址是否正确，或网络是否需要代理"
+            return f"连接测试异常 — 请确认 API 地址可访问：{err_str[:200]}"
 
     def load_api_config(self) -> Tuple[str, str, str, str, float, int, str]:
         """加载当前 API 配置"""
@@ -1246,17 +1664,265 @@ THEME_CLASSIC_HTML = """
 
 THEME_STARRY_NIGHT_HTML = """
 <style>
+    /* 星月夜：背景改为内联 SVG（SMIL 动画真正执行），容器透明以透出背景 */
     .gradio-container {
-        background-image: url('data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%220%200%201000%201000%22%20preserveAspectRatio%3D%22xMidYMid%20slice%22%3E%0A%20%20%3Cdefs%3E%0A%20%20%20%20%3Cfilter%20id%3D%22blurLg%22%3E%3CfeGaussianBlur%20stdDeviation%3D%2280%22%20/%3E%3C/filter%3E%0A%20%20%20%20%3Cfilter%20id%3D%22blurMd%22%3E%3CfeGaussianBlur%20stdDeviation%3D%2240%22%20/%3E%3C/filter%3E%0A%20%20%20%20%3Cfilter%20id%3D%22blurSm%22%3E%3CfeGaussianBlur%20stdDeviation%3D%2210%22%20/%3E%3C/filter%3E%0A%20%20%20%20%0A%20%20%20%20%3CradialGradient%20id%3D%22swirlLight%22%20cx%3D%2250%25%22%20cy%3D%2250%25%22%20r%3D%2250%25%22%3E%0A%20%20%20%20%20%20%3Cstop%20offset%3D%220%25%22%20stop-color%3D%22%234F7EA4%22%20stop-opacity%3D%220.8%22%20/%3E%0A%20%20%20%20%20%20%3Cstop%20offset%3D%22100%25%22%20stop-color%3D%22%23003153%22%20stop-opacity%3D%220%22%20/%3E%0A%20%20%20%20%3C/radialGradient%3E%0A%20%20%20%20%0A%20%20%20%20%3CradialGradient%20id%3D%22swirlMid%22%20cx%3D%2250%25%22%20cy%3D%2250%25%22%20r%3D%2250%25%22%3E%0A%20%20%20%20%20%20%3Cstop%20offset%3D%220%25%22%20stop-color%3D%22%232a6a9b%22%20stop-opacity%3D%220.7%22%20/%3E%0A%20%20%20%20%20%20%3Cstop%20offset%3D%22100%25%22%20stop-color%3D%22%2300213B%22%20stop-opacity%3D%220%22%20/%3E%0A%20%20%20%20%3C/radialGradient%3E%0A%20%20%20%20%0A%20%20%20%20%3CradialGradient%20id%3D%22swirlDark%22%20cx%3D%2250%25%22%20cy%3D%2250%25%22%20r%3D%2250%25%22%3E%0A%20%20%20%20%20%20%3Cstop%20offset%3D%220%25%22%20stop-color%3D%22%23005085%22%20stop-opacity%3D%220.6%22%20/%3E%0A%20%20%20%20%20%20%3Cstop%20offset%3D%22100%25%22%20stop-color%3D%22%2305101a%22%20stop-opacity%3D%220%22%20/%3E%0A%20%20%20%20%3C/radialGradient%3E%0A%0A%20%20%20%20%3CradialGradient%20id%3D%22starHalo%22%20cx%3D%2250%25%22%20cy%3D%2250%25%22%20r%3D%2250%25%22%3E%0A%20%20%20%20%20%20%3Cstop%20offset%3D%220%25%22%20stop-color%3D%22%23DFCB5C%22%20stop-opacity%3D%220.95%22%20/%3E%0A%20%20%20%20%20%20%3Cstop%20offset%3D%2220%25%22%20stop-color%3D%22%23DFCB5C%22%20stop-opacity%3D%220.6%22%20/%3E%0A%20%20%20%20%20%20%3Cstop%20offset%3D%2250%25%22%20stop-color%3D%22%231C3765%22%20stop-opacity%3D%220.3%22%20/%3E%0A%20%20%20%20%20%20%3Cstop%20offset%3D%22100%25%22%20stop-color%3D%22%231C3765%22%20stop-opacity%3D%220%22%20/%3E%0A%20%20%20%20%3C/radialGradient%3E%0A%20%20%20%20%0A%20%20%20%20%3CradialGradient%20id%3D%22moonHalo%22%20cx%3D%2250%25%22%20cy%3D%2250%25%22%20r%3D%2250%25%22%3E%0A%20%20%20%20%20%20%3Cstop%20offset%3D%220%25%22%20stop-color%3D%22%23E7D674%22%20stop-opacity%3D%221%22%20/%3E%0A%20%20%20%20%20%20%3Cstop%20offset%3D%2215%25%22%20stop-color%3D%22%23DFCB5C%22%20stop-opacity%3D%220.8%22%20/%3E%0A%20%20%20%20%20%20%3Cstop%20offset%3D%2240%25%22%20stop-color%3D%22%23648BA8%22%20stop-opacity%3D%220.4%22%20/%3E%0A%20%20%20%20%20%20%3Cstop%20offset%3D%22100%25%22%20stop-color%3D%22%231C3765%22%20stop-opacity%3D%220%22%20/%3E%0A%20%20%20%20%3C/radialGradient%3E%0A%20%20%3C/defs%3E%0A%0A%20%20%3Crect%20width%3D%22100%25%22%20height%3D%22100%25%22%20fill%3D%22%2300172D%22%20/%3E%0A%0A%20%20%3C%21--%20Background%20Stars%20--%3E%0A%20%20%3Cg%20fill%3D%22%23FFF%22%3E%0A%20%20%20%20%3Ccircle%20cx%3D%22100%22%20cy%3D%22200%22%20r%3D%221.5%22%20opacity%3D%220.8%22/%3E%0A%20%20%20%20%3Ccircle%20cx%3D%22250%22%20cy%3D%2280%22%20r%3D%221%22%20opacity%3D%220.6%22/%3E%0A%20%20%20%20%3Ccircle%20cx%3D%22450%22%20cy%3D%22150%22%20r%3D%222%22%20opacity%3D%220.9%22/%3E%0A%20%20%20%20%3Ccircle%20cx%3D%22650%22%20cy%3D%2290%22%20r%3D%221.5%22%20opacity%3D%220.5%22/%3E%0A%20%20%20%20%3Ccircle%20cx%3D%22850%22%20cy%3D%22120%22%20r%3D%222.5%22%20opacity%3D%220.8%22/%3E%0A%20%20%20%20%3Ccircle%20cx%3D%22950%22%20cy%3D%22250%22%20r%3D%221%22%20opacity%3D%220.7%22/%3E%0A%20%20%20%20%3Ccircle%20cx%3D%22150%22%20cy%3D%22350%22%20r%3D%222%22%20opacity%3D%220.9%22/%3E%0A%20%20%20%20%3Ccircle%20cx%3D%22350%22%20cy%3D%22450%22%20r%3D%221.5%22%20opacity%3D%220.6%22/%3E%0A%20%20%20%20%3Ccircle%20cx%3D%22550%22%20cy%3D%22350%22%20r%3D%222.5%22%20opacity%3D%220.8%22/%3E%0A%20%20%20%20%3Ccircle%20cx%3D%22750%22%20cy%3D%22480%22%20r%3D%221%22%20opacity%3D%220.5%22/%3E%0A%20%20%20%20%3Ccircle%20cx%3D%22920%22%20cy%3D%22380%22%20r%3D%222%22%20opacity%3D%220.7%22/%3E%0A%20%20%20%20%3Ccircle%20cx%3D%2250%22%20cy%3D%22550%22%20r%3D%221.5%22%20opacity%3D%220.8%22/%3E%0A%20%20%20%20%3Ccircle%20cx%3D%22250%22%20cy%3D%22650%22%20r%3D%222%22%20opacity%3D%220.6%22/%3E%0A%20%20%20%20%3Ccircle%20cx%3D%22450%22%20cy%3D%22750%22%20r%3D%221%22%20opacity%3D%220.9%22/%3E%0A%20%20%20%20%3Ccircle%20cx%3D%22650%22%20cy%3D%22650%22%20r%3D%222.5%22%20opacity%3D%220.5%22/%3E%0A%20%20%20%20%3Ccircle%20cx%3D%22850%22%20cy%3D%22750%22%20r%3D%221.5%22%20opacity%3D%220.8%22/%3E%0A%20%20%20%20%3Ccircle%20cx%3D%22950%22%20cy%3D%22600%22%20r%3D%221%22%20opacity%3D%220.7%22/%3E%0A%20%20%20%20%3Ccircle%20cx%3D%22150%22%20cy%3D%22850%22%20r%3D%222%22%20opacity%3D%220.9%22/%3E%0A%20%20%20%20%3Ccircle%20cx%3D%22350%22%20cy%3D%22950%22%20r%3D%221.5%22%20opacity%3D%220.6%22/%3E%0A%20%20%20%20%3Ccircle%20cx%3D%22550%22%20cy%3D%22850%22%20r%3D%222.5%22%20opacity%3D%220.8%22/%3E%0A%20%20%20%20%3Ccircle%20cx%3D%22750%22%20cy%3D%22950%22%20r%3D%221%22%20opacity%3D%220.5%22/%3E%0A%20%20%20%20%3Ccircle%20cx%3D%22920%22%20cy%3D%22880%22%20r%3D%222%22%20opacity%3D%220.7%22/%3E%0A%20%20%3C/g%3E%0A%0A%20%20%3C%21--%20Flowing%20Swirls%20--%3E%0A%20%20%3Cg%3E%0A%20%20%20%20%3CanimateTransform%20attributeName%3D%22transform%22%20type%3D%22rotate%22%20from%3D%220%20300%20300%22%20to%3D%22360%20300%20300%22%20dur%3D%2245s%22%20repeatCount%3D%22indefinite%22%20/%3E%0A%20%20%20%20%3Cellipse%20cx%3D%22300%22%20cy%3D%22300%22%20rx%3D%22450%22%20ry%3D%22200%22%20fill%3D%22url%28%23swirlLight%29%22%20filter%3D%22url%28%23blurLg%29%22%20transform%3D%22rotate%2830%20300%20300%29%22%20/%3E%0A%20%20%20%20%3Cellipse%20cx%3D%22300%22%20cy%3D%22300%22%20rx%3D%22300%22%20ry%3D%22150%22%20fill%3D%22url%28%23swirlMid%29%22%20filter%3D%22url%28%23blurMd%29%22%20transform%3D%22rotate%28-20%20300%20300%29%22%20/%3E%0A%20%20%3C/g%3E%0A%0A%20%20%3Cg%3E%0A%20%20%20%20%3CanimateTransform%20attributeName%3D%22transform%22%20type%3D%22rotate%22%20from%3D%22360%20750%20400%22%20to%3D%220%20750%20400%22%20dur%3D%2260s%22%20repeatCount%3D%22indefinite%22%20/%3E%0A%20%20%20%20%3Cellipse%20cx%3D%22750%22%20cy%3D%22400%22%20rx%3D%22500%22%20ry%3D%22250%22%20fill%3D%22url%28%23swirlMid%29%22%20filter%3D%22url%28%23blurLg%29%22%20transform%3D%22rotate%28-45%20750%20400%29%22%20/%3E%0A%20%20%20%20%3Cellipse%20cx%3D%22750%22%20cy%3D%22400%22%20rx%3D%22200%22%20ry%3D%22400%22%20fill%3D%22url%28%23swirlLight%29%22%20filter%3D%22url%28%23blurMd%29%22%20transform%3D%22rotate%2815%20750%20400%29%22%20/%3E%0A%20%20%3C/g%3E%0A%0A%20%20%3Cg%3E%0A%20%20%20%20%3CanimateTransform%20attributeName%3D%22transform%22%20type%3D%22rotate%22%20from%3D%220%20400%20800%22%20to%3D%22360%20400%20800%22%20dur%3D%2250s%22%20repeatCount%3D%22indefinite%22%20/%3E%0A%20%20%20%20%3Cellipse%20cx%3D%22400%22%20cy%3D%22800%22%20rx%3D%22400%22%20ry%3D%22250%22%20fill%3D%22url%28%23swirlDark%29%22%20filter%3D%22url%28%23blurLg%29%22%20transform%3D%22rotate%2860%20400%20800%29%22%20/%3E%0A%20%20%3C/g%3E%0A%0A%20%20%3C%21--%20The%20Moon%20--%3E%0A%20%20%3Cg%3E%0A%20%20%20%20%3CanimateTransform%20attributeName%3D%22transform%22%20type%3D%22rotate%22%20from%3D%220%20850%20200%22%20to%3D%22360%20850%20200%22%20dur%3D%2230s%22%20repeatCount%3D%22indefinite%22%20/%3E%0A%20%20%20%20%3Ccircle%20cx%3D%22850%22%20cy%3D%22200%22%20r%3D%22180%22%20fill%3D%22url%28%23moonHalo%29%22%20filter%3D%22url%28%23blurSm%29%22%20/%3E%0A%20%20%20%20%3C%21--%20inner%20swirl%20inside%20moon%20--%3E%0A%20%20%20%20%3Cellipse%20cx%3D%22850%22%20cy%3D%22200%22%20rx%3D%22140%22%20ry%3D%2270%22%20fill%3D%22url%28%23swirlLight%29%22%20opacity%3D%220.3%22%20filter%3D%22url%28%23blurSm%29%22%20transform%3D%22rotate%2845%20850%20200%29%22%20/%3E%0A%20%20%3C/g%3E%0A%0A%20%20%3C%21--%20Stars%20--%3E%0A%20%20%3Cg%3E%0A%20%20%20%20%3CanimateTransform%20attributeName%3D%22transform%22%20type%3D%22rotate%22%20from%3D%22360%20200%20150%22%20to%3D%220%20200%20150%22%20dur%3D%2225s%22%20repeatCount%3D%22indefinite%22%20/%3E%0A%20%20%20%20%3Ccircle%20cx%3D%22200%22%20cy%3D%22150%22%20r%3D%22120%22%20fill%3D%22url%28%23starHalo%29%22%20filter%3D%22url%28%23blurSm%29%22%20/%3E%0A%20%20%20%20%3Cellipse%20cx%3D%22200%22%20cy%3D%22150%22%20rx%3D%2290%22%20ry%3D%2240%22%20fill%3D%22url%28%23swirlLight%29%22%20opacity%3D%220.4%22%20filter%3D%22url%28%23blurSm%29%22%20transform%3D%22rotate%28-30%20200%20150%29%22%20/%3E%0A%20%20%3C/g%3E%0A%0A%20%20%3Cg%3E%0A%20%20%20%20%EF%BF%BDnimateTransform%20attributeName%3D%22transform%22%20type%3D%22rotate%22%20from%3D%220%20150%20550%22%20to%3D%22360%20150%20550%22%20dur%3D%2222s%22%20repeatCount%3D%22indefinite%22%20/%3E%0A%20%20%20%20%3Ccircle%20cx%3D%22150%22%20cy%3D%22550%22%20r%3D%22100%22%20fill%3D%22url%28%23starHalo%29%22%20filter%3D%22url%28%23blurSm%29%22%20/%3E%0A%20%20%3C/g%3E%0A%0A%20%20%3Cg%3E%0A%20%20%20%20%3CanimateTransform%20attributeName%3D%22transform%22%20type%3D%22rotate%22%20from%3D%22360%20500%20450%22%20to%3D%220%20500%20450%22%20dur%3D%2235s%22%20repeatCount%3D%22indefinite%22%20/%3E%0A%20%20%20%20%3Ccircle%20cx%3D%22500%22%20cy%3D%22450%22%20r%3D%2280%22%20fill%3D%22url%28%23starHalo%29%22%20filter%3D%22url%28%23blurSm%29%22%20opacity%3D%220.8%22%20/%3E%0A%20%20%3C/g%3E%0A%0A%20%20%3Cg%3E%0A%20%20%20%20%3CanimateTransform%20attributeName%3D%22transform%22%20type%3D%22rotate%22%20from%3D%220%20750%20750%22%20to%3D%22360%20750%20750%22%20dur%3D%2228s%22%20repeatCount%3D%22indefinite%22%20/%3E%0A%20%20%20%20%3Ccircle%20cx%3D%22750%22%20cy%3D%22750%22%20r%3D%22110%22%20fill%3D%22url%28%23starHalo%29%22%20filter%3D%22url%28%23blurSm%29%22%20/%3E%0A%20%20%20%20%3Cellipse%20cx%3D%22750%22%20cy%3D%22750%22%20rx%3D%2280%22%20ry%3D%2230%22%20fill%3D%22url%28%23swirlLight%29%22%20opacity%3D%220.3%22%20filter%3D%22url%28%23blurSm%29%22%20transform%3D%22rotate%2870%20750%20750%29%22%20/%3E%0A%20%20%3C/g%3E%0A%3C/svg%3E') !important;
-        background-size: cover !important;
-        background-position: center !important;
+        background: transparent !important;
     }
-    .gradio-container::before {
-        content: none !important;
-    }
+    .gradio-container::before,
     .gradio-container::after {
         content: none !important;
     }
+    #starry-night-bg {
+        position: fixed;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        z-index: -1;
+        pointer-events: none;
+    }
+    @media (prefers-reduced-motion: reduce) {
+        #starry-night-bg animateTransform,
+        #starry-night-bg animate,
+        #starry-night-bg animateMotion {
+            display: none !important;
+        }
+    }
+</style>
+<svg id="starry-night-bg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 1000" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+  <defs>
+    <filter id="blurLg"><feGaussianBlur stdDeviation="24"/></filter>
+    <filter id="blurMd"><feGaussianBlur stdDeviation="12"/></filter>
+    <filter id="blurSm"><feGaussianBlur stdDeviation="6"/></filter>
+    <radialGradient id="swirlLight" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#4F7EA4" stop-opacity="0.8"/>
+      <stop offset="100%" stop-color="#003153" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="swirlMid" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#2a6a9b" stop-opacity="0.7"/>
+      <stop offset="100%" stop-color="#00213B" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="swirlDark" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#005085" stop-opacity="0.6"/>
+      <stop offset="100%" stop-color="#05101a" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="starHalo" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#DFCB5C" stop-opacity="0.95"/>
+      <stop offset="20%" stop-color="#DFCB5C" stop-opacity="0.6"/>
+      <stop offset="50%" stop-color="#1C3765" stop-opacity="0.3"/>
+      <stop offset="100%" stop-color="#1C3765" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="moonHalo" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#E7D674" stop-opacity="1"/>
+      <stop offset="15%" stop-color="#DFCB5C" stop-opacity="0.8"/>
+      <stop offset="40%" stop-color="#648BA8" stop-opacity="0.4"/>
+      <stop offset="100%" stop-color="#1C3765" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <rect width="100%" height="100%" fill="#00172D"/>
+
+  <!-- 背景星点（静态，零成本） -->
+  <g fill="#FFF">
+    <circle cx="100" cy="200" r="1.5" opacity="0.8"/>
+    <circle cx="250" cy="80" r="1" opacity="0.6"/>
+    <circle cx="450" cy="150" r="2" opacity="0.9"/>
+    <circle cx="650" cy="90" r="1.5" opacity="0.5"/>
+    <circle cx="850" cy="120" r="2.5" opacity="0.8"/>
+    <circle cx="950" cy="250" r="1" opacity="0.7"/>
+    <circle cx="150" cy="350" r="2" opacity="0.9"/>
+    <circle cx="350" cy="450" r="1.5" opacity="0.6"/>
+    <circle cx="550" cy="350" r="2.5" opacity="0.8"/>
+    <circle cx="750" cy="480" r="1" opacity="0.5"/>
+    <circle cx="920" cy="380" r="2" opacity="0.7"/>
+    <circle cx="50" cy="550" r="1.5" opacity="0.8"/>
+    <circle cx="250" cy="650" r="2" opacity="0.6"/>
+    <circle cx="450" cy="750" r="1" opacity="0.9"/>
+    <circle cx="650" cy="650" r="2.5" opacity="0.5"/>
+    <circle cx="850" cy="750" r="1.5" opacity="0.8"/>
+    <circle cx="950" cy="600" r="1" opacity="0.7"/>
+    <circle cx="150" cy="850" r="2" opacity="0.9"/>
+    <circle cx="350" cy="950" r="1.5" opacity="0.6"/>
+    <circle cx="550" cy="850" r="2.5" opacity="0.8"/>
+    <circle cx="750" cy="950" r="1" opacity="0.5"/>
+    <circle cx="920" cy="880" r="2" opacity="0.7"/>
+  </g>
+
+  <!-- 流动漩涡（SMIL 旋转 + 模糊光晕） -->
+  <g>
+    <animateTransform attributeName="transform" type="rotate" from="0 300 300" to="360 300 300" dur="45s" repeatCount="indefinite"/>
+    <ellipse cx="300" cy="300" rx="450" ry="200" fill="url(#swirlLight)" filter="url(#blurLg)" transform="rotate(30 300 300)"/>
+    <ellipse cx="300" cy="300" rx="300" ry="150" fill="url(#swirlMid)" filter="url(#blurMd)" transform="rotate(-20 300 300)"/>
+  </g>
+  <g>
+    <animateTransform attributeName="transform" type="rotate" from="360 750 400" to="0 750 400" dur="60s" repeatCount="indefinite"/>
+    <ellipse cx="750" cy="400" rx="500" ry="250" fill="url(#swirlMid)" filter="url(#blurLg)" transform="rotate(-45 750 400)"/>
+    <ellipse cx="750" cy="400" rx="200" ry="400" fill="url(#swirlLight)" filter="url(#blurMd)" transform="rotate(15 750 400)"/>
+  </g>
+  <g>
+    <animateTransform attributeName="transform" type="rotate" from="0 400 800" to="360 400 800" dur="50s" repeatCount="indefinite"/>
+    <ellipse cx="400" cy="800" rx="400" ry="250" fill="url(#swirlDark)" filter="url(#blurLg)" transform="rotate(60 400 800)"/>
+  </g>
+
+  <!-- 月亮 -->
+  <g>
+    <animateTransform attributeName="transform" type="rotate" from="0 850 200" to="360 850 200" dur="30s" repeatCount="indefinite"/>
+    <circle cx="850" cy="200" r="180" fill="url(#moonHalo)" filter="url(#blurSm)"/>
+    <ellipse cx="850" cy="200" rx="140" ry="70" fill="url(#swirlLight)" opacity="0.3" filter="url(#blurSm)" transform="rotate(45 850 200)"/>
+  </g>
+
+  <!-- 星晕 -->
+  <g>
+    <animateTransform attributeName="transform" type="rotate" from="360 200 150" to="0 200 150" dur="25s" repeatCount="indefinite"/>
+    <circle cx="200" cy="150" r="120" fill="url(#starHalo)" filter="url(#blurSm)"/>
+    <ellipse cx="200" cy="150" rx="90" ry="40" fill="url(#swirlLight)" opacity="0.4" filter="url(#blurSm)" transform="rotate(-30 200 150)"/>
+  </g>
+  <g>
+    <animateTransform attributeName="transform" type="rotate" from="0 150 550" to="360 150 550" dur="22s" repeatCount="indefinite"/>
+    <circle cx="150" cy="550" r="100" fill="url(#starHalo)" filter="url(#blurSm)"/>
+  </g>
+  <g>
+    <animateTransform attributeName="transform" type="rotate" from="360 500 450" to="0 500 450" dur="35s" repeatCount="indefinite"/>
+    <circle cx="500" cy="450" r="80" fill="url(#starHalo)" filter="url(#blurSm)" opacity="0.8"/>
+  </g>
+  <g>
+    <animateTransform attributeName="transform" type="rotate" from="0 750 750" to="360 750 750" dur="28s" repeatCount="indefinite"/>
+    <circle cx="750" cy="750" r="110" fill="url(#starHalo)" filter="url(#blurSm)"/>
+    <ellipse cx="750" cy="750" rx="80" ry="30" fill="url(#swirlLight)" opacity="0.3" filter="url(#blurSm)" transform="rotate(70 750 750)"/>
+  </g>
+</svg>
+"""
+
+
+THEME_APPLE_MINIMAL_HTML = """
+<style>
+    /* 苹果极简主题：浅色、克制动效、单一强调色，遵循 Apple HIG 克制原则 */
+    :root {
+        --color-ink: #1D1D1F !important;
+        --color-ink-body: #3A3A3C !important;
+        --color-ink-muted: #86868B !important;
+        --color-accent: #0A84FF !important;
+        --color-accent-hover: #2E95FF !important;
+        --color-accent-active: #0071E3 !important;
+        --color-accent-focus: rgba(10, 132, 255, 0.25) !important;
+        --color-sky-pale: #6E6E73 !important;
+    }
+    .gradio-container {
+        background: #F5F5F7 !important;
+        color: #1D1D1F !important;
+    }
+    .gradio-container::before,
+    .gradio-container::after {
+        content: none !important;
+    }
+    .gradio-container h1, .gradio-container h2, .gradio-container h3 {
+        color: #1D1D1F !important;
+    }
+    .gradio-container p, .gradio-container span, .gradio-container label,
+    .gradio-container li, .gradio-container div {
+        color: #3A3A3C !important;
+    }
+    .sidebar-pane, .workspace-pane {
+        background: rgba(255, 255, 255, 0.85) !important;
+        backdrop-filter: none !important;
+        -webkit-backdrop-filter: none !important;
+        border: 1px solid rgba(0, 0, 0, 0.08) !important;
+        box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06) !important;
+    }
+    .ios-card, .empty-state-card {
+        background: #FFFFFF !important;
+        backdrop-filter: none !important;
+        -webkit-backdrop-filter: none !important;
+        border: 1px solid rgba(0, 0, 0, 0.08) !important;
+        box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06) !important;
+    }
+    .ios-card:hover {
+        background: #FFFFFF !important;
+        border-color: rgba(10, 132, 255, 0.3) !important;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08) !important;
+    }
+    .gradio-container [class*="accordion"],
+    .gradio-container details {
+        background: #FFFFFF !important;
+        backdrop-filter: none !important;
+        -webkit-backdrop-filter: none !important;
+        border: 1px solid rgba(0, 0, 0, 0.08) !important;
+        box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06) !important;
+    }
+    .gradio-container details > summary,
+    .gradio-container [class*="accordion"] > button,
+    .gradio-container [class*="accordion-header"] {
+        background: #F5F5F7 !important;
+        color: #1D1D1F !important;
+        border-bottom: 1px solid rgba(0, 0, 0, 0.06) !important;
+    }
+    .ios-btn-primary {
+        background: #0A84FF !important;
+        color: #FFFFFF !important;
+        border: none !important;
+        box-shadow: none !important;
+        text-shadow: none !important;
+    }
+    .ios-btn-primary:hover { background: #2E95FF !important; transform: none !important; }
+    .ios-btn-primary:active { background: #0071E3 !important; transform: none !important; filter: none !important; }
+    .ios-btn-secondary,
+    .gradio-container button.secondary,
+    .gradio-container button[variant="secondary"] {
+        background: #FFFFFF !important;
+        color: #1D1D1F !important;
+        border: 1px solid rgba(0, 0, 0, 0.12) !important;
+        box-shadow: none !important;
+    }
+    .ios-btn-secondary:hover { background: #EBEBED !important; transform: none !important; }
+    .ios-btn-danger {
+        background: #FFFFFF !important;
+        color: #FF3B30 !important;
+        border: 1px solid rgba(255, 59, 48, 0.3) !important;
+        box-shadow: none !important;
+    }
+    .ios-btn-danger:hover { background: #FFEBE9 !important; transform: none !important; }
+    .gradio-container input:not([type="checkbox"]):not([type="radio"]),
+    .gradio-container textarea {
+        background: #FFFFFF !important;
+        border: 1px solid rgba(0, 0, 0, 0.12) !important;
+        box-shadow: none !important;
+        color: #1D1D1F !important;
+    }
+    .gradio-container input:not([type="checkbox"]):not([type="radio"]):focus,
+    .gradio-container textarea:focus {
+        background: #FFFFFF !important;
+        border-color: #0A84FF !important;
+        box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.2) !important;
+        outline: none !important;
+    }
+    .title-banner {
+        background: #FFFFFF !important;
+        border: 1px solid rgba(0, 0, 0, 0.08) !important;
+        box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06) !important;
+    }
+    .title-banner h1 { color: #1D1D1F !important; text-shadow: none !important; }
+    .title-banner p { color: #6E6E73 !important; }
+    .step-done { color: #0A84FF !important; }
+    .step-done .step-num { background: rgba(10, 132, 255, 0.2) !important; color: #0A84FF !important; }
+    .step-current {
+        background: rgba(10, 132, 255, 0.1) !important;
+        border-color: #0A84FF !important;
+        color: #0A84FF !important;
+        box-shadow: none !important;
+    }
+    .step-current .step-num { background: #0A84FF !important; color: #FFFFFF !important; }
+    .agent-bubble { background: #F5F5F7 !important; border: 1px solid rgba(0, 0, 0, 0.06) !important; }
+    .badge-info { background: rgba(10, 132, 255, 0.1) !important; color: #0A84FF !important; border-color: rgba(10, 132, 255, 0.2) !important; }
+    .user-identity-bar { background: #FFFFFF !important; border: 1px solid rgba(0, 0, 0, 0.08) !important; }
+    .sidebar-footer-btn { color: #86868B !important; }
+    .sidebar-footer-btn:hover { background: rgba(0, 0, 0, 0.04) !important; color: #1D1D1F !important; }
+    .empty-state-card p { color: #86868B !important; }
+    .gradio-container .gr-group *,
+    .gradio-container [class*="group"] *,
+    .gradio-container [class*="accordion"] *,
+    .ios-card * {
+        color: #3A3A3C !important;
+    }
+    *:focus-visible { outline: 2px solid #0A84FF !important; }
 </style>
 """
 
@@ -1299,7 +1965,7 @@ def build_ui() -> gr.Blocks:
         
         --color-ink: #F8FAFC; 
         --color-ink-body: #E2E8F0; 
-        --color-ink-muted: #94A3B8; 
+        --color-ink-muted: #A8B8CC; 
         
         --color-danger: oklch(65% 0.18 20);
         --color-danger-hover: oklch(75% 0.18 20);
@@ -1309,6 +1975,9 @@ def build_ui() -> gr.Blocks:
         --radius-card: 22px;
         --radius-input: 12px;
         --radius-sm: 10px;
+
+        /* Glass Effects */
+        --blur-glass: blur(28px) saturate(130%);
 
         /* Apple-Style Easing & Animation */
         --ease-out-expo: cubic-bezier(0.23, 1, 0.32, 1);
@@ -1366,7 +2035,11 @@ def build_ui() -> gr.Blocks:
     }
 
     .gradio-container p, .gradio-container span, .gradio-container label,
-    .gradio-container li, .gradio-container div {
+    .gradio-container li {
+        color: var(--color-ink-body);
+        text-wrap: pretty;
+    }
+    .gradio-container div {
         color: var(--color-ink-body);
     }
 
@@ -1386,8 +2059,8 @@ def build_ui() -> gr.Blocks:
     .gradio-container [class*="accordion"],
     .gradio-container details {
         background: rgba(13, 22, 43, 0.6) !important;
-        backdrop-filter: blur(28px) saturate(130%) !important;
-        -webkit-backdrop-filter: blur(28px) saturate(130%) !important;
+        backdrop-filter: var(--blur-glass) !important;
+        -webkit-backdrop-filter: var(--blur-glass) !important;
         border: 1px solid rgba(100, 139, 168, 0.25) !important;
         border-radius: var(--radius-card) !important;
         box-shadow: 0 4px 24px rgba(0, 0, 0, 0.35) !important;
@@ -1467,8 +2140,8 @@ def build_ui() -> gr.Blocks:
     /* Apply Blur ONLY to major structural containers */
     .sidebar-pane, .workspace-pane {
         background: rgba(20, 35, 60, 0.15) !important;
-        backdrop-filter: blur(28px) saturate(130%) !important;
-        -webkit-backdrop-filter: blur(28px) saturate(130%) !important;
+        backdrop-filter: var(--blur-glass) !important;
+        -webkit-backdrop-filter: var(--blur-glass) !important;
         border: 1px solid rgba(255, 255, 255, 0.08) !important;
         border-top: 1px solid rgba(255, 255, 255, 0.15) !important;
         border-left: 1px solid rgba(255, 255, 255, 0.12) !important;
@@ -1528,8 +2201,8 @@ def build_ui() -> gr.Blocks:
     /* Specific Glass Cards */
     .ios-card {
         background: rgba(13, 22, 43, 0.55) !important;
-        backdrop-filter: blur(28px) saturate(130%) !important;
-        -webkit-backdrop-filter: blur(28px) saturate(130%) !important;
+        backdrop-filter: var(--blur-glass) !important;
+        -webkit-backdrop-filter: var(--blur-glass) !important;
         border: 1px solid rgba(79, 126, 164, 0.2) !important;
         border-top: 1px solid rgba(141, 179, 195, 0.25) !important;
         border-left: 1px solid rgba(141, 179, 195, 0.18) !important;
@@ -1570,6 +2243,7 @@ def build_ui() -> gr.Blocks:
         font-family: "Inter", "Noto Sans SC", sans-serif !important;
         color: var(--color-ink) !important;
         letter-spacing: -0.01em;
+        text-wrap: balance;
     }
 
     /* Badges */
@@ -1736,6 +2410,61 @@ def build_ui() -> gr.Blocks:
         font-weight: 600;
     }
 
+    /* ═══ TABS REDESIGN ═══ */
+    .gradio-container .tabitem {
+        border: none !important;
+        background: transparent !important;
+        padding: 16px 0 0 0 !important;
+    }
+    .gradio-container .tabs {
+        background: transparent !important;
+        border: none !important;
+    }
+    .gradio-container .tab-nav {
+        background: rgba(13, 22, 43, 0.4) !important;
+        border: 1px solid rgba(141, 179, 195, 0.15) !important;
+        border-radius: var(--radius-sm) !important;
+        padding: 4px !important;
+        gap: 4px !important;
+        display: flex;
+        flex-wrap: wrap;
+    }
+    .gradio-container .tab-nav > button {
+        border: none !important;
+        background: transparent !important;
+        color: var(--color-ink-muted) !important;
+        border-radius: calc(var(--radius-sm) - 2px) !important;
+        padding: 6px 12px !important;
+        font-weight: 500 !important;
+        transition: all 0.2s ease !important;
+    }
+    .gradio-container .tab-nav > button.selected {
+        background: rgba(255, 255, 255, 0.1) !important;
+        color: var(--color-ink) !important;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.2) !important;
+        border-bottom: none !important;
+    }
+
+    /* ═══ PROJECT HEADER ═══ */
+    .project-header-row {
+        align-items: center !important;
+        margin-bottom: 12px !important;
+        background: rgba(0, 0, 0, 0.15);
+        border: 1px solid rgba(255, 255, 255, 0.05);
+        border-radius: var(--radius-sm);
+        padding: 12px 16px !important;
+    }
+    .project-title-text h2, .project-title-text h3 {
+        margin: 0 !important;
+        font-size: 18px !important;
+        color: var(--color-accent) !important;
+        line-height: 1.3 !important;
+    }
+    .progress-badge-container {
+        display: flex;
+        justify-content: flex-end;
+    }
+
     /* Step Progress - Glassy */
     .step-track {
         display: inline-flex;
@@ -1743,6 +2472,7 @@ def build_ui() -> gr.Blocks:
         gap: 4px;
         font-size: 13px;
         line-height: 1;
+        font-variant-numeric: tabular-nums;
     }
     .step-badge {
         display: inline-flex;
@@ -1845,32 +2575,34 @@ def build_ui() -> gr.Blocks:
     }
 
 
-    /* ═══ THREE-COLUMN LAYOUT SYSTEM (V11) ═══ */
+    /* ═══ THREE-COLUMN LAYOUT SYSTEM (V11.1 MERGED) ═══ */
     .layout-three-col {
         display: flex !important;
         flex-direction: row !important;
         gap: 16px;
-        min-height: calc(100vh - 100px);
+        min-height: calc(100dvh - 100px);
     }
     .layout-three-col > .col-sidebar {
-        flex: 0 0 280px !important;
-        max-width: 280px;
+        flex: 0 0 300px !important;
+        max-width: 300px !important;
+        min-width: 250px !important;
         overflow-y: auto;
     }
     .layout-three-col > .col-canvas {
-        flex: 1 !important;
-        min-width: 0;
+        flex: 1 1 0 !important;
+        min-width: 480px !important;
         overflow-y: auto;
     }
     .layout-three-col > .col-agent-hub {
-        flex: 0 0 340px !important;
-        max-width: 340px;
+        flex: 0 0 300px !important;
+        max-width: 300px !important;
+        min-width: 250px !important;
         overflow-y: auto;
     }
     @media (max-width: 1280px) {
         .layout-three-col > .col-agent-hub {
-            flex: 0 0 280px !important;
-            max-width: 280px;
+            flex: 0 0 250px !important;
+            max-width: 250px !important;
         }
     }
     @media (max-width: 1024px) {
@@ -1886,8 +2618,8 @@ def build_ui() -> gr.Blocks:
     /* Agent Hub card styling */
     .agent-hub-card {
         background: rgba(13, 22, 43, 0.45) !important;
-        backdrop-filter: blur(28px) saturate(150%) !important;
-        -webkit-backdrop-filter: blur(28px) saturate(150%) !important;
+        backdrop-filter: var(--blur-glass) !important;
+        -webkit-backdrop-filter: var(--blur-glass) !important;
         border: 1px solid rgba(100, 139, 168, 0.2) !important;
         border-top: 1px solid rgba(141, 179, 195, 0.25) !important;
         border-radius: var(--radius-card) !important;
@@ -1962,28 +2694,7 @@ def build_ui() -> gr.Blocks:
         }
     }
 
-    /* ═══ LAYOUT PROPORTION FIX (V11.1) ═══ */
-    /* Override Gradio's scale system with explicit CSS flex values */
-    .layout-three-col > .col-sidebar {
-        flex: 0 0 250px !important;
-        max-width: 250px !important;
-        min-width: 220px !important;
-    }
-    .layout-three-col > .col-canvas {
-        flex: 1 1 0 !important;
-        min-width: 480px !important;
-    }
-    .layout-three-col > .col-agent-hub {
-        flex: 0 0 290px !important;
-        max-width: 290px !important;
-        min-width: 240px !important;
-    }
-    @media (max-width: 1280px) {
-        .layout-three-col > .col-agent-hub {
-            flex: 0 0 250px !important;
-            max-width: 250px !important;
-        }
-    }
+
 
     /* ═══ BORDER & BOX NUCLEAR RESET (V11.1) ═══ */
     /* Eliminate all unwanted borders from Gradio HTML/Markdown wrapper divs */
@@ -2101,7 +2812,7 @@ def build_ui() -> gr.Blocks:
         # 顶部渐变标题栏
         gr.Markdown(
             """
-            <div class="title-banner">
+            <div class="title-banner" role="banner">
                 <h1 style="margin: 0; font-size: 28px; font-weight: 700; letter-spacing: 0.5px;">公文写作智能助手</h1>
                 <p style="margin: 6px 0 0 0; opacity: 0.9; font-size: 14px;">多角色协作写作 · 智能审查校对 · 一键生成规范公文</p>
             </div>
@@ -2116,6 +2827,7 @@ def build_ui() -> gr.Blocks:
                 # ── 身份栏 ──
                 with gr.Row(elem_classes="user-identity-bar"):
                     user_input = gr.Textbox(
+                        label="用户名",
                         show_label=False,
                         placeholder="输入姓名以切换或建立新空间",
                         value=app.current_user_name or "",
@@ -2155,34 +2867,14 @@ def build_ui() -> gr.Blocks:
 
                 # ── 参考素材库 ──
                 with gr.Accordion("参考资料库", open=False):
-                    topic_selector = gr.Dropdown(
-                        choices=app.get_topics_list(),
-                        label="主题分类",
-                        value=app.get_topics_list()[0] if app.get_topics_list() else None
-                    )
-                    ref_doc_selector = gr.Dropdown(
-                        choices=[],
-                        label="选择参考文档",
-                        info="选中后将在右侧主工作区显示全文预览"
-                    )
-                    
-                    with gr.Row():
-                        url_import_trigger = gr.Button("导入新网页", variant="secondary", size="sm", elem_classes="ios-btn-secondary")
-                        ref_doc_delete_btn = gr.Button("移出素材", variant="stop", size="sm", elem_classes="ios-btn-danger")
-                    
-                    # 导入URL表单 (隐藏，点击显示)
-                    with gr.Column(visible=False) as url_import_box:
-                        url_input_val = gr.Textbox(label="网页 URL", placeholder="https://example.com/article")
-                        url_topic_val = gr.Textbox(label="导入至主题", placeholder="例如: 教育改革参考")
-                        with gr.Row():
-                            url_save_btn = gr.Button("执行导入", variant="primary", size="sm", elem_classes="ios-btn-primary")
-                            url_cancel_btn = gr.Button("取消", variant="secondary", size="sm")
+                    open_ref_lib_btn = gr.Button("📚 打开知识与参考资料库", variant="secondary", elem_classes="ios-btn-secondary")
+                    gr.Markdown("<small>点击进入独立的工作台面板，进行搜索、过滤与深度管理。</small>")
 
                 # ── 底部快捷操作 & 系统设置 ──
                 with gr.Accordion("系统与个性化", open=False):
                     bg_theme_selector = gr.Dropdown(
                         label="背景美学风格",
-                        choices=["经典流光 (Classic Fluid)", "星月夜漩涡 (Starry Night)"],
+                        choices=["星月夜漩涡 (Starry Night)", "经典流光 (Classic Fluid)", "苹果极简 (Apple Minimal)"],
                         value="星月夜漩涡 (Starry Night)"
                     )
                 
@@ -2202,17 +2894,21 @@ def build_ui() -> gr.Blocks:
                     gr.Markdown("""
                     <div style="text-align: center; padding: 120px 20px;">
                         <h2 style="font-size: 28px; margin-bottom: 16px;">欢迎来到公文写作智能助手</h2>
-                        <p style="color: var(--color-ink-muted); font-size: 16px;">请在左侧登录并选择或创建一个项目工程，即可开始您的沉浸式写作流程。</p>
+                        <p style="color: var(--color-ink-muted); font-size: 16px; margin-bottom: 24px;">请在左侧登录并选择或创建一个项目工程，即可开始您的沉浸式写作流程。</p>
+                        <div style="display: inline-flex; align-items: center; gap: 8px; color: var(--color-accent); font-weight: 500;">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
+                            请在左侧栏开始操作
+                        </div>
                     </div>
                     """)
 
                 # ─── 面板 A: 写作项目工作台 ───
                 with gr.Column(visible=False, elem_classes="ws-panel-hidden") as project_panel:
                     # 顶部进度和状态
-                    with gr.Row():
-                        with gr.Column(scale=2):
-                            active_proj_title = gr.Markdown("## 选择左侧项目或新建项目开始写作")
-                        with gr.Column(scale=1, min_width=260):
+                    with gr.Row(elem_classes="project-header-row"):
+                        with gr.Column(scale=1, min_width=300):
+                            active_proj_title = gr.Markdown("### 选择左侧项目或新建项目开始写作", elem_classes="project-title-text")
+                        with gr.Column(scale=0, min_width=320, elem_classes="progress-badge-container"):
                             progress_badge_html = gr.HTML(build_progress_badge("问卷"))
                     
                     # 场景选择卡片 (路由问卷)
@@ -2245,17 +2941,13 @@ def build_ui() -> gr.Blocks:
                                 q_answer_input = gr.Textbox(label="您的回答", lines=4, placeholder="请提供详细素材，供智能写作参考。若无需要可点击跳过...")
                                 
                                 with gr.Row():
-                                    q_btn_submit = gr.Button("提交回答", variant="primary", elem_classes="ios-btn-primary")
+                                    q_btn_back = gr.Button("回退", elem_classes="ios-btn-secondary", size="sm")
+                                    q_btn_skip = gr.Button("跳过", elem_classes="ios-btn-secondary", size="sm")
+                                    q_btn_finish = gr.Button("提前完成", elem_classes="ios-btn-secondary", size="sm")
+                                    q_btn_reset = gr.Button("清空进度", variant="stop", elem_classes="ios-btn-danger", size="sm")
                                 
                                 with gr.Row():
-                                    q_btn_back = gr.Button("回退", elem_classes="ios-btn-secondary")
-                                    q_btn_skip = gr.Button("跳过", elem_classes="ios-btn-secondary")
-                                    q_btn_finish = gr.Button("提前完成", elem_classes="ios-btn-secondary")
-                                
-                                gr.Markdown("<br>")
-                                
-                                with gr.Row():
-                                    q_btn_reset = gr.Button("重头开始(清空进度)", variant="stop", elem_classes="ios-btn-danger")
+                                    q_btn_submit = gr.Button("提交回答", variant="primary", elem_classes="ios-btn-primary", size="lg")
                                 
                                 with gr.Column(visible=False) as confirm_reset_box:
                                     gr.Markdown("⚠️ **危险操作**：确定要清空当前问卷的所有进度并重头开始吗？此操作无法撤销。")
@@ -2285,21 +2977,38 @@ def build_ui() -> gr.Blocks:
                         # Tab 2: 智能方案生成
                         with gr.Tab("写作大纲方案", id="tab_plan"):
                             plan_output_text = gr.Textbox(label="生成的方案大纲与结构", lines=18, interactive=False, show_copy_button=True)
-                            kb_exemplar_recommend = gr.Markdown("### 知识库推荐范文")
+                            
+                            with gr.Row():
+                                with gr.Column(scale=1):
+                                    doc_type_recommend_md = gr.Markdown("### 💡 智能文种推荐\n(完成问卷后自动推荐)")
+                                with gr.Column(scale=1):
+                                    kb_exemplar_recommend = gr.Markdown("### 📚 知识库推荐范文")
                             
                             gr.Markdown("#### 方案大纲调优调整")
+                            with gr.Row():
+                                ui_doc_selector = gr.Dropdown(
+                                    choices=[label for label, _ in DOC_TYPE_CHOICES],
+                                    value="通讯（推荐1500-3000字）",
+                                    label="覆盖/确认最终公文文种",
+                                    scale=2
+                                )
+                                plan_regen_btn = gr.Button("重新生成大纲", variant="secondary", elem_classes="ios-btn-secondary", scale=1)
+                                
+                            gr.Markdown("#### 风格调校")
                             with gr.Row():
                                 ui_style_selector = gr.Dropdown(
                                     choices=[label for label, _ in STYLE_CHOICES],
                                     value="人民日报风格",
-                                    label="选择主导风格"
+                                    label="选择主导风格",
+                                    scale=1
                                 )
-                                ui_doc_selector = gr.Dropdown(
-                                    choices=[label for label, _ in DOC_TYPE_CHOICES],
-                                    value="通讯（推荐1500-3000字）",
-                                    label="选择期望公文文种"
-                                )
-                                plan_regen_btn = gr.Button("重新生成大纲", variant="secondary", elem_classes="ios-btn-secondary")
+                                style_intensity_slider = gr.Slider(0.0, 1.0, value=0.5, step=0.1, label="风格强度", scale=1)
+                            
+                            with gr.Row():
+                                with gr.Column(scale=1):
+                                    style_detail_md = gr.Markdown("请选择风格查看特征详情...")
+                                with gr.Column(scale=1):
+                                    style_blend_md = gr.Markdown("混合风格建议...")
                             
                             plan_btn_next = gr.Button("确认方案，开始写作", variant="primary", elem_classes="ios-btn-primary")
 
@@ -2331,7 +3040,7 @@ def build_ui() -> gr.Blocks:
                                 ref_inject_btn = gr.Button("📥 注入参考素材到下方素材区", variant="secondary", size="sm", elem_classes="ios-btn-secondary")
                             
                             materials_input = gr.Textbox(label="可贴入本次写作的其他原始语料/素材内容(可选)", lines=5, placeholder="粘贴任何其他零碎记录、会议讲话或新闻参考数据...\n也可点击上方「注入参考素材」自动填入已导入的参考资料内容。")
-                            write_start_btn = gr.Button("开始写作（通常需要 30-60 秒）", variant="primary", elem_classes="ios-btn-primary")
+                            write_start_btn = gr.Button("开始写作（多智能体协商 + 生成，首次可能需要 1-3 分钟）", variant="primary", elem_classes="ios-btn-primary")
                             
                             write_event_msg = gr.Markdown()
                             draft_editor = gr.Textbox(label="草稿（主版本）", lines=22, placeholder="草稿内容将在这里呈现...", show_copy_button=True)
@@ -2347,6 +3056,12 @@ def build_ui() -> gr.Blocks:
                         with gr.Tab("智能审查与人工介入", id="tab_review"):
                             review_event_msg = gr.Markdown()
                             review_summary_text = gr.Textbox(label="多维审查得分与总结", lines=12, interactive=False, show_copy_button=True)
+                            
+                            with gr.Accordion("🕒 智能审查迭代历史", open=False):
+                                review_iteration_history_md = gr.Markdown("暂无审查历史")
+                                
+                            with gr.Accordion("🚨 知识库合规诊断", open=False):
+                                kb_diagnosis_detail_md = gr.Markdown("暂无诊断结果")
                             
                             with gr.Row():
                                 with gr.Column(scale=1):
@@ -2369,25 +3084,94 @@ def build_ui() -> gr.Blocks:
                         # Tab 5: 终稿交付完成
                         with gr.Tab("最终成果交付", id="tab_finalize"):
                             final_draft_output = gr.Textbox(label="最终公文文稿", lines=24, interactive=True, show_copy_button=True)
-                            final_multi_versions = gr.Textbox(label="多格式版本备份", lines=12, interactive=False, show_copy_button=True)
-                            workflow_summary_text = gr.Textbox(label="智能协作工作流回溯报告", lines=10, interactive=False)
                             
+                            with gr.Row():
+                                with gr.Column(scale=1):
+                                    final_multi_versions = gr.Textbox(label="多格式版本备份", lines=12, interactive=False, show_copy_button=True)
+                                with gr.Column(scale=1):
+                                    workflow_summary_text = gr.Textbox(label="智能协作工作流回溯报告", lines=12, interactive=False)
+                            
+                            with gr.Accordion("📊 API 成本与 Token 优化统计", open=False):
+                                token_stats_md = gr.Markdown("无统计数据")
+                                
                             export_finished_btn = gr.Button("导出完成", variant="primary", elem_classes="ios-btn-primary")
 
-                # ─── 面板 B: 参考素材查看与编辑器 ───
+                # ─── 面板 B: 参考素材资料库 (重构版) ───
                 with gr.Column(visible=True, elem_classes="ws-panel-hidden") as ref_doc_panel:
-                    gr.Markdown("## 📄 参考资料查看")
+                    gr.Markdown("## 📚 知识与参考资料库")
                     
                     with gr.Group(elem_classes="ios-card"):
-                        ref_doc_edit_title = gr.Textbox(label="参考文章标题", interactive=True)
-                        ref_doc_edit_meta = gr.Markdown()
-                        ref_doc_edit_content = gr.Textbox(label="正文内容", lines=20, interactive=True)
+                        with gr.Row():
+                            ref_search_query = gr.Textbox(label="搜索关键词", placeholder="输入标题或正文...", scale=3)
+                            ref_filter_topic = gr.Dropdown(label="按主题过滤", choices=["全部主题"] + app.get_topics_list(), value="全部主题", scale=2)
+                            ref_filter_format = gr.Dropdown(label="按格式过滤", choices=["全部格式"], value="全部格式", scale=2)
+                            ref_filter_source = gr.Dropdown(label="按来源过滤", choices=["全部来源"], value="全部来源", scale=2)
+                            ref_sort_by = gr.Dropdown(label="排序方式", choices=["默认", "最新发布", "字数最多", "字数最少"], value="默认", scale=2)
+                            ref_search_btn = gr.Button("🔍 搜索", variant="primary", scale=1)
+                            
+                        ref_docs_table = gr.Dataframe(
+                            headers=["文档ID", "标题", "格式", "字数", "日期", "来源", "所属主题"],
+                            datatype=["str", "str", "str", "number", "str", "str", "str"],
+                            col_count=(7, "fixed"),
+                            interactive=False,
+                            wrap=True
+                        )
+                        gr.Markdown("<small>提示：在上方表格**点击任意一行**即可在下方查看该文档详情。</small>")
                         
                         with gr.Row():
-                            ref_doc_edit_save = gr.Button("保存修改", variant="primary", elem_classes="ios-btn-primary")
-                            ref_doc_import_to_write = gr.Button("📥 一键导入到写作素材", variant="secondary", elem_classes="ios-btn-secondary")
-                            ref_doc_edit_close = gr.Button("关闭视窗", variant="secondary", elem_classes="ios-btn-secondary")
+                            url_import_trigger = gr.Button("📥 导入新网页", variant="secondary", size="sm")
+                            topic_manage_trigger = gr.Button("🗂️ 主题管理", variant="secondary", size="sm")
+                            ref_batch_delete_trigger = gr.Button("🗑️ 批量删除", variant="secondary", size="sm")
+                            ref_panel_close_btn = gr.Button("❌ 返回项目", variant="secondary", size="sm")
                             
+                        # 导入URL表单 (隐藏)
+                        with gr.Column(visible=False) as url_import_box:
+                            gr.Markdown("### 📥 导入新网页")
+                            url_input_val = gr.Textbox(label="网页 URL", placeholder="https://example.com/article")
+                            url_topic_val = gr.Textbox(label="导入至主题", placeholder="例如: 教育改革参考")
+                            with gr.Row():
+                                url_save_btn = gr.Button("执行导入", variant="primary", size="sm", elem_classes="ios-btn-primary")
+                                url_cancel_btn = gr.Button("取消", variant="secondary", size="sm")
+                                
+                        # 主题管理表单 (隐藏)
+                        with gr.Column(visible=False) as topic_manage_box:
+                            gr.Markdown("### 🗂️ 主题管理")
+                            with gr.Row():
+                                topic_create_name = gr.Textbox(label="新建主题名称", scale=2)
+                                topic_create_btn = gr.Button("新建", variant="primary", scale=1)
+                            with gr.Row():
+                                topic_rename_old = gr.Dropdown(label="原主题名", choices=app.get_topics_list(), scale=1)
+                                topic_rename_new = gr.Textbox(label="新主题名", scale=1)
+                                topic_rename_btn = gr.Button("重命名", variant="primary", scale=1)
+                            with gr.Row():
+                                topic_delete_name = gr.Dropdown(label="要删除的主题", choices=app.get_topics_list(), scale=2)
+                                topic_delete_btn = gr.Button("删除主题", variant="stop", scale=1)
+                            topic_manage_cancel = gr.Button("关闭管理", size="sm")
+                            
+                        # 批量删除辅助框
+                        with gr.Column(visible=False) as batch_delete_box:
+                            gr.Markdown("### 🗑️ 批量删除文档")
+                            batch_delete_ids = gr.Textbox(label="要删除的文档ID", placeholder="输入表格中第一列的文档ID，多个用逗号分隔")
+                            with gr.Row():
+                                confirm_batch_delete_btn = gr.Button("确认删除", variant="stop", elem_classes="ios-btn-danger")
+                                cancel_batch_delete_btn = gr.Button("取消")
+
+                    # 选中文档详情区域
+                    with gr.Column(visible=False) as ref_doc_detail_box:
+                        gr.Markdown("### 📄 文档详情与操作")
+                        with gr.Group(elem_classes="ios-card"):
+                            # 隐藏存放当前选中的 doc_id 状态
+                            current_selected_doc_id = gr.State("")
+                            
+                            ref_doc_edit_meta = gr.Markdown()
+                            ref_doc_edit_title = gr.Textbox(label="修改标题", interactive=True)
+                            ref_doc_edit_content = gr.Textbox(label="正文内容预览/编辑", lines=10, interactive=True)
+                            
+                            with gr.Row():
+                                ref_doc_edit_save = gr.Button("💾 保存修改", variant="primary")
+                                ref_doc_import_to_write = gr.Button("📥 注入当前文稿素材区", variant="secondary")
+                                ref_doc_detail_close = gr.Button("🔼 收起详情", variant="secondary")
+                                
                     ref_doc_edit_msg = gr.Markdown()
 
                 # ─── 面板 C: API参数配置 ───
@@ -2406,7 +3190,7 @@ def build_ui() -> gr.Blocks:
                             api_key_val = gr.Textbox(label="API Key", type="password", placeholder="sk-...")
                         with gr.Row():
                             api_model_name = gr.Textbox(label="模型名称 (Model)", placeholder="gpt-4o")
-                            api_temp = gr.Slider(0.0, 2.0, value=0.7, step=0.1, label="创新度 (Temperature)")
+                            api_temp = gr.Slider(0.0, 2.0, value=0.7, step=0.1, label="创新度默认值 (保存到配置)", info="实际写作使用右侧「Agent 决策大脑」的创新温度滑杆")
                             api_tokens = gr.Slider(1000, 32000, value=8000, step=500, label="最大生成Token (Max Tokens)")
                             
                         with gr.Row():
@@ -2434,8 +3218,19 @@ def build_ui() -> gr.Blocks:
                                 memory_add_btn = gr.Button("写入永久记忆", variant="primary", elem_classes="ios-btn-primary")
                                 memory_add_msg = gr.Markdown()
                                 
+                    with gr.Group(elem_classes="ios-card"):
+                        gr.Markdown("### 📚 专属词汇语料库管理 (Vocabulary Corpus)")
+                        with gr.Row():
+                            with gr.Column(scale=1):
+                                vocab_corpus_summary_md = gr.Markdown("加载中...")
+                            with gr.Column(scale=1):
+                                vocab_keyword_input = gr.Textbox(label="添加必用关键词", placeholder="如: 新质生产力")
+                                vocab_keyword_btn = gr.Button("添加必用词", size="sm")
+                                vocab_forbidden_input = gr.Textbox(label="添加禁用/违禁词", placeholder="如: 遥遥领先")
+                                vocab_forbidden_btn = gr.Button("添加禁用词", size="sm")
+                                vocab_msg = gr.Markdown()
+                                
                     profile_close_btn = gr.Button("关闭画像", variant="secondary")
-
 
 
             # ═══════════════════════════════════════════════════════
@@ -2445,7 +3240,7 @@ def build_ui() -> gr.Blocks:
                 # 装饰标题（带脸动脉冲圆点）
                 gr.HTML("""
                     <div class="agent-hub-title">
-                        <div class="dot"></div>
+                        <div class="dot" aria-hidden="true"></div>
                         <h3>Agent 决策大脑</h3>
                     </div>
                 """)
@@ -2456,6 +3251,9 @@ def build_ui() -> gr.Blocks:
                         value=app.format_agent_messages_html(),
                         elem_classes="agent-log-html"
                     )
+                    
+                with gr.Accordion("多智能体协同全景视图", open=False):
+                    agent_coordination_report_md = gr.Markdown("暂无协同数据")
                 
                 # ── 五轮审查热力图 ──
                 with gr.Accordion("审查热力图", open=True):
@@ -2476,7 +3274,7 @@ def build_ui() -> gr.Blocks:
                 # ── HITL 快捷操作 ──
                 with gr.Accordion("审查建议速览", open=False):
                     hitl_quick_issues = gr.Markdown(
-                        "<div class='agent-empty-state' style='color:#3d4f6b;font-size:12px;'>"
+                        "<div class='agent-empty-state' style='color:var(--color-ink-muted);font-size:12px;'>"
                         "审查完成后，关键修改建议将在此列出。</div>"
                     )
 
@@ -2495,8 +3293,7 @@ def build_ui() -> gr.Blocks:
                 msg,
                 gr.update(value=f"当前用户: **{name}**", visible=True),
                 gr.update(choices=projects, value=None),
-                gr.update(choices=app.get_topics_list(), value=None),
-                gr.update(value="## 请新建项目以开始"),
+                gr.update(value="### 请新建项目以开始"),
                 "",  # plan_output_text
                 "",  # draft_editor
                 "",  # coord_agent_logs
@@ -2524,7 +3321,7 @@ def build_ui() -> gr.Blocks:
             fn=login_user_fn,
             inputs=[user_input],
             outputs=[
-                global_status_msg, user_status_msg, project_selector, topic_selector,
+                global_status_msg, user_status_msg, project_selector,
                 active_proj_title, plan_output_text,
                 draft_editor, coord_agent_logs, review_summary_text,
                 final_draft_output, final_multi_versions, progress_badge_html,
@@ -2553,7 +3350,7 @@ def build_ui() -> gr.Blocks:
                 msg,
                 gr.update(choices=projects, value=default_proj),
                 gr.update(visible=False), # 关闭新建表单
-                gr.update(value=f"## 项目工程：{name}"),
+                gr.update(value=f"### 项目工程：{name}"),
                 gr.update(elem_classes="ios-card ws-panel-visible" if routing_vis else "ios-card ws-panel-hidden"),
                 gr.update(value=ui["title"]),
                 gr.update(value=ui["desc"]),
@@ -2623,7 +3420,7 @@ def build_ui() -> gr.Blocks:
                 
             return (
                 msg,
-                gr.update(value=f"## 项目工程：{name}"),
+                gr.update(value=f"### 项目工程：{name}"),
                 plan,
                 draft,
                 log,
@@ -2960,108 +3757,120 @@ def build_ui() -> gr.Blocks:
             outputs=[final_draft_output, final_multi_versions, workflow_summary_text, progress_badge_html, antibias_display]
         )
 
-        # ── 13. URL 素材导入面板事件 ──
-        url_import_trigger.click(
-            fn=lambda: gr.update(visible=True),
-            outputs=[url_import_box]
+        # ── 13. 参考资料库 (Reference Library) 面板导航与事件 ──
+        open_ref_lib_btn.click(
+            fn=lambda: (gr.update(elem_classes="ws-panel-hidden"), gr.update(elem_classes="ws-panel-visible")),
+            outputs=[project_panel, ref_doc_panel]
         )
-        url_cancel_btn.click(
-            fn=lambda: gr.update(visible=False),
-            outputs=[url_import_box]
+        ref_panel_close_btn.click(
+            fn=lambda: (gr.update(elem_classes="ws-panel-visible"), gr.update(elem_classes="ws-panel-hidden")),
+            outputs=[project_panel, ref_doc_panel]
         )
 
+        def do_ref_search(query, topic, fmt, source, sort_by):
+            data = app.search_ref_docs(query, topic, fmt, source, sort_by)
+            return gr.update(value=data)
+
+        ref_search_btn.click(
+            fn=do_ref_search,
+            inputs=[ref_search_query, ref_filter_topic, ref_filter_format, ref_filter_source, ref_sort_by],
+            outputs=[ref_docs_table]
+        )
+
+        def ref_table_select(evt: gr.SelectData, table_data):
+            if not table_data or evt.index[0] >= len(table_data):
+                return gr.update(visible=False), "", "", "", ""
+            row_idx = evt.index[0]
+            doc_id = table_data[row_idx][0]
+            # 获取详情
+            title, meta_md = app.get_doc_detail_markdown(doc_id)
+            if not title:
+                return gr.update(visible=False), "", "", meta_md, ""
+                
+            topic, _ = doc_id.split(":::", 1)
+            doc = next((d for d in app.url_topics[topic] if d.title == title), None)
+            content = doc.content if doc else ""
+            
+            return gr.update(visible=True), doc_id, title, meta_md, content
+
+        ref_docs_table.select(
+            fn=ref_table_select,
+            inputs=[ref_docs_table],
+            outputs=[ref_doc_detail_box, current_selected_doc_id, ref_doc_edit_title, ref_doc_edit_meta, ref_doc_edit_content]
+        )
+
+        ref_doc_detail_close.click(
+            fn=lambda: gr.update(visible=False),
+            outputs=[ref_doc_detail_box]
+        )
+
+        # ── 14. 导入URL/主题管理/批量删除 (表单开关) ──
+        url_import_trigger.click(fn=lambda: gr.update(visible=True), outputs=[url_import_box])
+        url_cancel_btn.click(fn=lambda: gr.update(visible=False), outputs=[url_import_box])
+        
+        topic_manage_trigger.click(fn=lambda: gr.update(visible=True), outputs=[topic_manage_box])
+        topic_manage_cancel.click(fn=lambda: gr.update(visible=False), outputs=[topic_manage_box])
+        
+        ref_batch_delete_trigger.click(fn=lambda: gr.update(visible=True), outputs=[batch_delete_box])
+        cancel_batch_delete_btn.click(fn=lambda: gr.update(visible=False), outputs=[batch_delete_box])
+
+        # ── 15. 执行导入URL事件 ──
         def url_import_fn(url, topic):
-            msg, topics, current_topic, docs, default_doc = app.import_url_action(url, topic)
+            msg, topics, current_topic, _, _ = app.import_url_action(url, topic)
+            # 导入完成后自动触发一次搜索刷新表格
+            new_data = app.search_ref_docs("", "全部主题", "全部格式", "全部来源", "默认")
             return (
-                msg,
-                gr.update(choices=topics, value=current_topic),
-                gr.update(choices=docs, value=default_doc),
+                msg, 
                 gr.update(visible=False), # 关闭表单
-                gr.update(choices=topics) # 同步更新写作Tab的主题选择器
+                gr.update(choices=["全部主题"] + topics), # 更新搜索栏下拉
+                gr.update(choices=["全部主题"] + topics), # 更新主题管理下拉
+                gr.update(value=new_data) # 更新表格
             )
 
         url_save_btn.click(
             fn=url_import_fn,
             inputs=[url_input_val, url_topic_val],
-            outputs=[global_status_msg, topic_selector, ref_doc_selector, url_import_box, ref_topic_for_write]
+            outputs=[global_status_msg, url_import_box, ref_filter_topic, topic_delete_name, ref_docs_table]
         )
 
-        # ── 14. 切换分类主题事件 ──
-        def topic_change_fn(topic):
-            if not topic:
-                return gr.update(choices=[], value=None)
-            docs = app.get_docs_list_by_topic(topic)
-            return gr.update(choices=docs, value=None)
-            
-        topic_selector.change(
-            fn=topic_change_fn,
-            inputs=[topic_selector],
-            outputs=[ref_doc_selector]
-        )
-
-        # ── 15. 选择参考文档 -> 直接在主工作区显示全文预览 ──
-        def select_ref_doc_fn(topic, title):
-            if not title:
-                return gr.update(), gr.update(), "", "", ""
-            t, c, meta = app.select_ref_doc_detail(topic, title)
-            return (
-                gr.update(elem_classes="ws-panel-hidden"), # 隐藏项目工作台
-                gr.update(elem_classes="ws-panel-visible"), # 显示参考文档面板
-                t,
-                meta,
-                c
-            )
-
-        ref_doc_selector.change(
-            fn=select_ref_doc_fn,
-            inputs=[topic_selector, ref_doc_selector],
-            outputs=[project_panel, ref_doc_panel, ref_doc_edit_title, ref_doc_edit_meta, ref_doc_edit_content]
-        )
-
-        ref_doc_edit_close.click(
-            fn=lambda: (gr.update(elem_classes="ws-panel-visible"), gr.update(elem_classes="ws-panel-hidden")),
-            outputs=[project_panel, ref_doc_panel]
-        )
-
-        # ── 15b. 主工作区"一键导入到写作素材" ──
-        def ref_panel_import_fn(topic, title):
-            if not topic or not title:
-                return materials_input.value or "", "⚠️ 请先选择参考文档"
-            new_materials, msg = app.inject_ref_docs_to_materials(topic, [title], True, "")
-            return new_materials, msg
-
-        ref_doc_import_to_write.click(
-            fn=ref_panel_import_fn,
-            inputs=[topic_selector, ref_doc_selector],
-            outputs=[materials_input, ref_doc_edit_msg]
-        )
-
-        # ── 16. 编辑参考文档 ──
-        def save_ref_doc_fn(topic, old_title, new_title, content):
-            msg, docs = app.save_ref_doc_edit(topic, old_title, new_title, content)
-            return msg, gr.update(choices=docs, value=new_title)
+        # ── 16. 编辑选中的参考文档 ──
+        def save_ref_doc_fn(doc_id, new_title, content):
+            if not doc_id or ":::" not in doc_id:
+                return "保存失败: 找不到文档ID"
+            topic, old_title = doc_id.split(":::", 1)
+            msg, _ = app.save_ref_doc_edit(topic, old_title, new_title, content)
+            return msg
 
         ref_doc_edit_save.click(
             fn=save_ref_doc_fn,
-            inputs=[topic_selector, ref_doc_selector, ref_doc_edit_title, ref_doc_edit_content],
-            outputs=[ref_doc_edit_msg, ref_doc_selector]
+            inputs=[current_selected_doc_id, ref_doc_edit_title, ref_doc_edit_content],
+            outputs=[ref_doc_edit_msg]
         )
 
-        # ── 17. 删除参考文档 ──
-        def delete_ref_doc_fn(topic, title):
-            msg, topics, docs = app.delete_ref_doc_action(topic, title)
-            return (
-                msg,
-                gr.update(choices=topics, value=topic if topic in topics else None),
-                gr.update(choices=docs, value=None),
-                gr.update(choices=topics) # 同步更新写作Tab的主题选择器
-            )
-
-        ref_doc_delete_btn.click(
-            fn=delete_ref_doc_fn,
-            inputs=[topic_selector, ref_doc_selector],
-            outputs=[global_status_msg, topic_selector, ref_doc_selector, ref_topic_for_write]
+        # ── 17. 批量删除与主题管理操作 ──
+        def do_batch_delete(doc_ids_str):
+            msg, topics, _ = app.batch_delete_ref_docs(doc_ids_str)
+            new_data = app.search_ref_docs("", "全部主题", "全部格式", "全部来源", "默认")
+            return msg, gr.update(visible=False), gr.update(choices=["全部主题"]+topics), gr.update(value=new_data)
+            
+        confirm_batch_delete_btn.click(
+            fn=do_batch_delete,
+            inputs=[batch_delete_ids],
+            outputs=[global_status_msg, batch_delete_box, ref_filter_topic, ref_docs_table]
         )
+        
+        def do_topic_create(name):
+            msg, topics = app.create_topic(name)
+            return msg, gr.update(choices=["全部主题"]+topics), gr.update(choices=["全部主题"]+topics)
+            
+        topic_create_btn.click(fn=do_topic_create, inputs=[topic_create_name], outputs=[global_status_msg, ref_filter_topic, topic_delete_name])
+        
+        def do_topic_delete(name):
+            msg, topics = app.delete_topic(name)
+            new_data = app.search_ref_docs("", "全部主题", "全部格式", "全部来源", "默认")
+            return msg, gr.update(choices=["全部主题"]+topics), gr.update(choices=["全部主题"]+topics), gr.update(value=new_data)
+            
+        topic_delete_btn.click(fn=do_topic_delete, inputs=[topic_delete_name], outputs=[global_status_msg, ref_filter_topic, topic_delete_name, ref_docs_table])
 
         # ── 18. API 快捷配置面板导航与事件 ──
         goto_api_btn.click(
@@ -3106,19 +3915,24 @@ def build_ui() -> gr.Blocks:
                 strengths_weaknesses += f"\n**优势诊断分析**:\n"
                 strengths_weaknesses += "\n".join([f"- {s}" for s in user.common_strengths]) if user.common_strengths else "- 待生成\n"
                 strengths_weaknesses += f"\n**短板诊断分析**:\n"
-                strengths_weaknesses += "\n".join([f"- {s}" for s in user.common_strengths]) if user.common_strengths else "- 暂无明显偏好短板\n"
+                if user.common_error_patterns:
+                    strengths_weaknesses += "\n".join([f"- {err.get('error_key', '')}: {err.get('diagnosis', '')}" for err in user.common_error_patterns])
+                else:
+                    strengths_weaknesses += "- 暂无明显偏好短板\n"
                 
             memory = app.pdb.get_memory_summary(app.current_project_id)
+            vocab = app.get_vocab_corpus_summary()
             return (
                 gr.update(elem_classes="ws-panel-hidden"), 
                 gr.update(elem_classes="ws-panel-visible"), 
                 strengths_weaknesses, 
-                memory
+                memory,
+                vocab
             )
 
         goto_profile_btn.click(
             fn=goto_profile_fn,
-            outputs=[project_panel, profile_panel, user_strengths_weaknesses, memory_summary_text]
+            outputs=[project_panel, profile_panel, user_strengths_weaknesses, memory_summary_text, vocab_corpus_summary_md]
         )
 
         profile_close_btn.click(
@@ -3137,11 +3951,88 @@ def build_ui() -> gr.Blocks:
             outputs=[memory_add_msg, memory_summary_text, memory_note_input]
         )
 
+        # ── 20. 词汇语料库事件 ──
+        vocab_keyword_btn.click(
+            fn=app.add_vocab_keyword,
+            inputs=[vocab_keyword_input],
+            outputs=[vocab_msg, vocab_corpus_summary_md]
+        )
+        vocab_forbidden_btn.click(
+            fn=app.add_vocab_forbidden,
+            inputs=[vocab_forbidden_input],
+            outputs=[vocab_msg, vocab_corpus_summary_md]
+        )
+
+        # ── 21. 扩展组件交互更新 (Plan, Review, Finalize, Agent Hub) ──
+        def update_plan_components():
+            # 联动：问卷路由方向(subtype)传导到文种下拉框默认值，避免行政模式默认生成"通讯"
+            md = app.get_doc_type_recommendation()
+            doc_enum = app.get_recommended_doc_enum()
+            dd_update = gr.update(value=DOC_TYPE_ENUM_TO_LABEL[doc_enum]) if doc_enum else gr.update()
+            return md, dd_update
+            
+        # 当问卷提交/提前完成时更新文种推荐与下拉框默认值
+        # （V11 布局无对应"下一题"按钮，改挂在 submit/finish 上）
+        q_btn_submit.click(
+            fn=update_plan_components,
+            outputs=[doc_type_recommend_md, ui_doc_selector]
+        )
+        q_btn_finish.click(
+            fn=update_plan_components,
+            outputs=[doc_type_recommend_md, ui_doc_selector]
+        )
+
+        def update_style_components(style_lbl, intensity):
+            return app.get_style_detail_display(style_lbl, intensity)
+            
+        ui_style_selector.change(fn=update_style_components, inputs=[ui_style_selector, style_intensity_slider], outputs=[style_detail_md, style_blend_md])
+        style_intensity_slider.change(fn=update_style_components, inputs=[ui_style_selector, style_intensity_slider], outputs=[style_detail_md, style_blend_md])
+
+        # 注意：此处使用 .then 附加在原有的 write_btn_next 和 re_review_btn 上，
+        # 因为原逻辑中 write_btn_next 已经绑定了 safe_write_next，不应该覆盖原有绑定。
+        # 我们用 .then 追加更新辅助组件
+        def update_review_components():
+            history = app.get_review_history_display()
+            hub = app.get_agent_coordination_report()
+            # 获取 draft_editor 的内容不太方便通过 then 直接拿，但由于我们不修改核心流，
+            # 这里的 text 参数可以留空，后续可以进一步优化。
+            # 这里简单起见，我们只更新没有外部依赖的内容。
+            # 为了获取诊断，我们需要传入最新的草稿，这会比较复杂，因为在链式调用中。
+            # 最好是通过 gradio 的 gr.State 或者直接绑定一个读取最新草稿的函数。
+            # 但是最简单的方案：不直接在 .then 绑定无参数的方法，而是额外在草稿更新时更新诊断。
+            return history, hub
+
+        write_btn_next.click(
+            fn=update_review_components,
+            outputs=[review_iteration_history_md, agent_coordination_report_md]
+        )
+        
+        re_review_btn.click(
+            fn=update_review_components,
+            outputs=[review_iteration_history_md, agent_coordination_report_md]
+        )
+        
+        def do_kb_diagnosis(text):
+            return app.get_kb_diagnostics_display(text)
+            
+        draft_editor.change(fn=do_kb_diagnosis, inputs=[draft_editor], outputs=[kb_diagnosis_detail_md])
+        manual_edit_text.change(fn=do_kb_diagnosis, inputs=[manual_edit_text], outputs=[kb_diagnosis_detail_md])
+
+        def update_finalize_components():
+            return app.get_token_stats_display()
+
+        review_btn_next.click(
+            fn=update_finalize_components,
+            outputs=[token_stats_md]
+        )
+
+
         def update_bg_theme(choice):
             if choice == "经典流光 (Classic Fluid)":
                 return THEME_CLASSIC_HTML
-            else:
-                return THEME_STARRY_NIGHT_HTML
+            if choice == "苹果极简 (Apple Minimal)":
+                return THEME_APPLE_MINIMAL_HTML
+            return THEME_STARRY_NIGHT_HTML
                 
         bg_theme_selector.change(
             fn=update_bg_theme,

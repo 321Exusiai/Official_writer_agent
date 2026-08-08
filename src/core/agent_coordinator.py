@@ -18,6 +18,7 @@ Agent 协同调度系统 — "一党执政，民主协商" 模式
 from dataclasses import dataclass, field
 from typing import List, Dict, Optional, Any, Callable, Tuple
 from enum import Enum
+from collections import deque
 import json
 import time
 import uuid
@@ -31,6 +32,34 @@ class AgentRole(Enum):
     KNOWLEDGE_BASE = "knowledge_base"
     DOC_TYPE_IDENTIFIER = "doc_type_identifier"
     PERSONALIZED_DB = "personalized_db"
+
+
+# 各 Agent 职责矩阵（供系统全景注入，LLM 可见性保障）
+AGENT_RESPONSIBILITY_MATRIX = {
+    AgentRole.ORCHESTRATOR: "总指挥：拥有最终决策权，统一调度各 Agent，对结果负总责",
+    AgentRole.WRITER: "主笔：起草与修订文稿，关注内容充实、表达清晰、素材运用",
+    AgentRole.REVIEWER: "审稿人：质量把关，关注事实准确性、格式合规性、语言规范性",
+    AgentRole.STYLE_ADAPTER: "风格专家：文种-风格匹配、风格强度适配",
+    AgentRole.KNOWLEDGE_BASE: "知识库：推送标杆范文、规范术语、写作提示",
+    AgentRole.DOC_TYPE_IDENTIFIER: "文种专家：文种选择与行文规则把关",
+    AgentRole.PERSONALIZED_DB: "用户画像：历史偏好、常见弱点与反偏见",
+}
+
+# 角色展示名（协商/决策/辩论/注入时让 LLM 明确"谁说了什么"）
+ROLE_DISPLAY_NAMES = {
+    AgentRole.ORCHESTRATOR: "Orchestrator（总指挥）",
+    AgentRole.WRITER: "Writer（主笔）",
+    AgentRole.REVIEWER: "Reviewer（审稿人）",
+    AgentRole.STYLE_ADAPTER: "StyleAdapter（风格专家）",
+    AgentRole.KNOWLEDGE_BASE: "KnowledgeBase（知识库）",
+    AgentRole.DOC_TYPE_IDENTIFIER: "DocTypeIdentifier（文种专家）",
+    AgentRole.PERSONALIZED_DB: "PersonalizedDB（用户画像）",
+}
+
+
+def role_display_name(role: AgentRole) -> str:
+    """角色展示名（协商/决策/辩论/注入时用）"""
+    return ROLE_DISPLAY_NAMES.get(role, role.value if role else "未知角色")
 
 
 class MessageType(Enum):
@@ -177,7 +206,7 @@ class MessageBus:
 
     def __init__(self):
         self._inbox: Dict[AgentRole, List[AgentMessage]] = {role: [] for role in AgentRole}
-        self._history: List[AgentMessage] = []
+        self._history = deque(maxlen=500)
         self._subscribers: Dict[MessageType, List[Callable]] = {mt: [] for mt in MessageType}
         self._message_count = 0
 
@@ -191,7 +220,10 @@ class MessageBus:
         self._message_count += 1
 
         for handler in self._subscribers.get(msg.msg_type, []):
-            handler(msg)
+            try:
+                handler(msg)
+            except Exception:
+                pass
 
     def receive(self, receiver: AgentRole) -> List[AgentMessage]:
         """接收消息，按优先级排序。快速路径：无消息时直接返回空列表"""
@@ -341,7 +373,7 @@ class AgentCoordinator:
         """注册内置的 Agent 事件订阅者（实现真正的消息驱动联动）"""
         # 订阅决策事件 → 自动更新 agent log
         def on_decision(msg: AgentMessage):
-            payload = msg.payload if isinstance(msg, (dict,)) else getattr(msg, 'payload', {})
+            payload = msg.payload
             self.consultation_log.append({
                 "topic": payload.get("topic", ""),
                 "decision": payload.get("decision", ""),
@@ -355,7 +387,7 @@ class AgentCoordinator:
 
         # 订阅共识事件 → 自动记录辩论结果
         def on_consensus(msg: AgentMessage):
-            payload = msg.payload if isinstance(msg, (dict,)) else getattr(msg, 'payload', {})
+            payload = msg.payload
             self.consultation_log.append({
                 "type": "consensus",
                 "topic": payload.get("topic", ""),
@@ -376,77 +408,99 @@ class AgentCoordinator:
         participants: List[AgentRole],
         context: Dict[str, Any] = None,
         llm_call: Callable = None,
+        max_rounds: int = 1,
     ) -> Dict[AgentRole, Dict[str, Any]]:
         """
-        决策前民主协商
+        决策前民主协商（V3：真多轮）
 
         流程：
         1. Orchestrator 发出协商议题
-        2. 各参与 Agent 发表意见（优先使用 LLM 生成，规则匹配兜底）
-        3. Orchestrator 汇总意见，做出最终决策
+        2. Round 1：各参与 Agent 发表意见（LLM 生成，规则匹配兜底）
+        3. Round 2+：把上一轮各方意见带角色标签回传，各 Agent 回应/确认/修正
+        4. Orchestrator 汇总意见，做出最终决策
 
         Args:
             decision_topic: 协商议题
             participants: 参与协商的 Agent
             context: 协商背景信息（包含 plan、brief、writing_mode 等）
             llm_call: LLM 调用函数 (system_prompt, user_prompt) -> str，None 时使用规则匹配
+            max_rounds: 协商轮数（>=1）。每多一轮增加参与者数量次 LLM 调用。
 
         Returns:
             各 Agent 的反馈意见
         """
-        responses = {}
+        if not participants:
+            return {}
 
         consultation_msg = AgentMessage.create(
             sender=AgentRole.ORCHESTRATOR,
             receiver=AgentRole.ORCHESTRATOR,
             msg_type=MessageType.CONSULTATION,
             action="consult",
-            payload={"topic": decision_topic, "participants": [p.value for p in participants]},
+            payload={
+                "topic": decision_topic,
+                "participants": [p.value for p in participants],
+                "rounds": max_rounds,
+            },
             priority=MessagePriority.HIGH,
         )
         self.bus.send(consultation_msg)
 
         from concurrent.futures import ThreadPoolExecutor
 
-        requests = {}
-        for agent_role in participants:
-            request = AgentMessage.create(
-                sender=AgentRole.ORCHESTRATOR,
-                receiver=agent_role,
-                msg_type=MessageType.CONSULTATION,
-                action="request_opinion",
-                payload={"topic": decision_topic, "context": context or {}},
-            )
-            self.bus.send(request)
-            requests[agent_role] = request
+        responses: Dict[AgentRole, Dict[str, Any]] = {}
 
-        def query_agent(agent_role):
-            if llm_call:
-                response = self._llm_agent_response(agent_role, decision_topic, context or {}, llm_call)
-            else:
-                response = self._simulate_agent_response(agent_role, decision_topic, context)
-            return agent_role, response
+        for round_idx in range(max(1, max_rounds)):
+            # 上一轮意见摘要（带角色标签），供本轮各 Agent 回应
+            prior_opinions = self._summarize_opinions(responses) if round_idx > 0 else ""
 
-        with ThreadPoolExecutor(max_workers=len(participants)) as executor:
-            future_to_role = {executor.submit(query_agent, role): role for role in participants}
-            for future in future_to_role:
-                agent_role, response = future.result()
-                responses[agent_role] = response
-
-                request = requests[agent_role]
-                response_msg = AgentMessage.create(
-                    sender=agent_role,
-                    receiver=AgentRole.ORCHESTRATOR,
-                    msg_type=MessageType.RESPONSE,
-                    action="opinion",
-                    payload=response,
-                    reply_to=request.msg_id,
+            requests = {}
+            for agent_role in participants:
+                request = AgentMessage.create(
+                    sender=AgentRole.ORCHESTRATOR,
+                    receiver=agent_role,
+                    msg_type=MessageType.CONSULTATION,
+                    action="request_opinion",
+                    payload={
+                        "topic": decision_topic,
+                        "context": context or {},
+                        "round": round_idx + 1,
+                    },
                 )
-                self.bus.send(response_msg)
+                self.bus.send(request)
+                requests[agent_role] = request
+
+            def query_agent(agent_role):
+                if llm_call:
+                    response = self._llm_agent_response(
+                        agent_role, decision_topic, context or {}, llm_call,
+                        round_idx=round_idx, prior_opinions=prior_opinions,
+                    )
+                else:
+                    response = self._simulate_agent_response(agent_role, decision_topic, context)
+                return agent_role, response
+
+            with ThreadPoolExecutor(max_workers=len(participants)) as executor:
+                future_to_role = {executor.submit(query_agent, role): role for role in participants}
+                for future in future_to_role:
+                    agent_role, response = future.result()
+                    responses[agent_role] = response
+
+                    request = requests[agent_role]
+                    response_msg = AgentMessage.create(
+                        sender=agent_role,
+                        receiver=AgentRole.ORCHESTRATOR,
+                        msg_type=MessageType.RESPONSE,
+                        action="opinion",
+                        payload=response,
+                        reply_to=request.msg_id,
+                    )
+                    self.bus.send(response_msg)
 
         self.consultation_log.append({
             "topic": decision_topic,
             "participants": [p.value for p in participants],
+            "rounds": max_rounds,
             "responses": {r.value: v for r, v in responses.items()},
             "timestamp": time.time(),
         })
@@ -593,6 +647,7 @@ class AgentCoordinator:
         topic: str,
         consultation_responses: Dict[AgentRole, Dict[str, Any]] = None,
         proactive_reports: List[Dict[str, Any]] = None,
+        llm_call: Callable = None,
     ) -> Dict[str, Any]:
         """
         民主集中制决策：先民主（征询）后集中（决策）
@@ -601,9 +656,10 @@ class AgentCoordinator:
             topic: 决策议题
             consultation_responses: 协商阶段收集的各 Agent 意见
             proactive_reports: 主动上报的问题
+            llm_call: 传入时用 LLM 基于各方意见生成最终决策与理由；失败/缺省时回退模板
 
         Returns:
-            最终决策
+            最终决策（含 role_opinions 角色归属）
         """
         decision = {
             "topic": topic,
@@ -613,19 +669,31 @@ class AgentCoordinator:
             "rationale": "",
         }
 
+        # 保留角色归属：谁说了什么（多轮协商的结构化输出，注入时按角色呈现）
+        role_opinions: Dict[str, Dict[str, List[str]]] = {}
         if consultation_responses:
             for role, resp in consultation_responses.items():
+                role_opinions[role.value] = {
+                    "concerns": resp.get("concerns", []),
+                    "suggestions": resp.get("suggestions", []),
+                }
                 if resp.get("concerns"):
                     decision.setdefault("concerns", []).extend(resp["concerns"])
                 if resp.get("suggestions"):
                     decision.setdefault("suggestions", []).extend(resp["suggestions"])
+        decision["role_opinions"] = role_opinions
 
         if proactive_reports:
             for report in proactive_reports:
                 decision.setdefault("alerts", []).append(report.get("alert", ""))
 
-        decision["decision"] = self._orchestrator_decision(topic, decision)
-        decision["rationale"] = f"基于{decision['consultation_count']}方意见和{decision['alert_count']}个预警"
+        if llm_call:
+            llm_decision, llm_rationale = self._llm_orchestrator_decision(topic, decision, llm_call)
+            decision["decision"] = llm_decision or self._orchestrator_decision(topic, decision)
+            decision["rationale"] = llm_rationale or f"基于{decision['consultation_count']}方意见和{decision['alert_count']}个预警"
+        else:
+            decision["decision"] = self._orchestrator_decision(topic, decision)
+            decision["rationale"] = f"基于{decision['consultation_count']}方意见和{decision['alert_count']}个预警"
 
         decision_msg = AgentMessage.create(
             sender=AgentRole.ORCHESTRATOR,
@@ -647,9 +715,11 @@ class AgentCoordinator:
         topic: str,
         context: Dict[str, Any],
         llm_call: Callable,
+        round_idx: int = 0,
+        prior_opinions: str = "",
     ) -> Dict[str, Any]:
         """
-        使用 LLM 生成 Agent 的协商意见（V2 核心改进）
+        使用 LLM 生成 Agent 的协商意见（V3：系统全景可见 + 多轮回应）
 
         Token 优化集成：
           C. ContextManager：多轮协商历史分层管理（省 80-90%）
@@ -657,20 +727,54 @@ class AgentCoordinator:
           F. ModelRouter：按议题复杂度分类，简单任务可用便宜模型
         """
         role_profiles = {
-            AgentRole.WRITER: "你是一名资深公文撰写者（Writer Agent），10年体制内写作经验。你的职责是确保文章内容饱满、表达有力、逻辑清晰。",
-            AgentRole.REVIEWER: "你是一名严格的公文审查者（Reviewer Agent），精通公文质量标准。你的职责是发现文章中的问题、错误和潜在风险。",
-            AgentRole.STYLE_ADAPTER: "你是一名文体风格专家（Style Adapter Agent），精通14种媒体风格和36种修辞技法。你的职责是确保文章风格与媒体调性匹配。",
-            AgentRole.KNOWLEDGE_BASE: "你是一名知识库管理员（Knowledge Base Agent），掌握大量标杆范文和公文写作规范。你的职责是推送相关范文和术语。",
-            AgentRole.DOC_TYPE_IDENTIFIER: "你是一名文种辨析专家（Document Type Agent），精通16类公文文种的格式规范。你的职责是确保文种选择正确且格式合规。",
-            AgentRole.PERSONALIZED_DB: "你是一名用户画像分析师（Personalized DB Agent），了解用户的历史写作偏好。你的职责是提供个性化建议，避免重复历史错误。",
+            AgentRole.WRITER: (
+                "你负责起草文稿（Writer Agent）。"
+                "关注三件事：内容是否充实、表达是否清晰、素材是否用到位。"
+                "如果素材不够或者方向有偏差，直接说出来，不要硬写。"
+                "不同文体有不同写法，法定公文开门见山，新闻通讯讲究主体性，别用一套方法套所有场景。"
+            ),
+            AgentRole.REVIEWER: (
+                "你负责质量把关（Reviewer Agent）。"
+                "关注事实准确性、格式合规性、语言规范性。"
+                "发现问题要给出具体位置和修改方向，不只是说'有问题'。"
+                "审查标准按文体区分：法定公文查四要求（准确、简明、朴实、得体）和格式规范，新闻通讯查主体性和叙事质量。"
+            ),
+            AgentRole.STYLE_ADAPTER: (
+                "你负责风格适配（Style Adapter Agent）。"
+                "关注文种与风格是否匹配、风格强度是否合适。"
+                "行政公文不该用文学风格，新闻稿不该套公文格式，这些冲突要提前预警。"
+                "风格是为内容服务的，不是反过来。"
+            ),
+            AgentRole.KNOWLEDGE_BASE: (
+                "你负责范文和术语支持（Knowledge Base Agent）。"
+                "关注当前写作任务有没有可参考的标杆范文、术语用得准不准。"
+                "有好的参考素材就推送给主笔，但范文是学结构不是抄句子。"
+                "术语要结合具体场景用，生搬硬套不如不用。"
+            ),
+            AgentRole.DOC_TYPE_IDENTIFIER: (
+                "你负责文种辨析（Document Type Agent）。"
+                "关注文种选择对不对、格式符不符合该文种的规范。"
+                "请示不能一文多事、报告不能夹带请示、函不能用于上下级——这些行文规则问题你来把关。"
+                "文种选错了，后面写得再好也是白费。"
+            ),
+            AgentRole.PERSONALIZED_DB: (
+                "你负责用户画像（Personalized DB Agent）。"
+                "关注用户的历史偏好和常见弱点。"
+                "如果用户上次犯过同类错误，提醒一下；如果用户偏好某种风格，可以建议。"
+                "但个性化不是迁就，用户习惯里的毛病该指出还是要指出。"
+            ),
         }
 
         plan_info = context.get("plan", "")
         brief_info = context.get("brief", "")
         writing_mode = context.get("writing_mode", "")
+        env_state_info = context.get("env_state", "")
+        user_memory_info = context.get("user_memory", "")
 
         # ── Strategy D: 缓存对齐（静态角色描述前置 + 动态议题后置）──
-        static_part = role_profiles.get(agent_role, "你是一名公文写作专家。")
+        # 系统全景：让协商 Agent 看到系统提示词、各 Agent 职责、工具职责（LLM 可见性保障）
+        static_part = self.build_agent_orientation()
+        static_part += "\n\n" + role_profiles.get(agent_role, "你是一名公文写作专家。")
         # ── Strategy E: 隐式推理（协商场景直接给结果，省70%推理token）──
         from ..utils.token_optimizer import ImplicitReasoning
         static_part += "\n\n" + ImplicitReasoning.get_injection("basic")
@@ -681,6 +785,12 @@ class AgentCoordinator:
 **协商议题**：{topic}
 
 **写作模式**：{writing_mode}
+**环境状态**：
+{env_state_info or "（暂无）"}
+
+**用户记忆**：
+{user_memory_info or "（暂无）"}
+
 **写作方案**：
 {plan_info[:1500]}
 
@@ -696,13 +806,23 @@ class AgentCoordinator:
 如果你没有发现任何问题，concerns 可以返回空数组，但 suggestions 必须有至少1条建设性建议。
 如果你认为方案没有问题，请明确说明为什么方案是合理的。"""
 
+        # 多轮协商：附上其他 Agent 上一轮意见，要求回应（真多轮）
+        if round_idx > 0 and prior_opinions:
+            dynamic_part += f"""
+
+**其他 Agent 的上一轮意见（请逐一回应：认同的确认、分歧的说明理由，再给出你的最终意见）**：
+{prior_opinions}"""
+
         # CacheAligner 重排：静态前置 + 动态后置
         system_prompt = self._cache_aligner.reorder_for_cache(static_part, "")
         user_prompt = dynamic_part
 
-        # ── Strategy D: LRU 缓存检查（相同 agent+topic 直接返回）──
+        # ── Strategy D: LRU 缓存检查（相同 agent+topic+round 直接返回）──
         from ..utils.response_cache import cached_prompt, store_prompt, make_cache_key
-        cache_key = make_cache_key(agent_role.value, topic, writing_mode)
+        cache_key = make_cache_key(
+            agent_role.value, topic, writing_mode, round_idx,
+            plan_info, brief_info, env_state_info, user_memory_info,
+        )
         with self._lock:
             cached = cached_prompt("agent_consultation", cache_key)
         if cached:
@@ -724,7 +844,7 @@ class AgentCoordinator:
                 self._context_mgr.add_message("assistant", raw[:200] if raw else "")
 
             # 缓存成功响应
-            if raw and len(raw) > 10:
+            if raw and len(raw) > 10 and "占位文本" not in raw:
                 with self._lock:
                     store_prompt("agent_consultation", raw, cache_key)
 
@@ -732,6 +852,102 @@ class AgentCoordinator:
         except Exception:
             # LLM 调用失败时回退到规则匹配
             return self._simulate_agent_response(agent_role, topic, context)
+
+    # ═══ 系统全景与协商辅助（LLM 可见性保障 / 真多轮）═══
+
+    def build_agent_orientation(self) -> str:
+        """
+        生成系统全景文本：工作流状态机 + 各 Agent 职责矩阵 + 工具职责清单。
+
+        注入到协商/决策/辩论的 LLM system prompt，让 LLM 能看到整个系统：
+        有哪些组件、每个 Agent 的职责、有哪些工具及各自用途。
+        """
+        lines = [
+            "# 系统全景（多智能体公文写作系统）",
+            "",
+            "## 工作流状态机",
+            "IDLE → ROUTING（决策树路由）→ MODE_QUESTIONING（模式问卷）→ PLANNING（规划与协商）"
+            "→ WRITING（写作）→ REVIEWING（迭代审查/辩论）→ COMPLETED",
+            "",
+            "## 各 Agent 职责矩阵",
+        ]
+        for role in AgentRole:
+            if role != AgentRole.ORCHESTRATOR:
+                lines.append(f"- {role_display_name(role)}：{AGENT_RESPONSIBILITY_MATRIX.get(role, '')}")
+        lines.append(f"- {role_display_name(AgentRole.ORCHESTRATOR)}：{AGENT_RESPONSIBILITY_MATRIX.get(AgentRole.ORCHESTRATOR, '')}")
+        lines.append("")
+        lines.append("## 可用工具及职责")
+        try:
+            from ..config.tool_definitions import TOOL_DEFINITIONS
+            for t in TOOL_DEFINITIONS:
+                lines.append(f"- {t.name}：{t.description}")
+        except Exception:
+            lines.append("（工具清单不可用）")
+        return "\n".join(lines)
+
+    def _summarize_opinions(self, responses: Dict[AgentRole, Dict[str, Any]]) -> str:
+        """把上一轮各方意见汇总为带角色标签的文本（多轮协商反馈用）"""
+        lines = []
+        for role, resp in responses.items():
+            parts = [f"【{role_display_name(role)}】"]
+            for c in (resp.get("concerns") or [])[:2]:
+                parts.append(f"  关注：{c}")
+            for s in (resp.get("suggestions") or [])[:2]:
+                parts.append(f"  建议：{s}")
+            if len(parts) > 1:
+                lines.append("\n".join(parts))
+        return "\n".join(lines)
+
+    def _format_role_opinions(self, role_opinions: Dict[str, Dict[str, List[str]]]) -> str:
+        """把带角色归属的意见格式化为文本（决策 LLM 调用输入）"""
+        lines = []
+        for role_value, opinions in role_opinions.items():
+            try:
+                role = AgentRole(role_value)
+            except ValueError:
+                role = None
+            name = role_display_name(role) if role else role_value
+            parts = [f"【{name}】"]
+            for c in (opinions.get("concerns") or [])[:2]:
+                parts.append(f"  关注：{c}")
+            for s in (opinions.get("suggestions") or [])[:2]:
+                parts.append(f"  建议：{s}")
+            if len(parts) > 1:
+                lines.append("\n".join(parts))
+        return "\n".join(lines)
+
+    def _llm_orchestrator_decision(
+        self, topic: str, decision: Dict[str, Any], llm_call: Callable
+    ) -> Tuple[str, str]:
+        """用 LLM 基于各方意见生成最终决策与理由（Orchestrator 裁决），失败返回空"""
+        opinions_text = self._format_role_opinions(decision.get("role_opinions", {}))
+        system_prompt = (
+            self.build_agent_orientation()
+            + "\n\n你是 Orchestrator（总指挥），拥有最终决策权。"
+            "在各方意见分歧时，依据文体规范与写作目标做出最终裁决。"
+            "决策要具体可执行，不是和稀泥。"
+            "\n\n请用JSON格式输出，只输出JSON："
+            '{"decision": "最终决策", "rationale": "决策依据（结合各方意见说明）"}'
+        )
+        user_prompt = f"""协商议题：{topic}
+
+各方意见：
+{opinions_text or "（无意见）"}
+
+请给出最终决策与决策依据："""
+        try:
+            raw = llm_call(system_prompt, user_prompt)
+            if not raw or "占位文本" in raw:
+                return "", ""
+            json_str = raw.strip()
+            if "```json" in json_str:
+                json_str = json_str.split("```json")[1].split("```")[0].strip()
+            elif "```" in json_str:
+                json_str = json_str.split("```")[1].split("```")[0].strip()
+            data = json.loads(json_str)
+            return data.get("decision", ""), data.get("rationale", "")
+        except Exception:
+            return "", ""
 
     def _parse_llm_json_response(self, raw: str, agent_role: AgentRole) -> Dict[str, Any]:
         """安全解析 LLM 返回的 JSON，处理各种格式异常"""
@@ -948,9 +1164,16 @@ class AgentCoordinator:
         round_num: int,
         llm_call: Callable,
     ) -> str:
-        """使用 LLM 生成辩论反驳（V2 核心改进）"""
-        role_name = "资深公文撰写者" if agent_role == AgentRole.WRITER else "严格公文审查者"
-        system_prompt = f"你是一名{role_name}，正在参与一场专业辩论。请针对对方的观点提出有力反驳。"
+        """使用 LLM 生成辩论反驳（V3：注入系统全景，明确双方职责）"""
+        role_name = "撰写方" if agent_role == AgentRole.WRITER else "审查方"
+        system_prompt = (
+            self.build_agent_orientation()
+            + "\n\n你是"
+            + role_name
+            + "，正在参与文稿质量讨论。"
+            "对方提出了意见，你需要从专业角度回应：认同合理的部分，解释有分歧的部分。"
+            "聚焦具体问题，不要泛泛而谈，也不要为了反驳而反驳。"
+        )
         user_prompt = f"""辩论议题：{topic}
 
 对方（{'审查方' if agent_role == AgentRole.WRITER else '撰写方'}）的观点：
@@ -972,8 +1195,13 @@ class AgentCoordinator:
         reviewer_pos: str,
         llm_call: Callable,
     ) -> str:
-        """使用 LLM 生成共识（V2 核心改进）"""
-        system_prompt = "你是一名公正的调解者，需要在辩论双方之间找到共同点和可行的折中方案。"
+        """使用 LLM 生成共识（V3：注入系统全景）"""
+        system_prompt = (
+            self.build_agent_orientation()
+            + "\n\n你需要在撰写方和审查方之间找到平衡。"
+            "两边都有道理时，看哪个更符合文体规范和读者需求。"
+            "给出具体的处理方案，不是和稀泥。"
+        )
         user_prompt = f"""辩论议题：{topic}
 
 撰写方最终立场：

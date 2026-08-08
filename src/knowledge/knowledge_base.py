@@ -16,6 +16,7 @@ V3.0 重大更新：
 from dataclasses import dataclass, field
 from typing import List, Dict, Optional
 from enum import Enum
+import re
 
 
 class KnowledgeCategory(Enum):
@@ -1031,6 +1032,87 @@ FORMAT_ERRORS_DB: Dict[str, FormatError] = {
         category="结尾",
         check_method="structural",
     ),
+    "qingshi_multitheme": FormatError(
+        id="qingshi_multitheme",
+        name="请示一文多事",
+        description="《党政机关公文处理工作条例》规定：请示应当一文一事。常见错误：在一份请示中同时请求批准多个不相关事项",
+        prescription="将多个事项拆分为多份请示，每份只解决一个问题",
+        severity="critical",
+        category="行文规则",
+        check_method="structural",
+    ),
+    "baogao_with_qingshi": FormatError(
+        id="baogao_with_qingshi",
+        name="报告夹带请示事项",
+        description="《党政机关公文处理工作条例》规定：不得在报告等非请示性公文中夹带请示事项。报告只用于汇报，不用于请求批准",
+        prescription="删除报告中的请示性内容，如需请示另行发文",
+        severity="critical",
+        category="行文规则",
+        check_method="structural",
+    ),
+    "han_for_subordinate": FormatError(
+        id="han_for_subordinate",
+        name="函用于上下级",
+        description="函适用于不相隶属机关之间。常见错误：上下级机关之间用函行文（应用通知/请示/批复）",
+        prescription="上下级之间用相应文种（上行用请示/报告，下行用通知/批复），函仅用于不相隶属机关",
+        severity="critical",
+        category="文种错用",
+        check_method="structural",
+    ),
+    "literary_metaphor": FormatError(
+        id="literary_metaphor",
+        name="公文使用文学性比喻",
+        description="法定公文用'直笔'不用'曲笔'，禁止使用比喻、拟人、夸张等修辞手法。常见错误：'犹如一幅画卷''宛如一首诗''仿佛置身于'",
+        prescription="删除所有文学性比喻词，改用直白叙述和说明",
+        severity="major",
+        category="表达方式",
+        check_method="pattern",
+    ),
+    "lyrical_description": FormatError(
+        id="lyrical_description",
+        name="公文使用抒情描写",
+        description="法定公文基本不用描写和抒情。常见错误：'令人心潮澎湃''让人感慨万千''不禁热泪盈眶'",
+        prescription="删除抒情性描写，改为客观陈述事实",
+        severity="major",
+        category="表达方式",
+        check_method="pattern",
+    ),
+    "ambiguous_words": FormatError(
+        id="ambiguous_words",
+        name="用词产生歧义",
+        description="公文语言四要求之首是'准确'——一词一句只能有一种解释。常见歧义词：'有关''相关''适当''酌情''尽快'",
+        prescription="将模糊词替换为具体明确的表述（如'有关单位'改为'XX部门'，'尽快'改为'X月X日前'）",
+        severity="major",
+        category="语言四要求",
+        check_method="pattern",
+    ),
+    "inappropriate_tone": FormatError(
+        id="inappropriate_tone",
+        name="语气与行文关系不匹配",
+        description="公文语言要求'得体'：上行文突出请示性，下行文强调指令性，平行文注重协商性。常见错误：下行文用'希望''建议'（应用'要求''务必'）；上行文用'必须''应当'（应用'拟''建议'）",
+        prescription="根据行文方向调整语气：上行文谦请，下行文明确，平行文平等协商",
+        severity="major",
+        category="语言四要求",
+        check_method="structural",
+    ),
+    "verbose_platitudes": FormatError(
+        id="verbose_platitudes",
+        name="公文语言不简明",
+        description="公文语言要求'简明'：开门见山，摒弃大话空话套话。常见错误：开篇冗长铺垫、过度修饰、堆砌形容词",
+        prescription="删除铺垫和修饰，直陈事项。一句话能说清的不用两句",
+        severity="minor",
+        category="语言四要求",
+        check_method="pattern",
+    ),
+    "flowered_language": FormatError(
+        id="flowered_language",
+        name="公文语言不朴实",
+        description="公文语言要求'朴实'：平易朴实，忌用华丽辞藻。常见错误：'宏伟蓝图''壮丽篇章''辉煌成就'",
+        prescription="将华丽辞藻替换为朴实表述（如'宏伟蓝图'改为'发展规划'）",
+        severity="minor",
+        category="语言四要求",
+        check_method="pattern",
+    ),
 }
 
 
@@ -1062,6 +1144,7 @@ ERROR_PATTERNS_DB: Dict[str, Dict] = {
     "no_strategic_anchor": {
         "name": "缺少战略锚点",
         "patterns": [],
+        "auto_detectable": False,
         "diagnosis": "行程板块读起来像独立游记，与开篇的班级定位、培养方案脱节",
         "prescription": "为每个行程板块添加一句'为什么是这里'",
         "example_bad": "（直接描述行程内容，没有战略关联句）",
@@ -1072,6 +1155,7 @@ ERROR_PATTERNS_DB: Dict[str, Dict] = {
     "external_without_link": {
         "name": "外部权威未建立关联",
         "patterns": [],
+        "auto_detectable": False,
         "diagnosis": "记录了外部权威的言行，但没有建立与我方的关联",
         "prescription": "在外部权威观点后添加一句'这印证了……'或'这与……一脉相承'",
         "example_bad": "张院士指出，人工智能的未来在于交叉创新。",
@@ -1112,6 +1196,7 @@ ERROR_PATTERNS_DB: Dict[str, Dict] = {
     "format_title_wrong": {
         "name": "公文标题格式错误",
         "patterns": [],
+        "auto_detectable": False,
         "diagnosis": "标题缺少发文机关、事由或文种某一元素，或三者顺序错误",
         "prescription": "严格按照'XX单位关于XXXX的通知/请示/批复/函/纪要'格式",
         "example_bad": "关于举办活动的通知",
@@ -1122,6 +1207,7 @@ ERROR_PATTERNS_DB: Dict[str, Dict] = {
     "wrong_doc_type_mix": {
         "name": "文种混用",
         "patterns": [],
+        "auto_detectable": False,
         "diagnosis": "报告中夹带请示事项，或请示中混入报告内容，或将'请示报告'作为文种",
         "prescription": "请示和报告严格分开。请示请求批准（需批复），报告汇报情况（不需批复）。需要上级批准的单独写请示",
         "example_bad": "XX关于XX工作的请示报告",
@@ -1132,6 +1218,7 @@ ERROR_PATTERNS_DB: Dict[str, Dict] = {
     "multi_topic_in_request": {
         "name": "请示一文多事",
         "patterns": [],
+        "auto_detectable": False,
         "diagnosis": "一份请示中包含多个不相关的事项",
         "prescription": "请示必须一文一事。多个事项需要请示的，分别行文",
         "example_bad": "关于申请追加经费并调整人员编制的请示",
@@ -1501,24 +1588,34 @@ class KnowledgeBase:
         """基于模式匹配的自动错误诊断"""
         findings = []
         for err_id, pattern in self.error_patterns.items():
+            # 标记为不可自动检测的错误类型直接跳过（需语义理解，无法靠模式匹配）
+            if not pattern.get("auto_detectable", True):
+                continue
             for p in pattern.get("patterns", []):
-                if p in text:
-                    findings.append({
-                        "error_id": err_id,
-                        "name": pattern["name"],
-                        "diagnosis": pattern["diagnosis"],
-                        "prescription": pattern["prescription"],
-                        "example_good": pattern.get("example_good", ""),
-                        "severity": pattern["severity"],
-                        "category": pattern["category"],
-                    })
-                    break
+                # 高频短词（<=2字）误报率高，需多次出现才判定为模式
+                if len(p) <= 2:
+                    if text.count(p) < 3:
+                        continue
+                elif p not in text:
+                    continue
+                findings.append({
+                    "error_id": err_id,
+                    "name": pattern["name"],
+                    "diagnosis": pattern["diagnosis"],
+                    "prescription": pattern["prescription"],
+                    "example_good": pattern.get("example_good", ""),
+                    "severity": pattern["severity"],
+                    "category": pattern["category"],
+                })
+                break
         return findings
 
     def diagnose_format(self, text: str) -> List[Dict[str, str]]:
-        """格式错误诊断"""
+        """格式错误诊断：根据 check_method 对 text 执行实际检查"""
         findings = []
         for err_id, fmt_err in self.format_errors.items():
+            if not self._check_format_error(err_id, text):
+                continue
             findings.append({
                 "error_id": err_id,
                 "name": fmt_err.name,
@@ -1528,6 +1625,86 @@ class KnowledgeBase:
                 "category": fmt_err.category,
             })
         return findings
+
+    def _check_format_error(self, err_id: str, text: str) -> bool:
+        """根据 check_method 对单个格式错误执行实际检查（保守策略，避免误报）"""
+        if not text:
+            return False
+        fmt_err = self.format_errors.get(err_id)
+        if fmt_err is None:
+            return False
+        if fmt_err.check_method == "pattern":
+            return self._check_format_pattern(err_id, text)
+        return self._check_format_structural(err_id, text)
+
+    def _check_format_structural(self, err_id: str, text: str) -> bool:
+        """结构性检查：标题三要素、日期、引文、结尾等"""
+        if err_id == "title_3elements_missing":
+            # 取首个非空行作为标题候选
+            title = ""
+            for line in text.splitlines():
+                if line.strip():
+                    title = line.strip()
+                    break
+            doc_types = ["通知", "请示", "批复", "函", "纪要", "报告", "决定", "意见"]
+            if not any(dt in title for dt in doc_types):
+                return False
+            # 以"关于"开头 -> 缺发文机关
+            if title.startswith("关于"):
+                return True
+            # 含文种但无"关于"且标题过短 -> 缺事由
+            if "关于" not in title and len(title) <= 4:
+                return True
+            return False
+        if err_id == "date_format_wrong":
+            # 汉字数字年份
+            if re.search(r"二[〇零一三四五六七八九]+年", text):
+                return True
+            # 编虚位（如 05月、05日）
+            if re.search(r"\d{4}年0\d月", text):
+                return True
+            if re.search(r"\d{4}年\d{1,2}月0\d日", text):
+                return True
+            return False
+        if err_id == "citation_format_wrong":
+            # 文号〔〕号未配合书名号《》
+            if re.search(r"根据[^《]*〔\d{4}〕\d+号", text):
+                return True
+            return False
+        if err_id == "closing_missing":
+            # 仅当首行标题明确为某文种时才校验结尾用语
+            title = ""
+            for line in text.splitlines():
+                if line.strip():
+                    title = line.strip()
+                    break
+            if "请示" in title and "请批示" not in text and "请批复" not in text:
+                return True
+            if "通知" in title and "特此通知" not in text:
+                return True
+            if "批复" in title and "此复" not in text:
+                return True
+            if "报告" in title and "特此报告" not in text:
+                return True
+            return False
+        # indent_wrong / signer_missing_on_upward 仅凭纯文本难以可靠判定，保守跳过
+        return False
+
+    def _check_format_pattern(self, err_id: str, text: str) -> bool:
+        """模式型检查：引号、数字用法等"""
+        if err_id == "quotation_mark_wrong":
+            # 书名号《》未成对出现
+            if text.count("《") != text.count("》") and (text.count("《") > 0 or text.count("》") > 0):
+                return True
+            return False
+        if err_id == "number_usage_inconsistent":
+            # 阿拉伯数字与汉字数字修饰同一类量词（个/项/条/方面/问题）
+            if re.search(r"\d+个", text) and re.search(r"[一二三四五六七八九十]+个", text):
+                return True
+            if re.search(r"\d+项", text) and re.search(r"[一二三四五六七八九十]+项", text):
+                return True
+            return False
+        return False
 
     # ── 过渡词检索 ──
 

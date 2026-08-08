@@ -14,26 +14,34 @@
 
 分流逻辑：
   Q0: 核心目的是什么？
-   ├→ 对外传播 → Q1: 深度/篇幅？
-   │   ├→ 简短 → INFORMATIONAL (消息/快讯)
-   │   ├→ 深度 → STRATEGIC_NARRATIVE (通讯/研学报道)
-   │   └→ 场景 → INFORMATIONAL (侧记/特写)
-   ├→ 内部行政 → Q1: 哪种行政文书？
-   │   ├→ 通知/请示/批复/函 → ADMINISTRATIVE
-   │   ├→ 纪要 → INFORMATIONAL
-   │   └→ 通报 → OBJECTIVE_REPORT
-   ├→ 活动记录 → Q1: 活动层级？
-   │   ├→ 班级/团支/院系 → INFORMATIONAL
-   │   └→ 研学/校际/重大 → STRATEGIC_NARRATIVE
-   └→ 汇报总结 → Q1: 核心内容？
-       ├→ 工作总结 → STRATEGIC_NARRATIVE
-       ├→ 调研/事故 → OBJECTIVE_REPORT
-       └→ 述职 → ADMINISTRATIVE
+   ├-> 对外传播 -> Q1: 深度/篇幅？
+   │   ├-> 新闻快讯 -> INFORMATIONAL (消息/快讯)
+   │   ├-> 深度通讯 -> STRATEGIC_NARRATIVE (通讯/研学报道)
+   │   └-> 特写侧记 -> STRATEGIC_NARRATIVE (侧记/特写)
+   ├-> 内部行政 -> Q1: 行文方向？
+   │   ├-> 上行文（请示/报告） -> ADMINISTRATIVE
+   │   ├-> 下行文（通知/通报/批复/决定） -> ADMINISTRATIVE
+   │   ├-> 平行文（函/意见/议案） -> ADMINISTRATIVE
+   │   ├-> 公布性公文（公告/通告） -> ADMINISTRATIVE
+   │   └-> 会议文书（纪要/决议） -> INFORMATIONAL
+   ├-> 活动记录 -> Q1: 活动性质与调性？
+   │   ├-> 社团招新/文艺汇演 -> YOUTH_ENGAGEMENT
+   │   ├-> 班会/讲座/典礼 -> INFORMATIONAL
+   │   ├-> 研学考察/社会实践 -> STRATEGIC_NARRATIVE
+   │   ├-> 活动策划案 -> INFORMATIONAL
+   │   └-> 活动总结 -> STRATEGIC_NARRATIVE
+   └-> 汇报总结 -> Q1: 核心内容？
+       ├-> 工作总结 -> STRATEGIC_NARRATIVE
+       ├-> 调研报告 -> OBJECTIVE_REPORT
+       ├-> 事故/问题通报 -> OBJECTIVE_REPORT
+       ├-> 述职 -> ADMINISTRATIVE
+       └-> 社会实践报告 -> OBJECTIVE_REPORT
 """
 
 from dataclasses import dataclass, field, asdict
 from enum import Enum
 from typing import Optional, List, Dict, Any, Tuple, Set
+import re
 
 from ..core.writing_mode import (
     WritingMode,
@@ -68,6 +76,7 @@ class WritingBrief:
     key_materials: str = ""
     differentiator: str = ""
 
+    # 保留字段：当前问卷流程未填充，供未来扩展使用
     length_hint: Optional[int] = None
     style_intensity: float = 1.0
     target_doc_types: List[str] = field(default_factory=list)
@@ -85,8 +94,6 @@ class WritingBrief:
             missing.append("写作模式")
         if not self.purpose:
             missing.append("核心目的")
-        if not self.primary_audience:
-            missing.append("目标读者")
         return missing
 
     def to_dict(self) -> Dict[str, Any]:
@@ -164,6 +171,8 @@ class Questionnaire:
             return {"phase": "error", "message": "路由已完成"}
 
         node = DECISION_TREE[self._routing_current_node]
+        if choice_index < 0 or choice_index >= len(node["options"]):
+            return {"phase": "error", "message": f"选择编号超出范围（0-{len(node['options'])-1}）"}
         option = node["options"][choice_index]
 
         self._routing_history.append({
@@ -182,6 +191,9 @@ class Questionnaire:
             self.brief.writing_mode = mode.value
             self.brief.subtype = subtype
             self.brief.mode_display_name = path_desc
+
+            # 修复 N10：从路由选项填充保留字段（目标文种/期望篇幅）
+            self._fill_reserved_fields(option, subtype)
 
             profile = get_mode_profile(mode)
             self._mode_questions = get_mode_questions(mode)
@@ -258,10 +270,15 @@ class Questionnaire:
         prev_q = self._mode_questions[self._mode_question_index]
         prev_answer = self.brief.raw_answers.get(prev_q["id"], "")
 
+        if self._answer_history:
+            self._answer_history.pop()
+
         return {
             "qid": prev_q["id"],
             "question": prev_q["text"],
             "previous_answer": prev_answer,
+            "why_ask": prev_q.get("why_ask", ""),
+            "hint": prev_q.get("hint", ""),
             "index": self._mode_question_index + 1,
             "total": len(self._mode_questions),
         }
@@ -302,6 +319,24 @@ class Questionnaire:
         if not lines[1:]:
             lines.append("  （暂无，这是第一题）")
         return "\n".join(lines)
+
+    def _fill_reserved_fields(self, option: Dict[str, Any], subtype: str):
+        """填充 WritingBrief 保留字段（目标文种/期望篇幅，修复 N10 问卷路径不填充）"""
+        brief = self.brief
+        # 目标文种：subtype 直接匹配 DocumentType 枚举值时填充
+        if not brief.target_doc_types and subtype:
+            try:
+                from ..core.document_type import DocumentType
+                dt = DocumentType(subtype)
+                brief.target_doc_types = [dt.value]
+            except (ValueError, TypeError):
+                pass
+        # 期望篇幅：从路由选项标签解析（如"深度通讯——全景展现（1500-3000字）"）
+        if brief.length_hint is None:
+            m = re.search(r'(\d+)\s*[-~]\s*(\d+)\s*字', option.get("label", ""))
+            if m:
+                low, high = int(m.group(1)), int(m.group(2))
+                brief.length_hint = (low + high) // 2
 
     def _update_brief_from_answer(self, qid: str, answer: str):
         """根据问题ID更新简报字段"""
@@ -497,7 +532,7 @@ def create_brief_from_legacy_data(
         differentiator=legacy_differentiator,
         opportunity_context=legacy_opportunity,
         secondary_audiences=(
-            [s.strip() for s in legacy_secondary.split("；")]
+            [s.strip() for s in re.split(r'[；;，,]', legacy_secondary) if s.strip()]
             if legacy_secondary else []
         ),
     )

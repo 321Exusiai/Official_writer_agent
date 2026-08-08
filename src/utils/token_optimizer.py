@@ -254,6 +254,11 @@ class ContextManager:
         self._messages = self.MessageLayer()
         self._total_messages = 0
 
+    def reset(self):
+        """清空会话历史（新的一次工具闭环/协商开始时调用）"""
+        self._messages = self.MessageLayer()
+        self._total_messages = 0
+
     def add_message(self, role: str, content: str):
         self._messages.recent.append({"role": role, "content": content})
         self._total_messages += 1

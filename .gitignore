@@ -12,6 +12,9 @@ src/core/personalized_db.json
 src/api_config.json
 api_config.json
 impeccable/
+/graphify/
+/superpowers/
+/andrej-karpathy-skills/
 .gemini/
 .agents/
 .vscode/

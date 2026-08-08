@@ -522,12 +522,23 @@ class GradioApp:
                     return "请从下拉列表中选择一个场景", "", "", "", gr.update(elem_classes="ios-card ws-panel-visible"), gr.update(elem_classes="ws-panel-hidden"), "", "", "", "", ui["title"], ui["options_text"], gr.update(choices=ui["choices"], value=None)
         
         # 执行路由
+        custom_note = ""
         if is_custom:
             if not custom_text:
                 ui = self._get_routing_ui_state()
                 return "选择了自定义场景，请在输入框中对该写作场景进行简短描述。", "", "", "", gr.update(elem_classes="ios-card ws-panel-visible"), gr.update(elem_classes="ws-panel-hidden"), "", "", "", "", ui["title"], ui["options_text"], gr.update(choices=ui["choices"], value=None)
-            # Fallback 路由：默认选择第一个
-            print(f"[DEBUG] Executing fallback routing with choice_index=0")
+            # 修复 P2：自定义场景描述不再被丢弃——写入写作简报，后续写作与审查都会用到；
+            # 路由本身按默认场景进入流程（决策树不支持按自由文本路由）
+            try:
+                if self.orchestrator and self.orchestrator.brief:
+                    base = self.orchestrator.brief.key_materials or ""
+                    self.orchestrator.brief.key_materials = (
+                        (base + "\n" if base else "") + f"【自定义场景描述】{custom_text}"
+                    )
+                    custom_note = "（已记录你的场景描述，将并入写作简报）"
+            except Exception:
+                pass
+            print(f"[DEBUG] Custom routing recorded: {custom_text[:60]}")
             result = self.orchestrator.submit_routing_choice(0)
         else:
             print(f"[DEBUG] Executing routing with choice_index={choice_idx}")
@@ -549,7 +560,7 @@ class GradioApp:
                 progress_html = build_progress_badge("问卷")
                 
                 return (
-                    f"场景选择完成，进入写作问卷。写作模式：{get_mode_profile(self.orchestrator.writing_mode).name}",
+                    f"场景选择完成，进入写作问卷。写作模式：{get_mode_profile(self.orchestrator.writing_mode).name} {custom_note}",
                     prog_text,
                     f"### {q_text}",
                     why_ask,
@@ -1044,24 +1055,273 @@ THEME_CLASSIC_HTML = """
 
 THEME_STARRY_NIGHT_HTML = """
 <style>
+    /* 星月夜：背景改为内联 SVG（SMIL 动画真正执行），容器透明以透出背景 */
     .gradio-container {
-        background-image: url('data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%220%200%201000%201000%22%20preserveAspectRatio%3D%22xMidYMid%20slice%22%3E%0A%20%20%3Cdefs%3E%0A%20%20%20%20%3Cfilter%20id%3D%22blurLg%22%3E%3CfeGaussianBlur%20stdDeviation%3D%2280%22%20/%3E%3C/filter%3E%0A%20%20%20%20%3Cfilter%20id%3D%22blurMd%22%3E%3CfeGaussianBlur%20stdDeviation%3D%2240%22%20/%3E%3C/filter%3E%0A%20%20%20%20%3Cfilter%20id%3D%22blurSm%22%3E%3CfeGaussianBlur%20stdDeviation%3D%2210%22%20/%3E%3C/filter%3E%0A%20%20%20%20%0A%20%20%20%20%3CradialGradient%20id%3D%22swirlLight%22%20cx%3D%2250%25%22%20cy%3D%2250%25%22%20r%3D%2250%25%22%3E%0A%20%20%20%20%20%20%3Cstop%20offset%3D%220%25%22%20stop-color%3D%22%234F7EA4%22%20stop-opacity%3D%220.8%22%20/%3E%0A%20%20%20%20%20%20%3Cstop%20offset%3D%22100%25%22%20stop-color%3D%22%23003153%22%20stop-opacity%3D%220%22%20/%3E%0A%20%20%20%20%3C/radialGradient%3E%0A%20%20%20%20%0A%20%20%20%20%3CradialGradient%20id%3D%22swirlMid%22%20cx%3D%2250%25%22%20cy%3D%2250%25%22%20r%3D%2250%25%22%3E%0A%20%20%20%20%20%20%3Cstop%20offset%3D%220%25%22%20stop-color%3D%22%232a6a9b%22%20stop-opacity%3D%220.7%22%20/%3E%0A%20%20%20%20%20%20%3Cstop%20offset%3D%22100%25%22%20stop-color%3D%22%2300213B%22%20stop-opacity%3D%220%22%20/%3E%0A%20%20%20%20%3C/radialGradient%3E%0A%20%20%20%20%0A%20%20%20%20%3CradialGradient%20id%3D%22swirlDark%22%20cx%3D%2250%25%22%20cy%3D%2250%25%22%20r%3D%2250%25%22%3E%0A%20%20%20%20%20%20%3Cstop%20offset%3D%220%25%22%20stop-color%3D%22%23005085%22%20stop-opacity%3D%220.6%22%20/%3E%0A%20%20%20%20%20%20%3Cstop%20offset%3D%22100%25%22%20stop-color%3D%22%2305101a%22%20stop-opacity%3D%220%22%20/%3E%0A%20%20%20%20%3C/radialGradient%3E%0A%0A%20%20%20%20%3CradialGradient%20id%3D%22starHalo%22%20cx%3D%2250%25%22%20cy%3D%2250%25%22%20r%3D%2250%25%22%3E%0A%20%20%20%20%20%20%3Cstop%20offset%3D%220%25%22%20stop-color%3D%22%23DFCB5C%22%20stop-opacity%3D%220.95%22%20/%3E%0A%20%20%20%20%20%20%3Cstop%20offset%3D%2220%25%22%20stop-color%3D%22%23DFCB5C%22%20stop-opacity%3D%220.6%22%20/%3E%0A%20%20%20%20%20%20%3Cstop%20offset%3D%2250%25%22%20stop-color%3D%22%231C3765%22%20stop-opacity%3D%220.3%22%20/%3E%0A%20%20%20%20%20%20%3Cstop%20offset%3D%22100%25%22%20stop-color%3D%22%231C3765%22%20stop-opacity%3D%220%22%20/%3E%0A%20%20%20%20%3C/radialGradient%3E%0A%20%20%20%20%0A%20%20%20%20%3CradialGradient%20id%3D%22moonHalo%22%20cx%3D%2250%25%22%20cy%3D%2250%25%22%20r%3D%2250%25%22%3E%0A%20%20%20%20%20%20%3Cstop%20offset%3D%220%25%22%20stop-color%3D%22%23E7D674%22%20stop-opacity%3D%221%22%20/%3E%0A%20%20%20%20%20%20%3Cstop%20offset%3D%2215%25%22%20stop-color%3D%22%23DFCB5C%22%20stop-opacity%3D%220.8%22%20/%3E%0A%20%20%20%20%20%20%3Cstop%20offset%3D%2240%25%22%20stop-color%3D%22%23648BA8%22%20stop-opacity%3D%220.4%22%20/%3E%0A%20%20%20%20%20%20%3Cstop%20offset%3D%22100%25%22%20stop-color%3D%22%231C3765%22%20stop-opacity%3D%220%22%20/%3E%0A%20%20%20%20%3C/radialGradient%3E%0A%20%20%3C/defs%3E%0A%0A%20%20%3Crect%20width%3D%22100%25%22%20height%3D%22100%25%22%20fill%3D%22%2300172D%22%20/%3E%0A%0A%20%20%3C%21--%20Background%20Stars%20--%3E%0A%20%20%3Cg%20fill%3D%22%23FFF%22%3E%0A%20%20%20%20%3Ccircle%20cx%3D%22100%22%20cy%3D%22200%22%20r%3D%221.5%22%20opacity%3D%220.8%22/%3E%0A%20%20%20%20%3Ccircle%20cx%3D%22250%22%20cy%3D%2280%22%20r%3D%221%22%20opacity%3D%220.6%22/%3E%0A%20%20%20%20%3Ccircle%20cx%3D%22450%22%20cy%3D%22150%22%20r%3D%222%22%20opacity%3D%220.9%22/%3E%0A%20%20%20%20%3Ccircle%20cx%3D%22650%22%20cy%3D%2290%22%20r%3D%221.5%22%20opacity%3D%220.5%22/%3E%0A%20%20%20%20%3Ccircle%20cx%3D%22850%22%20cy%3D%22120%22%20r%3D%222.5%22%20opacity%3D%220.8%22/%3E%0A%20%20%20%20%3Ccircle%20cx%3D%22950%22%20cy%3D%22250%22%20r%3D%221%22%20opacity%3D%220.7%22/%3E%0A%20%20%20%20%3Ccircle%20cx%3D%22150%22%20cy%3D%22350%22%20r%3D%222%22%20opacity%3D%220.9%22/%3E%0A%20%20%20%20%3Ccircle%20cx%3D%22350%22%20cy%3D%22450%22%20r%3D%221.5%22%20opacity%3D%220.6%22/%3E%0A%20%20%20%20%3Ccircle%20cx%3D%22550%22%20cy%3D%22350%22%20r%3D%222.5%22%20opacity%3D%220.8%22/%3E%0A%20%20%20%20%3Ccircle%20cx%3D%22750%22%20cy%3D%22480%22%20r%3D%221%22%20opacity%3D%220.5%22/%3E%0A%20%20%20%20%3Ccircle%20cx%3D%22920%22%20cy%3D%22380%22%20r%3D%222%22%20opacity%3D%220.7%22/%3E%0A%20%20%20%20%3Ccircle%20cx%3D%2250%22%20cy%3D%22550%22%20r%3D%221.5%22%20opacity%3D%220.8%22/%3E%0A%20%20%20%20%3Ccircle%20cx%3D%22250%22%20cy%3D%22650%22%20r%3D%222%22%20opacity%3D%220.6%22/%3E%0A%20%20%20%20%3Ccircle%20cx%3D%22450%22%20cy%3D%22750%22%20r%3D%221%22%20opacity%3D%220.9%22/%3E%0A%20%20%20%20%3Ccircle%20cx%3D%22650%22%20cy%3D%22650%22%20r%3D%222.5%22%20opacity%3D%220.5%22/%3E%0A%20%20%20%20%3Ccircle%20cx%3D%22850%22%20cy%3D%22750%22%20r%3D%221.5%22%20opacity%3D%220.8%22/%3E%0A%20%20%20%20%3Ccircle%20cx%3D%22950%22%20cy%3D%22600%22%20r%3D%221%22%20opacity%3D%220.7%22/%3E%0A%20%20%20%20%3Ccircle%20cx%3D%22150%22%20cy%3D%22850%22%20r%3D%222%22%20opacity%3D%220.9%22/%3E%0A%20%20%20%20%3Ccircle%20cx%3D%22350%22%20cy%3D%22950%22%20r%3D%221.5%22%20opacity%3D%220.6%22/%3E%0A%20%20%20%20%3Ccircle%20cx%3D%22550%22%20cy%3D%22850%22%20r%3D%222.5%22%20opacity%3D%220.8%22/%3E%0A%20%20%20%20%3Ccircle%20cx%3D%22750%22%20cy%3D%22950%22%20r%3D%221%22%20opacity%3D%220.5%22/%3E%0A%20%20%20%20%3Ccircle%20cx%3D%22920%22%20cy%3D%22880%22%20r%3D%222%22%20opacity%3D%220.7%22/%3E%0A%20%20%3C/g%3E%0A%0A%20%20%3C%21--%20Flowing%20Swirls%20--%3E%0A%20%20%3Cg%3E%0A%20%20%20%20%3CanimateTransform%20attributeName%3D%22transform%22%20type%3D%22rotate%22%20from%3D%220%20300%20300%22%20to%3D%22360%20300%20300%22%20dur%3D%2245s%22%20repeatCount%3D%22indefinite%22%20/%3E%0A%20%20%20%20%3Cellipse%20cx%3D%22300%22%20cy%3D%22300%22%20rx%3D%22450%22%20ry%3D%22200%22%20fill%3D%22url%28%23swirlLight%29%22%20filter%3D%22url%28%23blurLg%29%22%20transform%3D%22rotate%2830%20300%20300%29%22%20/%3E%0A%20%20%20%20%3Cellipse%20cx%3D%22300%22%20cy%3D%22300%22%20rx%3D%22300%22%20ry%3D%22150%22%20fill%3D%22url%28%23swirlMid%29%22%20filter%3D%22url%28%23blurMd%29%22%20transform%3D%22rotate%28-20%20300%20300%29%22%20/%3E%0A%20%20%3C/g%3E%0A%0A%20%20%3Cg%3E%0A%20%20%20%20%3CanimateTransform%20attributeName%3D%22transform%22%20type%3D%22rotate%22%20from%3D%22360%20750%20400%22%20to%3D%220%20750%20400%22%20dur%3D%2260s%22%20repeatCount%3D%22indefinite%22%20/%3E%0A%20%20%20%20%3Cellipse%20cx%3D%22750%22%20cy%3D%22400%22%20rx%3D%22500%22%20ry%3D%22250%22%20fill%3D%22url%28%23swirlMid%29%22%20filter%3D%22url%28%23blurLg%29%22%20transform%3D%22rotate%28-45%20750%20400%29%22%20/%3E%0A%20%20%20%20%3Cellipse%20cx%3D%22750%22%20cy%3D%22400%22%20rx%3D%22200%22%20ry%3D%22400%22%20fill%3D%22url%28%23swirlLight%29%22%20filter%3D%22url%28%23blurMd%29%22%20transform%3D%22rotate%2815%20750%20400%29%22%20/%3E%0A%20%20%3C/g%3E%0A%0A%20%20%3Cg%3E%0A%20%20%20%20%3CanimateTransform%20attributeName%3D%22transform%22%20type%3D%22rotate%22%20from%3D%220%20400%20800%22%20to%3D%22360%20400%20800%22%20dur%3D%2250s%22%20repeatCount%3D%22indefinite%22%20/%3E%0A%20%20%20%20%3Cellipse%20cx%3D%22400%22%20cy%3D%22800%22%20rx%3D%22400%22%20ry%3D%22250%22%20fill%3D%22url%28%23swirlDark%29%22%20filter%3D%22url%28%23blurLg%29%22%20transform%3D%22rotate%2860%20400%20800%29%22%20/%3E%0A%20%20%3C/g%3E%0A%0A%20%20%3C%21--%20The%20Moon%20--%3E%0A%20%20%3Cg%3E%0A%20%20%20%20%3CanimateTransform%20attributeName%3D%22transform%22%20type%3D%22rotate%22%20from%3D%220%20850%20200%22%20to%3D%22360%20850%20200%22%20dur%3D%2230s%22%20repeatCount%3D%22indefinite%22%20/%3E%0A%20%20%20%20%3Ccircle%20cx%3D%22850%22%20cy%3D%22200%22%20r%3D%22180%22%20fill%3D%22url%28%23moonHalo%29%22%20filter%3D%22url%28%23blurSm%29%22%20/%3E%0A%20%20%20%20%3C%21--%20inner%20swirl%20inside%20moon%20--%3E%0A%20%20%20%20%3Cellipse%20cx%3D%22850%22%20cy%3D%22200%22%20rx%3D%22140%22%20ry%3D%2270%22%20fill%3D%22url%28%23swirlLight%29%22%20opacity%3D%220.3%22%20filter%3D%22url%28%23blurSm%29%22%20transform%3D%22rotate%2845%20850%20200%29%22%20/%3E%0A%20%20%3C/g%3E%0A%0A%20%20%3C%21--%20Stars%20--%3E%0A%20%20%3Cg%3E%0A%20%20%20%20%3CanimateTransform%20attributeName%3D%22transform%22%20type%3D%22rotate%22%20from%3D%22360%20200%20150%22%20to%3D%220%20200%20150%22%20dur%3D%2225s%22%20repeatCount%3D%22indefinite%22%20/%3E%0A%20%20%20%20%3Ccircle%20cx%3D%22200%22%20cy%3D%22150%22%20r%3D%22120%22%20fill%3D%22url%28%23starHalo%29%22%20filter%3D%22url%28%23blurSm%29%22%20/%3E%0A%20%20%20%20%3Cellipse%20cx%3D%22200%22%20cy%3D%22150%22%20rx%3D%2290%22%20ry%3D%2240%22%20fill%3D%22url%28%23swirlLight%29%22%20opacity%3D%220.4%22%20filter%3D%22url%28%23blurSm%29%22%20transform%3D%22rotate%28-30%20200%20150%29%22%20/%3E%0A%20%20%3C/g%3E%0A%0A%20%20%3Cg%3E%0A%20%20%20%20%EF%BF%BDnimateTransform%20attributeName%3D%22transform%22%20type%3D%22rotate%22%20from%3D%220%20150%20550%22%20to%3D%22360%20150%20550%22%20dur%3D%2222s%22%20repeatCount%3D%22indefinite%22%20/%3E%0A%20%20%20%20%3Ccircle%20cx%3D%22150%22%20cy%3D%22550%22%20r%3D%22100%22%20fill%3D%22url%28%23starHalo%29%22%20filter%3D%22url%28%23blurSm%29%22%20/%3E%0A%20%20%3C/g%3E%0A%0A%20%20%3Cg%3E%0A%20%20%20%20%3CanimateTransform%20attributeName%3D%22transform%22%20type%3D%22rotate%22%20from%3D%22360%20500%20450%22%20to%3D%220%20500%20450%22%20dur%3D%2235s%22%20repeatCount%3D%22indefinite%22%20/%3E%0A%20%20%20%20%3Ccircle%20cx%3D%22500%22%20cy%3D%22450%22%20r%3D%2280%22%20fill%3D%22url%28%23starHalo%29%22%20filter%3D%22url%28%23blurSm%29%22%20opacity%3D%220.8%22%20/%3E%0A%20%20%3C/g%3E%0A%0A%20%20%3Cg%3E%0A%20%20%20%20%3CanimateTransform%20attributeName%3D%22transform%22%20type%3D%22rotate%22%20from%3D%220%20750%20750%22%20to%3D%22360%20750%20750%22%20dur%3D%2228s%22%20repeatCount%3D%22indefinite%22%20/%3E%0A%20%20%20%20%3Ccircle%20cx%3D%22750%22%20cy%3D%22750%22%20r%3D%22110%22%20fill%3D%22url%28%23starHalo%29%22%20filter%3D%22url%28%23blurSm%29%22%20/%3E%0A%20%20%20%20%3Cellipse%20cx%3D%22750%22%20cy%3D%22750%22%20rx%3D%2280%22%20ry%3D%2230%22%20fill%3D%22url%28%23swirlLight%29%22%20opacity%3D%220.3%22%20filter%3D%22url%28%23blurSm%29%22%20transform%3D%22rotate%2870%20750%20750%29%22%20/%3E%0A%20%20%3C/g%3E%0A%3C/svg%3E') !important;
-        background-size: cover !important;
-        background-position: center !important;
+        background: transparent !important;
     }
-    .gradio-container::before {
-        content: none !important;
-    }
+    .gradio-container::before,
     .gradio-container::after {
         content: none !important;
     }
+    #starry-night-bg {
+        position: fixed;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        z-index: -1;
+        pointer-events: none;
+    }
+    @media (prefers-reduced-motion: reduce) {
+        #starry-night-bg animateTransform,
+        #starry-night-bg animate,
+        #starry-night-bg animateMotion {
+            display: none !important;
+        }
+    }
 </style>
+<svg id="starry-night-bg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 1000" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+  <defs>
+    <filter id="blurLg"><feGaussianBlur stdDeviation="24"/></filter>
+    <filter id="blurMd"><feGaussianBlur stdDeviation="12"/></filter>
+    <filter id="blurSm"><feGaussianBlur stdDeviation="6"/></filter>
+    <radialGradient id="swirlLight" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#4F7EA4" stop-opacity="0.8"/>
+      <stop offset="100%" stop-color="#003153" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="swirlMid" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#2a6a9b" stop-opacity="0.7"/>
+      <stop offset="100%" stop-color="#00213B" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="swirlDark" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#005085" stop-opacity="0.6"/>
+      <stop offset="100%" stop-color="#05101a" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="starHalo" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#DFCB5C" stop-opacity="0.95"/>
+      <stop offset="20%" stop-color="#DFCB5C" stop-opacity="0.6"/>
+      <stop offset="50%" stop-color="#1C3765" stop-opacity="0.3"/>
+      <stop offset="100%" stop-color="#1C3765" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="moonHalo" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#E7D674" stop-opacity="1"/>
+      <stop offset="15%" stop-color="#DFCB5C" stop-opacity="0.8"/>
+      <stop offset="40%" stop-color="#648BA8" stop-opacity="0.4"/>
+      <stop offset="100%" stop-color="#1C3765" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <rect width="100%" height="100%" fill="#00172D"/>
+
+  <!-- 背景星点（静态，零成本） -->
+  <g fill="#FFF">
+    <circle cx="100" cy="200" r="1.5" opacity="0.8"/>
+    <circle cx="250" cy="80" r="1" opacity="0.6"/>
+    <circle cx="450" cy="150" r="2" opacity="0.9"/>
+    <circle cx="650" cy="90" r="1.5" opacity="0.5"/>
+    <circle cx="850" cy="120" r="2.5" opacity="0.8"/>
+    <circle cx="950" cy="250" r="1" opacity="0.7"/>
+    <circle cx="150" cy="350" r="2" opacity="0.9"/>
+    <circle cx="350" cy="450" r="1.5" opacity="0.6"/>
+    <circle cx="550" cy="350" r="2.5" opacity="0.8"/>
+    <circle cx="750" cy="480" r="1" opacity="0.5"/>
+    <circle cx="920" cy="380" r="2" opacity="0.7"/>
+    <circle cx="50" cy="550" r="1.5" opacity="0.8"/>
+    <circle cx="250" cy="650" r="2" opacity="0.6"/>
+    <circle cx="450" cy="750" r="1" opacity="0.9"/>
+    <circle cx="650" cy="650" r="2.5" opacity="0.5"/>
+    <circle cx="850" cy="750" r="1.5" opacity="0.8"/>
+    <circle cx="950" cy="600" r="1" opacity="0.7"/>
+    <circle cx="150" cy="850" r="2" opacity="0.9"/>
+    <circle cx="350" cy="950" r="1.5" opacity="0.6"/>
+    <circle cx="550" cy="850" r="2.5" opacity="0.8"/>
+    <circle cx="750" cy="950" r="1" opacity="0.5"/>
+    <circle cx="920" cy="880" r="2" opacity="0.7"/>
+  </g>
+
+  <!-- 流动漩涡（SMIL 旋转 + 模糊光晕） -->
+  <g>
+    <animateTransform attributeName="transform" type="rotate" from="0 300 300" to="360 300 300" dur="45s" repeatCount="indefinite"/>
+    <ellipse cx="300" cy="300" rx="450" ry="200" fill="url(#swirlLight)" filter="url(#blurLg)" transform="rotate(30 300 300)"/>
+    <ellipse cx="300" cy="300" rx="300" ry="150" fill="url(#swirlMid)" filter="url(#blurMd)" transform="rotate(-20 300 300)"/>
+  </g>
+  <g>
+    <animateTransform attributeName="transform" type="rotate" from="360 750 400" to="0 750 400" dur="60s" repeatCount="indefinite"/>
+    <ellipse cx="750" cy="400" rx="500" ry="250" fill="url(#swirlMid)" filter="url(#blurLg)" transform="rotate(-45 750 400)"/>
+    <ellipse cx="750" cy="400" rx="200" ry="400" fill="url(#swirlLight)" filter="url(#blurMd)" transform="rotate(15 750 400)"/>
+  </g>
+  <g>
+    <animateTransform attributeName="transform" type="rotate" from="0 400 800" to="360 400 800" dur="50s" repeatCount="indefinite"/>
+    <ellipse cx="400" cy="800" rx="400" ry="250" fill="url(#swirlDark)" filter="url(#blurLg)" transform="rotate(60 400 800)"/>
+  </g>
+
+  <!-- 月亮 -->
+  <g>
+    <animateTransform attributeName="transform" type="rotate" from="0 850 200" to="360 850 200" dur="30s" repeatCount="indefinite"/>
+    <circle cx="850" cy="200" r="180" fill="url(#moonHalo)" filter="url(#blurSm)"/>
+    <ellipse cx="850" cy="200" rx="140" ry="70" fill="url(#swirlLight)" opacity="0.3" filter="url(#blurSm)" transform="rotate(45 850 200)"/>
+  </g>
+
+  <!-- 星晕 -->
+  <g>
+    <animateTransform attributeName="transform" type="rotate" from="360 200 150" to="0 200 150" dur="25s" repeatCount="indefinite"/>
+    <circle cx="200" cy="150" r="120" fill="url(#starHalo)" filter="url(#blurSm)"/>
+    <ellipse cx="200" cy="150" rx="90" ry="40" fill="url(#swirlLight)" opacity="0.4" filter="url(#blurSm)" transform="rotate(-30 200 150)"/>
+  </g>
+  <g>
+    <animateTransform attributeName="transform" type="rotate" from="0 150 550" to="360 150 550" dur="22s" repeatCount="indefinite"/>
+    <circle cx="150" cy="550" r="100" fill="url(#starHalo)" filter="url(#blurSm)"/>
+  </g>
+  <g>
+    <animateTransform attributeName="transform" type="rotate" from="360 500 450" to="0 500 450" dur="35s" repeatCount="indefinite"/>
+    <circle cx="500" cy="450" r="80" fill="url(#starHalo)" filter="url(#blurSm)" opacity="0.8"/>
+  </g>
+  <g>
+    <animateTransform attributeName="transform" type="rotate" from="0 750 750" to="360 750 750" dur="28s" repeatCount="indefinite"/>
+    <circle cx="750" cy="750" r="110" fill="url(#starHalo)" filter="url(#blurSm)"/>
+    <ellipse cx="750" cy="750" rx="80" ry="30" fill="url(#swirlLight)" opacity="0.3" filter="url(#blurSm)" transform="rotate(70 750 750)"/>
+  </g>
+</svg>
 """
+
 
 
 # ═══════════════════════════════════════════════════════════════
 # 界面构建 (Gradio UI Layout Design)
 # ═══════════════════════════════════════════════════════════════
+
+THEME_APPLE_MINIMAL_HTML = """
+<style>
+    /* 苹果极简主题：浅色、克制动效、单一强调色，遵循 Apple HIG 克制原则 */
+    :root {
+        --color-ink: #1D1D1F !important;
+        --color-ink-body: #3A3A3C !important;
+        --color-ink-muted: #86868B !important;
+        --color-accent: #0A84FF !important;
+        --color-accent-hover: #2E95FF !important;
+        --color-accent-active: #0071E3 !important;
+        --color-accent-focus: rgba(10, 132, 255, 0.25) !important;
+        --color-sky-pale: #6E6E73 !important;
+    }
+    .gradio-container {
+        background: #F5F5F7 !important;
+        color: #1D1D1F !important;
+    }
+    .gradio-container::before,
+    .gradio-container::after {
+        content: none !important;
+    }
+    .gradio-container h1, .gradio-container h2, .gradio-container h3 {
+        color: #1D1D1F !important;
+    }
+    .gradio-container p, .gradio-container span, .gradio-container label,
+    .gradio-container li, .gradio-container div {
+        color: #3A3A3C !important;
+    }
+    .sidebar-pane, .workspace-pane {
+        background: rgba(255, 255, 255, 0.85) !important;
+        backdrop-filter: none !important;
+        -webkit-backdrop-filter: none !important;
+        border: 1px solid rgba(0, 0, 0, 0.08) !important;
+        box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06) !important;
+    }
+    .ios-card, .empty-state-card {
+        background: #FFFFFF !important;
+        backdrop-filter: none !important;
+        -webkit-backdrop-filter: none !important;
+        border: 1px solid rgba(0, 0, 0, 0.08) !important;
+        box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06) !important;
+    }
+    .ios-card:hover {
+        background: #FFFFFF !important;
+        border-color: rgba(10, 132, 255, 0.3) !important;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08) !important;
+    }
+    .gradio-container [class*="accordion"],
+    .gradio-container details {
+        background: #FFFFFF !important;
+        backdrop-filter: none !important;
+        -webkit-backdrop-filter: none !important;
+        border: 1px solid rgba(0, 0, 0, 0.08) !important;
+        box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06) !important;
+    }
+    .gradio-container details > summary,
+    .gradio-container [class*="accordion"] > button,
+    .gradio-container [class*="accordion-header"] {
+        background: #F5F5F7 !important;
+        color: #1D1D1F !important;
+        border-bottom: 1px solid rgba(0, 0, 0, 0.06) !important;
+    }
+    .ios-btn-primary {
+        background: #0A84FF !important;
+        color: #FFFFFF !important;
+        border: none !important;
+        box-shadow: none !important;
+        text-shadow: none !important;
+    }
+    .ios-btn-primary:hover { background: #2E95FF !important; transform: none !important; }
+    .ios-btn-primary:active { background: #0071E3 !important; transform: none !important; filter: none !important; }
+    .ios-btn-secondary,
+    .gradio-container button.secondary,
+    .gradio-container button[variant="secondary"] {
+        background: #FFFFFF !important;
+        color: #1D1D1F !important;
+        border: 1px solid rgba(0, 0, 0, 0.12) !important;
+        box-shadow: none !important;
+    }
+    .ios-btn-secondary:hover { background: #EBEBED !important; transform: none !important; }
+    .ios-btn-danger {
+        background: #FFFFFF !important;
+        color: #FF3B30 !important;
+        border: 1px solid rgba(255, 59, 48, 0.3) !important;
+        box-shadow: none !important;
+    }
+    .ios-btn-danger:hover { background: #FFEBE9 !important; transform: none !important; }
+    .gradio-container input:not([type="checkbox"]):not([type="radio"]),
+    .gradio-container textarea {
+        background: #FFFFFF !important;
+        border: 1px solid rgba(0, 0, 0, 0.12) !important;
+        box-shadow: none !important;
+        color: #1D1D1F !important;
+    }
+    .gradio-container input:not([type="checkbox"]):not([type="radio"]):focus,
+    .gradio-container textarea:focus {
+        background: #FFFFFF !important;
+        border-color: #0A84FF !important;
+        box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.2) !important;
+        outline: none !important;
+    }
+    .title-banner {
+        background: #FFFFFF !important;
+        border: 1px solid rgba(0, 0, 0, 0.08) !important;
+        box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06) !important;
+    }
+    .title-banner h1 { color: #1D1D1F !important; text-shadow: none !important; }
+    .title-banner p { color: #6E6E73 !important; }
+    .step-done { color: #0A84FF !important; }
+    .step-done .step-num { background: rgba(10, 132, 255, 0.2) !important; color: #0A84FF !important; }
+    .step-current {
+        background: rgba(10, 132, 255, 0.1) !important;
+        border-color: #0A84FF !important;
+        color: #0A84FF !important;
+        box-shadow: none !important;
+    }
+    .step-current .step-num { background: #0A84FF !important; color: #FFFFFF !important; }
+    .agent-bubble { background: #F5F5F7 !important; border: 1px solid rgba(0, 0, 0, 0.06) !important; }
+    .badge-info { background: rgba(10, 132, 255, 0.1) !important; color: #0A84FF !important; border-color: rgba(10, 132, 255, 0.2) !important; }
+    .user-identity-bar { background: #FFFFFF !important; border: 1px solid rgba(0, 0, 0, 0.08) !important; }
+    .sidebar-footer-btn { color: #86868B !important; }
+    .sidebar-footer-btn:hover { background: rgba(0, 0, 0, 0.04) !important; color: #1D1D1F !important; }
+    .empty-state-card p { color: #86868B !important; }
+    .gradio-container .gr-group *,
+    .gradio-container [class*="group"] *,
+    .gradio-container [class*="accordion"] *,
+    .ios-card * {
+        color: #3A3A3C !important;
+    }
+    *:focus-visible { outline: 2px solid #0A84FF !important; }
+</style>
+"""
+
 
 def build_ui() -> gr.Blocks:
     app = GradioApp()
@@ -1721,7 +1981,7 @@ def build_ui() -> gr.Blocks:
                 with gr.Accordion("系统与个性化", open=False):
                     bg_theme_selector = gr.Dropdown(
                         label="背景美学风格",
-                        choices=["经典流光 (Classic Fluid)", "星月夜漩涡 (Starry Night)"],
+                        choices=["星月夜漩涡 (Starry Night)", "经典流光 (Classic Fluid)", "苹果极简 (Apple Minimal)"],
                         value="星月夜漩涡 (Starry Night)"
                     )
                 
@@ -1845,7 +2105,7 @@ def build_ui() -> gr.Blocks:
                         # Tab 3: 智能写作生成
                         with gr.Tab("文稿草稿生成", id="tab_write"):
                             materials_input = gr.Textbox(label="可贴入本次写作的其他原始语料/素材内容(可选)", lines=5, placeholder="粘贴任何其他零碎记录、会议讲话或新闻参考数据...")
-                            write_start_btn = gr.Button("开始写作（通常需要 30-60 秒）", variant="primary", elem_classes="ios-btn-primary")
+                            write_start_btn = gr.Button("开始写作（多智能体协商 + 生成，首次可能需要 1-3 分钟）", variant="primary", elem_classes="ios-btn-primary")
                             
                             write_event_msg = gr.Markdown()
                             draft_editor = gr.Textbox(label="草稿（主版本）", lines=16, placeholder="草稿内容将在这里呈现...")
@@ -2447,9 +2707,11 @@ def build_ui() -> gr.Blocks:
                 strengths_weaknesses = f"**常用文种**: {', '.join(user.preferences.preferred_doc_types) if user.preferences.preferred_doc_types else '待积累'}\n"
                 strengths_weaknesses += f"**常用风格**: {', '.join(user.preferences.preferred_styles) if user.preferences.preferred_styles else '待积累'}\n"
                 strengths_weaknesses += f"\n**优势诊断分析**:\n"
-                strengths_weaknesses += "\n".join([f"- {s}" for s in user.common_strengths]) if user.common_strengths else "- 待生成\n"
-                strengths_weaknesses += f"\n**短板诊断分析**:\n"
-                strengths_weaknesses += "\n".join([f"- {s}" for s in user.common_strengths]) if user.common_strengths else "- 暂无明显偏好短板\n"
+            strengths_weaknesses += "\n".join([f"- {s}" for s in user.common_strengths]) if user.common_strengths else "- 待生成\n"
+            strengths_weaknesses += f"\n**短板诊断分析**:\n"
+            # 修复 P1：后端 User 模型暂无 common_weaknesses 字段，不再用优势冒充短板
+            weaknesses = getattr(user, "common_weaknesses", None) or []
+            strengths_weaknesses += "\n".join([f"- {w}" for w in weaknesses]) if weaknesses else "- 暂无短板数据，审查过程中将自动积累\n"
                 
             memory = app.pdb.get_memory_summary(app.current_project_id)
             return (
@@ -2483,8 +2745,9 @@ def build_ui() -> gr.Blocks:
         def update_bg_theme(choice):
             if choice == "经典流光 (Classic Fluid)":
                 return THEME_CLASSIC_HTML
-            else:
-                return THEME_STARRY_NIGHT_HTML
+            if choice == "苹果极简 (Apple Minimal)":
+                return THEME_APPLE_MINIMAL_HTML
+            return THEME_STARRY_NIGHT_HTML
                 
         bg_theme_selector.change(
             fn=update_bg_theme,

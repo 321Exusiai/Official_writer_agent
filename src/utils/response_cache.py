@@ -19,6 +19,7 @@
 """
 
 import hashlib
+import threading
 from typing import Any, Dict, Optional, Callable
 from collections import OrderedDict
 
@@ -29,36 +30,41 @@ class PromptCache:
     使用 OrderedDict 实现 LRU 淘汰策略，性能优化：
     - get/set 操作均为 O(1)
     - 避免 list.remove() 的 O(n) 开销
+    - 线程安全：所有读写操作通过 threading.Lock 保护
     """
 
     def __init__(self, maxsize: int = 128):
         self._cache: OrderedDict[str, str] = OrderedDict()
         self._maxsize = maxsize
+        self._lock = threading.Lock()
 
     def get(self, key: str) -> Optional[str]:
-        if key in self._cache:
-            # 移动到末尾表示最近使用
-            self._cache.move_to_end(key)
-            return self._cache[key]
-        return None
+        with self._lock:
+            if key in self._cache:
+                # 移动到末尾表示最近使用
+                self._cache.move_to_end(key)
+                return self._cache[key]
+            return None
 
     def set(self, key: str, value: str):
-        if key in self._cache:
-            # 更新现有键，移动到末尾
-            self._cache.move_to_end(key)
-            self._cache[key] = value
-        else:
-            # 新增键
-            if len(self._cache) >= self._maxsize:
-                # 淘汰最久未使用的（第一个）
-                self._cache.popitem(last=False)
-            self._cache[key] = value
+        with self._lock:
+            if key in self._cache:
+                # 更新现有键，移动到末尾
+                self._cache.move_to_end(key)
+                self._cache[key] = value
+            else:
+                # 新增键
+                if len(self._cache) >= self._maxsize:
+                    # 淘汰最久未使用的（第一个）
+                    self._cache.popitem(last=False)
+                self._cache[key] = value
 
     def invalidate(self, key: str = None):
-        if key:
-            self._cache.pop(key, None)
-        else:
-            self._cache.clear()
+        with self._lock:
+            if key:
+                self._cache.pop(key, None)
+            else:
+                self._cache.clear()
 
     @property
     def size(self) -> int:
