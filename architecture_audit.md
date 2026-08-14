@@ -298,12 +298,17 @@ PROJECT_DESIGN.md（V2.2）描述了 7 个模块，但实际代码中有 **11 �
       > 注：目标 ~300 行未完全达成，因保留了状态机/规划/写作编排等协调方法；如进一步压缩需将写作编排再下沉，留待后续阶段
 - [x] 回归验证：`tests/test_all.py` 16 通过 / 0 失败（含真实 LLM 完整工作流）
 
-### 阶段 2：Prompt 统一（1-2 天）
+### 阶段 2：Prompt 统一（1-2 天）✅ 已完成
 
-- [ ] 确定 `system_prompt.py` 的 `_CORE_SYSTEM_PROMPT` 为唯一 prompt 源
-- [ ] `writer_agent.py` 不再自行拼装，而是消费 `system_prompt.py` 的输出
-- [ ] 决定工具系统的方向：保留自定义 `[TOOL_CALL]` 还是迁移到原生 function calling
-- [ ] 确保 `tool_definitions.py` 的定义被真正注入到 LLM 调用中
+- [x] 确定 `system_prompt.py` 的 `_CORE_SYSTEM_PROMPT` 为唯一 prompt 源
+      > 核查确认：`get_core_prompt()` 已被 writer_agent 与 review_pipeline 两个核心消费者引用，实际即为唯一核心 prompt 源
+- [x] `writer_agent.py` 不再自行拼装，而是消费 `system_prompt.py` 的输出
+      > 核查确认：writer_agent.build_system_prompt() 以 get_core_prompt() 为基底 + 模式专属段落（原则/取舍/语言规范/格式约束），非碎片化重复
+- [x] 决定工具系统的方向：保留自定义 `[TOOL_CALL]` 还是迁移到原生 function calling
+      > 决策：**保留自定义 [TOOL_CALL] 语法**。理由：已端到端打通（writer/review 注入 → llm_client parse_tool_call 解析 → _execute_tool_call 执行 17 工具 → 结果回传整合），provider 无关、零迁移风险；是否迁移留待阶段3验证后视需要评估
+- [x] 确保 `tool_definitions.py` 的定义被真正注入到 LLM 调用中
+      > 核查确认：writer 注入 pre_writing/during_writing 工具、review_pipeline 注入 during_writing/post_writing 工具，llm_client 已执行全部 17 个工具
+      > 注：本阶段审计报告（2026-08-09）所述"prompt 碎片化 / 工具从未暴露"问题，实际已被既有提交（045f3fd/3fc4d1b）先行解决；本阶段以核查确认 + 决策记录完成，无多余代码改动
 
 ### 阶段 3：LLM 集成验证（2-3 天）
 
