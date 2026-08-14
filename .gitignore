@@ -22,3 +22,7 @@ impeccable/
 
 .hallmark-skill/
 .impeccable/
+
+# 工具生成产物（不入库）
+graphify-out/
+test_output.txt

@@ -1,0 +1,144 @@
+{
+  "passive_narrative": {
+    "name": "被动叙事",
+    "patterns": [
+      "安排了",
+      "组织了",
+      "邀请了",
+      "讲解了",
+      "介绍了",
+      "展示了",
+      "带领了"
+    ],
+    "diagnosis": "叙述重心落在合作方/接待方，而非我方",
+    "prescription": "将主语调整为'我们'，重心从'对方做了什么'转向'我们收获了什么'",
+    "example_bad": "北京大学图灵班学生展示了多项创新成果。",
+    "example_good": "同学们近距离感受到顶尖学府的科研水准与青年学者的创新活力。",
+    "severity": "严重",
+    "category": "主体性"
+  },
+  "empty_platitudes": {
+    "name": "空泛表态",
+    "patterns": [
+      "大家纷纷表示",
+      "深刻感受到",
+      "一致认为",
+      "受益匪浅",
+      "收获很大",
+      "深受鼓舞"
+    ],
+    "diagnosis": "使用空泛套话替代真实感言，缺乏说服力",
+    "prescription": "删除空话，替换为1-2段具体的、有细节的真实感言",
+    "example_bad": "本次研学让同学们收获很大，大家纷纷表示深受鼓舞。",
+    "example_good": "'在北大实验室的那两个小时，让我第一次觉得——原来我可以做到。'",
+    "severity": "严重",
+    "category": "成长性"
+  },
+  "no_strategic_anchor": {
+    "name": "缺少战略锚点",
+    "patterns": [],
+    "auto_detectable": false,
+    "diagnosis": "行程板块读起来像独立游记，与开篇的班级定位、培养方案脱节",
+    "prescription": "为每个行程板块添加一句'为什么是这里'",
+    "example_bad": "（直接描述行程内容，没有战略关联句）",
+    "example_good": "中关村学院的参访，正是学院对接国家人工智能战略人才培养部署的关键一环。",
+    "severity": "重要",
+    "category": "赋能性"
+  },
+  "external_without_link": {
+    "name": "外部权威未建立关联",
+    "patterns": [],
+    "auto_detectable": false,
+    "diagnosis": "记录了外部权威的言行，但没有建立与我方的关联",
+    "prescription": "在外部权威观点后添加一句'这印证了……'或'这与……一脉相承'",
+    "example_bad": "张院士指出，人工智能的未来在于交叉创新。",
+    "example_good": "张院士关于'交叉创新'的论述，与学院'打破学科壁垒'的培养理念一脉相承。",
+    "severity": "重要",
+    "category": "借势性"
+  },
+  "weak_ending": {
+    "name": "结尾无力",
+    "patterns": [
+      "圆满成功",
+      "顺利结束",
+      "满载而归",
+      "落下帷幕",
+      "活动在"
+    ],
+    "diagnosis": "结尾停留在'活动结束'，没有传递组织信号",
+    "prescription": "改为含蓄传递'有方向、有资源、有成果'的战略信号",
+    "example_bad": "本次活动圆满成功，同学们满载而归。",
+    "example_good": "从实验室到生产线，这条研学之路只是起点。当人才培养与国家战略同频共振，每一步都是通往未来的答案。",
+    "severity": "重要",
+    "category": "战略性"
+  },
+  "process_flow_account": {
+    "name": "流水账",
+    "patterns": [
+      "乘车",
+      "入住",
+      "就餐",
+      "出发",
+      "抵达",
+      "集合",
+      "签到",
+      "上午",
+      "下午"
+    ],
+    "diagnosis": "包含大量无意义的流程描述，占用篇幅",
+    "prescription": "删除所有纯过程性描述，只保留有叙事价值的时间节点",
+    "example_bad": "上午8点30分，全体成员在酒店门口集合，乘车前往北京大学。",
+    "example_good": "（直接进入北京大学实验室场景）",
+    "severity": "轻微",
+    "category": "内容取舍"
+  },
+  "title_weak": {
+    "name": "标题缺乏辨识度",
+    "patterns": [
+      "顺利举行",
+      "圆满举办",
+      "成功召开",
+      "活动纪实",
+      "活动报道"
+    ],
+    "diagnosis": "标题缺乏新闻性和辨识度，换成任何单位都能用",
+    "prescription": "标题应包含判断或问题，让读者一眼知道文章的核心价值",
+    "example_bad": "XX学院赴京研学活动顺利举行",
+    "example_good": "从燕园到航天城：一场研学如何检验拔尖人才培养的'成色'",
+    "severity": "重要",
+    "category": "规范性"
+  },
+  "format_title_wrong": {
+    "name": "公文标题格式错误",
+    "patterns": [],
+    "auto_detectable": false,
+    "diagnosis": "标题缺少发文机关、事由或文种某一元素，或三者顺序错误",
+    "prescription": "严格按照'XX单位关于XXXX的通知/请示/批复/函/纪要'格式",
+    "example_bad": "关于举办活动的通知",
+    "example_good": "XX学院关于举办2026年学生学术论坛的通知",
+    "severity": "严重",
+    "category": "格式规范"
+  },
+  "wrong_doc_type_mix": {
+    "name": "文种混用",
+    "patterns": [],
+    "auto_detectable": false,
+    "diagnosis": "报告中夹带请示事项，或请示中混入报告内容，或将'请示报告'作为文种",
+    "prescription": "请示和报告严格分开。请示请求批准（需批复），报告汇报情况（不需批复）。需要上级批准的单独写请示",
+    "example_bad": "XX关于XX工作的请示报告",
+    "example_good": "（根据实际需要，选择请示或报告，分开行文）",
+    "severity": "严重",
+    "category": "文种规范"
+  },
+  "multi_topic_in_request": {
+    "name": "请示一文多事",
+    "patterns": [],
+    "auto_detectable": false,
+    "diagnosis": "一份请示中包含多个不相关的事项",
+    "prescription": "请示必须一文一事。多个事项需要请示的，分别行文",
+    "example_bad": "关于申请追加经费并调整人员编制的请示",
+    "example_good": "（拆分为两份请示：一份申请经费，一份调整编制）",
+    "severity": "严重",
+    "category": "文种规范"
+  }
+}

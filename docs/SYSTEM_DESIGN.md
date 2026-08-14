@@ -29,7 +29,7 @@
 | 痛点 | 表现 | 解决方案 |
 |------|------|----------|
 | **流水账** | 按时间顺序记录，缺乏中心思想 | 战略叙事五大原则 + 模式分流 |
-| **模式错配** | 用写通知的思路写通讯 | 决策树路由 + 四模式分流 |
+| **模式错配** | 用写通知的思路写通讯 | 决策树路由 + 五模式分流 |
 | **风格混乱** | 同一篇文章多种媒体风格混杂 | 风格强度参数 + 风格混合引擎 |
 | **无审稿** | 写完直接交，无第二双眼睛 | 迭代式审查 + HITL 人工介入 |
 
@@ -125,9 +125,9 @@
 
 ## 四、核心概念体系
 
-### 4.1 四大写作模式（WritingMode）
+### 4.1 五大写作模式（WritingMode）
 
-系统通过决策树将写作任务路由到四种模式之一：
+系统通过决策树将写作任务路由到五种模式之一：
 
 | 模式 | 枚举值 | 适用文档 | 激活原则 | 对标 |
 |------|--------|----------|----------|------|
@@ -135,6 +135,7 @@
 | **客观陈述** | `OBJECTIVE_REPORT` | 事故通报、调研报告、审计报告 | 事实准确性/逻辑一致性/表述客观性/问题导向性/结论可验证性 | 新华社 |
 | **行政行为** | `ADMINISTRATIVE` | 通知、请示、批复、函、纪要 | 格式规范性/用词准确性/合规性/简洁性/无冗余性 | GB/T 9704-2012 |
 | **信息传达** | `INFORMATIONAL` | 简报、消息、活动稿 | 信息完整性/结构清晰性/重点突出性/不渲染/受众适配性 | 新华社消息 |
+| **青年共情** | `YOUTH_ENGAGEMENT` | 高校新媒体推文、社团活动稿、校园网感内容 | 思想引领/青年话语/去爹味/去官腔去AI味 | 共青团中央新媒体矩阵 |
 
 **决策路由**：从 `writing_mode.py` 中的 `DECISION_TREE` 出发，`navigate_tree(path)` 导航到叶子节点，匹配对应模式。
 
@@ -400,16 +401,16 @@ generate_multi_doc(brief, materials, target_types, primary_style, llm_callable=N
 
 **核心类**：`KnowledgeBase`、`CompactExemplar`、`KnowledgeCategory`
 
-**数据资产**：
+**数据资产**（V3.1 起数据与代码分离，全部存放于 `src/knowledge/data/*.json`，可直接编辑 JSON 维护）：
 
-| 资产 | 数量 | 说明 |
-|------|------|------|
-| `COMPACT_EXEMPLARS` | ~18篇 | 压缩范文（只存骨架/句式/可复用模式） |
-| `FORMULAIC_EXPRESSIONS` | 按文种分类 | 格式化用语库 |
-| `FORMAT_ERRORS_DB` | 8类 | 格式错误模式 |
-| `ERROR_PATTERNS_DB` | 通用 | 常见写作错误模式 |
-| `TERMINOLOGY_DB` | ~30+条 | 多领域术语 |
-| `TRANSITION_PHRASES` | 按风格分类 | 过渡句式 |
+| 资产 | 数量 | 数据文件 | 说明 |
+|------|------|----------|------|
+| `COMPACT_EXEMPLARS` | 22篇 | `exemplars.json` | 压缩范文（只存骨架/句式/可复用模式） |
+| `FORMULAIC_EXPRESSIONS` | 按文种分类 | `formulaic.json` | 格式化用语库 |
+| `FORMAT_ERRORS_DB` | 17类 | `format_errors.json` | 格式错误模式 |
+| `ERROR_PATTERNS_DB` | 10类 | `error_patterns.json` | 常见写作错误模式 |
+| `TERMINOLOGY_DB` | 27条 | `terminology.json` | 多领域术语 |
+| `TRANSITION_PHRASES` | 按风格分类 | `transitions.json` | 过渡句式 |
 
 **压缩范文设计**：范文不存原文全文，只保留**骨架结构**、**关键句式**、**可复用模式**和**语言标签**，Token 消耗节省 90%+，同时保留高保真指导价值。
 

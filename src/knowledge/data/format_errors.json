@@ -1,0 +1,155 @@
+{
+  "title_3elements_missing": {
+    "id": "title_3elements_missing",
+    "name": "标题缺少三要素",
+    "description": "公文标题应由'发文机关+事由+文种'三要素组成。常见错误：缺少发文机关（如'关于XX的通知'），或缺少事由（如'XX学院通知'），或文种不对",
+    "prescription": "标题格式：'XX单位关于XXXX的通知/请示/批复/函'。三要素缺一不可。",
+    "severity": "critical",
+    "category": "标题",
+    "check_method": "structural"
+  },
+  "date_format_wrong": {
+    "id": "date_format_wrong",
+    "name": "成文日期格式错误",
+    "description": "成文日期必须使用阿拉伯数字，年月日齐全，不编虚位。常见错误：使用汉字数字（如'二〇二四年'）、缺少日（如'2024年5月'）、编虚位（如'2024年05月05日'）",
+    "prescription": "正确格式：2024年5月5日（不写2024年05月05日）",
+    "severity": "critical",
+    "category": "日期",
+    "check_method": "structural"
+  },
+  "citation_format_wrong": {
+    "id": "citation_format_wrong",
+    "name": "引文格式不规范",
+    "description": "引用公文应先引标题后引文号。错误示例：'根据XX发〔2024〕5号文件'。正确格式：'根据《XX管理办法》（XX发〔2024〕5号）'",
+    "prescription": "引用公文格式：先引标题全称，后括号注文号。如：'根据《XX管理办法》（XX发〔2024〕5号）'",
+    "severity": "major",
+    "category": "引文",
+    "check_method": "structural"
+  },
+  "quotation_mark_wrong": {
+    "id": "quotation_mark_wrong",
+    "name": "引号使用不规范",
+    "description": "公文中引用文件标题、法规名称、讲话引用等，应使用书名号或双引号。常见错误：书名号与双引号混用，或漏用书名号",
+    "prescription": "法规文件用书名号《》，讲话引用用双引号''，二者不混用",
+    "severity": "minor",
+    "category": "标点",
+    "check_method": "pattern"
+  },
+  "number_usage_inconsistent": {
+    "id": "number_usage_inconsistent",
+    "name": "数字用法不统一",
+    "description": "根据GB/T 15835，同一篇文章中数字用法应统一。公文中非公历年月日、统计数据等用阿拉伯数字；已定型的含汉字数字的词语用汉字。常见错误：'3个方面''五个问题'混用",
+    "prescription": "统一使用阿拉伯数字（'3个方面''5个问题'），或统一使用汉字（'三个方面''五个问题'），择一并坚持到底",
+    "severity": "minor",
+    "category": "数字",
+    "check_method": "pattern"
+  },
+  "indent_wrong": {
+    "id": "indent_wrong",
+    "name": "段落缩进错误",
+    "description": "公文正文首行空2字符（不是2个空格），主送机关顶格。常见错误：首行缩进用空格代替字符缩进，或主送机关缩进",
+    "prescription": "正文首行缩进2字符（Word设置），主送机关顶格不缩进",
+    "severity": "minor",
+    "category": "缩进",
+    "check_method": "structural"
+  },
+  "signer_missing_on_upward": {
+    "id": "signer_missing_on_upward",
+    "name": "上行文缺少签发人",
+    "description": "上行文（请示、报告等）必须在发文字号右侧标注签发人姓名。下行文和平行文不需要",
+    "prescription": "上行文格式：发文字号(左) | 签发人：XXX(右)",
+    "severity": "critical",
+    "category": "签发",
+    "check_method": "structural"
+  },
+  "closing_missing": {
+    "id": "closing_missing",
+    "name": "缺少法定结尾用语",
+    "description": "每种文种有法定结尾用语。请示须写'妥否，请批示'；通知须写'特此通知'；批复须写'此复'；报告须写'特此报告'",
+    "prescription": "检查文种对应的结尾用语是否齐全正确",
+    "severity": "major",
+    "category": "结尾",
+    "check_method": "structural"
+  },
+  "qingshi_multitheme": {
+    "id": "qingshi_multitheme",
+    "name": "请示一文多事",
+    "description": "《党政机关公文处理工作条例》规定：请示应当一文一事。常见错误：在一份请示中同时请求批准多个不相关事项",
+    "prescription": "将多个事项拆分为多份请示，每份只解决一个问题",
+    "severity": "critical",
+    "category": "行文规则",
+    "check_method": "structural"
+  },
+  "baogao_with_qingshi": {
+    "id": "baogao_with_qingshi",
+    "name": "报告夹带请示事项",
+    "description": "《党政机关公文处理工作条例》规定：不得在报告等非请示性公文中夹带请示事项。报告只用于汇报，不用于请求批准",
+    "prescription": "删除报告中的请示性内容，如需请示另行发文",
+    "severity": "critical",
+    "category": "行文规则",
+    "check_method": "structural"
+  },
+  "han_for_subordinate": {
+    "id": "han_for_subordinate",
+    "name": "函用于上下级",
+    "description": "函适用于不相隶属机关之间。常见错误：上下级机关之间用函行文（应用通知/请示/批复）",
+    "prescription": "上下级之间用相应文种（上行用请示/报告，下行用通知/批复），函仅用于不相隶属机关",
+    "severity": "critical",
+    "category": "文种错用",
+    "check_method": "structural"
+  },
+  "literary_metaphor": {
+    "id": "literary_metaphor",
+    "name": "公文使用文学性比喻",
+    "description": "法定公文用'直笔'不用'曲笔'，禁止使用比喻、拟人、夸张等修辞手法。常见错误：'犹如一幅画卷''宛如一首诗''仿佛置身于'",
+    "prescription": "删除所有文学性比喻词，改用直白叙述和说明",
+    "severity": "major",
+    "category": "表达方式",
+    "check_method": "pattern"
+  },
+  "lyrical_description": {
+    "id": "lyrical_description",
+    "name": "公文使用抒情描写",
+    "description": "法定公文基本不用描写和抒情。常见错误：'令人心潮澎湃''让人感慨万千''不禁热泪盈眶'",
+    "prescription": "删除抒情性描写，改为客观陈述事实",
+    "severity": "major",
+    "category": "表达方式",
+    "check_method": "pattern"
+  },
+  "ambiguous_words": {
+    "id": "ambiguous_words",
+    "name": "用词产生歧义",
+    "description": "公文语言四要求之首是'准确'——一词一句只能有一种解释。常见歧义词：'有关''相关''适当''酌情''尽快'",
+    "prescription": "将模糊词替换为具体明确的表述（如'有关单位'改为'XX部门'，'尽快'改为'X月X日前'）",
+    "severity": "major",
+    "category": "语言四要求",
+    "check_method": "pattern"
+  },
+  "inappropriate_tone": {
+    "id": "inappropriate_tone",
+    "name": "语气与行文关系不匹配",
+    "description": "公文语言要求'得体'：上行文突出请示性，下行文强调指令性，平行文注重协商性。常见错误：下行文用'希望''建议'（应用'要求''务必'）；上行文用'必须''应当'（应用'拟''建议'）",
+    "prescription": "根据行文方向调整语气：上行文谦请，下行文明确，平行文平等协商",
+    "severity": "major",
+    "category": "语言四要求",
+    "check_method": "structural"
+  },
+  "verbose_platitudes": {
+    "id": "verbose_platitudes",
+    "name": "公文语言不简明",
+    "description": "公文语言要求'简明'：开门见山，摒弃大话空话套话。常见错误：开篇冗长铺垫、过度修饰、堆砌形容词",
+    "prescription": "删除铺垫和修饰，直陈事项。一句话能说清的不用两句",
+    "severity": "minor",
+    "category": "语言四要求",
+    "check_method": "pattern"
+  },
+  "flowered_language": {
+    "id": "flowered_language",
+    "name": "公文语言不朴实",
+    "description": "公文语言要求'朴实'：平易朴实，忌用华丽辞藻。常见错误：'宏伟蓝图''壮丽篇章''辉煌成就'",
+    "prescription": "将华丽辞藻替换为朴实表述（如'宏伟蓝图'改为'发展规划'）",
+    "severity": "minor",
+    "category": "语言四要求",
+    "check_method": "pattern"
+  }
+}
