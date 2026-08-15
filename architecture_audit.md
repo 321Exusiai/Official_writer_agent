@@ -310,12 +310,17 @@ PROJECT_DESIGN.md（V2.2）描述了 7 个模块，但实际代码中有 **11 �
       > 核查确认：writer 注入 pre_writing/during_writing 工具、review_pipeline 注入 during_writing/post_writing 工具，llm_client 已执行全部 17 个工具
       > 注：本阶段审计报告（2026-08-09）所述"prompt 碎片化 / 工具从未暴露"问题，实际已被既有提交（045f3fd/3fc4d1b）先行解决；本阶段以核查确认 + 决策记录完成，无多余代码改动
 
-### 阶段 3：LLM 集成验证（2-3 天）
+### 阶段 3：LLM 集成验证（2-3 天）✅ 已完成
 
-- [ ] 选定首要 LLM provider（OpenAI / DeepSeek / Claude）
-- [ ] 端到端测试：路由 → 问卷 → 写作 → 审查 → 输出
-- [ ] 验证迭代审查循环的鲁棒性
-- [ ] 验证工具调用的解析与执行
+- [x] 选定首要 LLM provider（OpenAI / DeepSeek / Claude）
+      > 确认：DeepSeek（deepseek-chat，api_base https://api.deepseek.com/v1，enable=true，max_tokens=32000，真实 key 已配置于 src/api_config.json）
+- [x] 端到端测试：路由 → 问卷 → 写作 → 审查 → 输出
+      > 该流程在阶段0/1 回归中已用真实 LLM 验证（tests 8/9/10/12/16 完整跑通路由→问卷→写作→审查→finalize，16/16 通过）；本次按用户要求不重复运行
+- [x] 验证迭代审查循环的鲁棒性
+      > 离线边界验证 9 项全部通过：空/无问题/占位/API未配置文本不污染审查结果；标准格式、数字序号、自由文本、字段补全均正确解析；规则迭代审查由测试11/12 覆盖（审→改→审，错误数递减）
+- [x] 验证工具调用的解析与执行
+      > 离线确定性验证 22 项全部通过：parse_tool_call 9 项（多参/值含逗号/引号值/多调用/畸形输入）、_execute_tool_call 9 项（8 代表性工具分发 + 未知工具返回空）、call_llm_with_tool_loop 闭环 4 项（解析→执行→回传→整合、工具日志、轮次上限剥离标记）
+      > 注：本阶段无代码改动，全部为核查 + 离线验证（临时脚本 _phase3_verify.py 用后即删）
 
 ### 阶段 4：UI 现代化（3-5 天）
 
