@@ -1,0 +1,12 @@
+{
+  "empty_platitudes": {"id": "empty_platitudes", "name": "空泛套话", "mode": "all", "pattern": "大家纷纷表示|一致认为|深刻感受到|圆满成功|顺利结束|取得了丰硕成果", "severity": "major", "prescription": "用亲历者的真实感言替代空泛表态，删除套话"},
+  "absolute_claims": {"id": "absolute_claims", "name": "绝对化表述", "mode": "all", "pattern": "全国首个|全国第一|全球唯一|史上最|独一无二", "severity": "major", "prescription": "删除绝对化表述；如需强调领先地位，用具体数据说明"},
+  "ai_flavor": {"id": "ai_flavor", "name": "AI套话", "mode": "all", "pattern": "总而言之|值得一提的是|毫无疑问|不可否认的是|综上所述|众所周知", "severity": "minor", "prescription": "删除AI套话，直接陈述观点"},
+  "date_with_zero": {"id": "date_with_zero", "name": "日期编虚位", "mode": "administrative", "pattern": "\\d{4}年0\\d月", "severity": "major", "prescription": "成文日期不编虚位：2025年7月27日，而非2025年07月"},
+  "evaluative_language": {"id": "evaluative_language", "name": "评价性词汇", "mode": "administrative", "pattern": "高度重视|隆重举行|热烈庆祝|圆满落幕", "severity": "major", "prescription": "行政公文禁用评价性词汇，直接陈述事实"},
+  "literary_metaphor": {"id": "literary_metaphor", "name": "公文文学化", "mode": "administrative", "pattern": "犹如|仿佛|宛如|好似一幅|仿佛一首", "severity": "major", "prescription": "行政公文禁用比喻拟人等修辞，用直笔陈述"},
+  "passive_narrative": {"id": "passive_narrative", "name": "被动叙事", "mode": "strategic_narrative", "pattern": "被安排|被组织|被带领|被要求", "severity": "minor", "prescription": "改被动为主动，突出主体性（'我们做了什么'而非'被安排了什么'）"},
+  "official_ai_mix": {"id": "official_ai_mix", "name": "官腔套话", "mode": "youth_engagement", "pattern": "领导高度重视|圆满成功|取得丰硕成果|充满激情与活力|家人们|宝宝们", "severity": "major", "prescription": "去爹味去官腔去AI味，用青年听得懂的话说"},
+  "subjective_judgment": {"id": "subjective_judgment", "name": "主观评价", "mode": "objective_report", "pattern": "我认为|笔者认为|可见其|显然可见", "severity": "minor", "prescription": "客观报告剥离主观评价，让事实自己说话"},
+  "inverted_pyramid_break": {"id": "inverted_pyramid_break", "name": "倒金字塔缺失", "mode": "informational", "pattern": "……为此，我们召开了|经过充分准备", "severity": "minor", "prescription": "导语即高潮，最重要信息放第一段第一句"}
+}
