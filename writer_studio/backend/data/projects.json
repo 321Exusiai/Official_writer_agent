@@ -1,1 +1,16 @@
-{}
+{
+  "proj_890ea9d3": {
+    "id": "proj_890ea9d3",
+    "name": "端到端验证",
+    "description": "",
+    "status": "draft",
+    "brief": null,
+    "plan": null,
+    "draft": "",
+    "final_draft": "",
+    "versions": [],
+    "review_results": [],
+    "created_at": "2026-08-15 23:30:59",
+    "updated_at": "2026-08-15 23:30:59"
+  }
+}

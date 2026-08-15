@@ -27,7 +27,7 @@ class EngineState(str, Enum):
 class WorkflowEngine:
     """驱动单个项目的完整工作流，事件经 `events` 列表暴露（供 SSE 推送）。"""
 
-    def __init__(self, project: Project):
+    def __init__(self, project: Project, llm=None):
         self.project = project
         self.state = EngineState.IDLE
         self.events: list = []
@@ -38,7 +38,11 @@ class WorkflowEngine:
         self.brief = Brief()
         self.plan = Plan()
         self.mode = ""
-        self.llm_available = False  # P2 接入后置 True
+        self.llm = llm  # LLMClient 或 None
+
+    @property
+    def llm_available(self) -> bool:
+        return bool(self.llm and self.llm.available)
 
     # ── 事件 ──
     def _emit(self, type_: str, step: str, payload: dict = None) -> WorkflowEvent:
@@ -153,16 +157,81 @@ class WorkflowEngine:
     # ── 写作 ──
     def write(self):
         self.state = EngineState.WRITING
-        self._emit("write_start", "writing", {"mode": "rule"})
+        mode = "llm" if self.llm_available else "rule"
+        self._emit("write_start", "writing", {"mode": mode})
         doc = Registry.by_id("doctypes", self.plan.doc_type)
-        draft = self._rule_draft(doc)
+        if mode == "llm":
+            decision = self._consult()
+            draft = self._llm_draft(doc, decision) or self._rule_draft(doc)
+        else:
+            draft = self._rule_draft(doc)
         self.project.draft = draft
-        self._emit("draft_ready", "writing", {"word_count": len(draft), "mode": "rule"})
+        self._emit("draft_ready", "writing", {"word_count": len(draft), "mode": mode})
         versions = multi_doc.generate_multi_doc(draft, self.brief, self.plan.doc_type, self.mode)
         self.project.versions = versions
-        self._emit("multi_doc", "writing", {"versions": [v.model_dump() for v in versions], "mode": "rule"})
+        self._emit("multi_doc", "writing", {"versions": [v.model_dump() for v in versions], "mode": mode})
         self.state = EngineState.REVIEWING
         return draft
+
+    def _consult(self) -> dict:
+        """多角色协商 + 集中决策，返回 decision。"""
+        from . import agents
+        context = {
+            "brief": self.brief.model_dump(),
+            "plan": self.plan.model_dump(),
+            "style_match": style.check_style_doc_match(self.plan.media_style, self.plan.doc_type),
+            "user_memory": "",
+        }
+        responses = agents.consult(self.llm, "写作方案评审", context)
+        for rid, r in responses.items():
+            self._emit("consult", "writing", r.model_dump())
+        decision = agents.decide(self.llm, "写作方案最终决策", responses)
+        self._emit("decision", "writing", decision)
+        return decision
+
+    def _core_prompt(self, doc) -> str:
+        mode_profile = Registry.by_id("modes", self.mode)
+        st = Registry.by_id("styles", self.plan.media_style) or {}
+        lines = [
+            "你是公文写作智能体，服务学生与基层写作者，兼具教学引导与生产辅助职能。",
+            "",
+            f"【写作模式】{mode_profile['name']}：{mode_profile['tagline']}",
+            "【核心原则】",
+        ]
+        for i, p in enumerate(mode_profile["principles"], 1):
+            lines.append(f"{i}. {p['name']}：{p['check']}")
+        lines += [
+            "",
+            f"【文种】{doc['name_cn']}：{doc['structure_mode']}",
+            f"【开篇】{doc['opening_template']}",
+            f"【正文】{doc['body_template']}",
+            f"【结尾】{doc['closing_template']}",
+            "",
+            f"【风格】{st.get('name', '')}：{st.get('description', '')}",
+            f"叙事视角：{st.get('narrative_perspective', '')}；情感基调：{st.get('emotional_tone', '')}",
+            "禁用表述：" + "、".join(st.get("forbidden_patterns", [])[:5]),
+            "",
+            "高级行文策略：用事实、结构和细节说话，避免解释自身写作逻辑，避免AI套话。",
+        ]
+        return "\n".join(lines)
+
+    def _draft_user_prompt(self, decision: dict) -> str:
+        b = self.brief
+        lines = [
+            "请根据上述要求生成一篇完整公文。",
+            f"核心目的：{b.purpose or '（未填）'}",
+            f"第一读者：{b.primary_audience or '（未填）'}",
+            f"深层含义：{b.deep_meaning or '（未填）'}",
+            f"核心素材：{b.key_materials or '（未填）'}",
+            f"差异化视角：{b.differentiator or '（未填）'}",
+        ]
+        if decision and decision.get("decision"):
+            lines.append(f"\n【协商决策摘要】\n{decision['decision']}")
+        lines.append("\n请直接输出正文，不要输出任何说明或元信息。")
+        return "\n".join(lines)
+
+    def _llm_draft(self, doc, decision: dict):
+        return self.llm.chat(self._core_prompt(doc), self._draft_user_prompt(decision), temperature=0.7)
 
     def _rule_draft(self, doc) -> str:
         b = self.brief
@@ -185,18 +254,58 @@ class WorkflowEngine:
     # ── 审查 ──
     def review(self):
         self.state = EngineState.REVIEWING
-        self._emit("review_start", "reviewing", {"mode": "rule"})
-        result = review.review(self.project.draft, self.mode, round_name="规则审查")
+        mode = "llm" if self.llm_available else "rule"
+        self._emit("review_start", "reviewing", {"mode": mode})
+        result = review.review(self.project.draft, self.mode, round_name="审查")
+        if mode == "llm":
+            llm_findings = self._llm_review(self.project.draft)
+            if llm_findings:
+                result.findings.extend(llm_findings)
+                result.score = review.score(result.findings)
+                result.passed = review.is_passed([result])
         self.project.review_results = [result]
         payload = {
             "round_name": result.round_name,
             "score": result.score,
             "passed": result.passed,
             "findings": [f.model_dump() for f in result.findings],
-            "mode": "rule",
+            "mode": mode,
         }
         self._emit("review_done", "reviewing", payload)
         return payload
+
+    def _reviewer_prompt(self) -> str:
+        mode_profile = Registry.by_id("modes", self.mode)
+        dims = mode_profile["review_dimensions"]
+        dim_text = "\n".join(f"- {d['name']}（权重{d['weight']:.0%}）" for d in dims)
+        return (
+            "你是公文审查员。按给定维度逐段检查稿件，标注问题位置、严重程度和修改建议。\n"
+            f"审查维度：\n{dim_text}\n\n"
+            "严重程度取 critical/major/minor/suggestion。\n"
+            "请用JSON输出：{\"findings\": [{\"issue\":\"...\",\"severity\":\"...\",\"suggestion\":\"...\"}]}\n"
+            "没有问题则输出 {\"findings\": []}"
+        )
+
+    def _llm_review(self, draft: str):
+        """LLM 深度审查：返回 ReviewFinding 列表（解析失败返回空）。"""
+        from ..domain.schemas import ReviewFinding, ReviewSeverity
+        data = self.llm.chat_json(self._reviewer_prompt(), f"请审查以下稿件：\n\n{draft[:4000]}", temperature=0.3)
+        if not data:
+            return []
+        findings = []
+        for f in data.get("findings", []):
+            sev = f.get("severity", "minor")
+            if sev not in ("critical", "major", "minor", "suggestion"):
+                sev = "minor"
+            findings.append(ReviewFinding(
+                round_name="AI深度审查",
+                severity=ReviewSeverity(sev),
+                issue=f.get("issue", ""),
+                suggestion=f.get("suggestion", ""),
+                error_key="",
+                source="llm",
+            ))
+        return findings
 
     # ── 交付 ──
     def finalize(self):
