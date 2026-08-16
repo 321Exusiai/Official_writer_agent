@@ -509,5 +509,138 @@
       "不回避矛盾，呈现复杂性"
     ],
     "reusable_pattern": "1.以一个人物的具体生活场景切入\n2.从个体困境扩展到群体数据\n3.呈现多方观点(老人/子女/政府/专家)\n4.结尾回到开篇人物，形成闭环"
+  },
+  "club_recruit": {
+    "id": "club_recruit",
+    "title": "招新｜加入我们，把热爱做成事业",
+    "source": "高校社团公众号",
+    "doc_type": "消息",
+    "style": "央视新闻",
+    "writing_mode": "youth_engagement",
+    "award": "校级优秀社团推文",
+    "word_count": 800,
+    "structure_skeleton": "反差开场(一个梗/疑问)→社团三个卖点(你+场景句式)→成员真实故事(一句感言)→强行动号召(扫码/留言/暗号)",
+    "key_sentences": [
+      "不是所有热爱都值得被辜负",
+      "这里有你的同路人",
+      "扫码进群，暗号「热爱」"
+    ],
+    "language_tags": [
+      "网感",
+      "短句",
+      "互动",
+      "情绪价值",
+      "圈层认同"
+    ],
+    "reusable_pattern": "开场用反差制造好奇→卖点用「你+场景」句式→结尾给明确行动出口"
+  },
+  "music_festival": {
+    "id": "music_festival",
+    "title": "草坪音乐节｜那个雨夜，我们把青春唱成了歌",
+    "source": "学院新媒体中心",
+    "doc_type": "侧记",
+    "style": "央视新闻",
+    "writing_mode": "youth_engagement",
+    "award": "校园十佳新媒体作品",
+    "word_count": 900,
+    "structure_skeleton": "现场高光瞬间(雨中合唱)→节目亮点(2-3个记忆点)→幕后小插曲(突发+随机反应)→思想落点(青春自信与校园文化)→互动号召",
+    "key_sentences": [
+      "主唱清唱的那三分钟，全场都安静了",
+      "设备断电，反而成了全场大合唱的开始",
+      "表面是音乐节，落点是「青春自信与校园文化自信」"
+    ],
+    "language_tags": [
+      "画面感",
+      "BGM感",
+      "情绪价值",
+      "思想落点"
+    ],
+    "reusable_pattern": "用最鲜活的高光瞬间开场→写真实突发与随机反应→娱乐外壳下点出育人价值落点"
+  },
+  "garden_party": {
+    "id": "garden_party",
+    "title": "游园会全攻略｜38个摊位，我们替你踩过点了",
+    "source": "校团委新媒体",
+    "doc_type": "消息",
+    "style": "央视新闻",
+    "writing_mode": "youth_engagement",
+    "award": "校团委优秀推送",
+    "word_count": 700,
+    "structure_skeleton": "种草式开场(最值得打卡的3个摊位)→分区导览(社团/游戏/美食)→隐藏玩法(暗号/集章)→时间地点与行动号召",
+    "key_sentences": [
+      "第12号摊位的射箭，可以赢社长请奶茶",
+      "集齐8个章能换限定周边",
+      "评论区猜中隐藏摊位，抽5个送门票"
+    ],
+    "language_tags": [
+      "种草",
+      "攻略体",
+      "互动",
+      "轻快"
+    ],
+    "reusable_pattern": "攻略体+种草语气→分区导览给可执行信息→隐藏玩法制造参与感→强互动收尾"
+  },
+  "class_meeting": {
+    "id": "class_meeting",
+    "title": "学院召开2026级新生第一次主题班会",
+    "source": "学院官网新闻",
+    "doc_type": "消息",
+    "style": "新华社",
+    "writing_mode": "informational",
+    "award": "学院新闻规范范例",
+    "word_count": 500,
+    "structure_skeleton": "导语(5W1H:时间地点人物事件结果)→班会主要内容(2-3个议程要点)→班主任/学生发言要点→意义点题(一句)",
+    "key_sentences": [
+      "X月X日，学院在X教室召开新生第一次主题班会",
+      "辅导员围绕学风建设、安全教育作了重点强调"
+    ],
+    "language_tags": [
+      "客观",
+      "要素齐全",
+      "倒金字塔"
+    ],
+    "reusable_pattern": "导语五要素齐全→按重要性递减排列议程→一句意义点题，不渲染"
+  },
+  "lecture": {
+    "id": "lecture",
+    "title": "知名学者做客「XX讲堂」谈人工智能与青年成长",
+    "source": "学院新闻网",
+    "doc_type": "消息",
+    "style": "新华社",
+    "writing_mode": "informational",
+    "award": "高校新闻采编规范范例",
+    "word_count": 600,
+    "structure_skeleton": "导语(讲座主题+主讲人+时间地点)→主讲核心观点(2-3点,用直接引语)→现场互动(学生提问)→主办方寄语(一句)",
+    "key_sentences": [
+      "讲座在X楼报告厅举行，X余名师生到场",
+      "教授以「……」为题，围绕……展开"
+    ],
+    "language_tags": [
+      "客观",
+      "直接引语",
+      "倒金字塔"
+    ],
+    "reusable_pattern": "导语点出讲座主题与主讲人→用直接引语呈现核心观点→一句互动+一句意义收束"
+  },
+  "opening_ceremony": {
+    "id": "opening_ceremony",
+    "title": "学院举行2026级新生开学典礼",
+    "source": "学院新闻网",
+    "doc_type": "消息",
+    "style": "新华社",
+    "writing_mode": "informational",
+    "award": "学院新闻规范范例",
+    "word_count": 500,
+    "structure_skeleton": "导语(典礼时间地点+出席)→院长致辞要点(引用原话)→教师/老生/新生代表发言→典礼意义点题",
+    "key_sentences": [
+      "X月X日上午，学院2026级新生开学典礼在X举行",
+      "院长寄语新生：……"
+    ],
+    "language_tags": [
+      "庄重",
+      "要素齐全",
+      "客观"
+    ],
+    "reusable_pattern": "导语要素齐全→按典礼流程排列→用直接引语承载寄语→一句点题"
   }
 }

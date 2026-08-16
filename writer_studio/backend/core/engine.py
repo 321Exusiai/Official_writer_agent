@@ -191,9 +191,11 @@ class WorkflowEngine:
             "policies": [p["text"] for p in retrieved["policies"]],
             "exemplars": [e["title"] for e in retrieved["exemplars"]],
         })
+        # 联网搜索（可选）：配置了搜索 key 时实时检索最新政策/讲话
+        web_results = self._web_search()
         if mode == "llm":
             decision = self._consult()
-            draft = self._llm_draft(doc, decision, retrieved) or self._rule_draft(doc)
+            draft = self._llm_draft(doc, decision, retrieved, web_results) or self._rule_draft(doc)
         else:
             draft = self._rule_draft(doc)
         self.project.draft = draft
@@ -203,6 +205,20 @@ class WorkflowEngine:
         self._emit("multi_doc", "writing", {"versions": [v.model_dump() for v in versions], "mode": mode})
         self.state = EngineState.REVIEWING
         return draft
+
+    def _web_search(self) -> list:
+        """联网搜索（可选）：配置了搜索 key 时实时检索最新政策/讲话。"""
+        if not self.llm:
+            return []
+        key = getattr(self.llm.config, "search_api_key", "")
+        if not key:
+            return []
+        from . import web_search
+        query = f"{self.brief.purpose} {self.brief.key_materials}"[:60]
+        provider = getattr(self.llm.config, "search_provider", "tavily")
+        results = web_search.search_web(query, provider, key)
+        self._emit("web_search", "writing", {"query": query, "count": len(results)})
+        return results
 
     def _consult(self) -> dict:
         """多角色协商 + 集中决策，返回 decision。"""
@@ -246,7 +262,7 @@ class WorkflowEngine:
         ]
         return "\n".join(lines)
 
-    def _draft_user_prompt(self, decision: dict, retrieved: dict = None) -> str:
+    def _draft_user_prompt(self, decision: dict, retrieved: dict = None, web_results: list = None) -> str:
         b = self.brief
         lines = [
             "请根据上述要求生成一篇完整公文。",
@@ -261,15 +277,20 @@ class WorkflowEngine:
             ctx = retrieval.format_retrieval_context(retrieved)
             if ctx:
                 lines.append(f"\n【知识库检索到的参考（请自然融入，不要照抄）】\n{ctx}")
+        if web_results:
+            from . import web_search
+            ctx = web_search.format_web_results(web_results)
+            if ctx:
+                lines.append(f"\n{ctx}")
         if decision and decision.get("decision"):
             lines.append(f"\n【协商决策摘要】\n{decision['decision']}")
         lines.append("\n请直接输出正文，不要输出任何说明或元信息。")
         return "\n".join(lines)
 
-    def _llm_draft(self, doc, decision: dict, retrieved: dict = None):
+    def _llm_draft(self, doc, decision: dict, retrieved: dict = None, web_results: list = None):
         from . import retrieval
         system = self._core_prompt(doc)
-        user = self._draft_user_prompt(decision, retrieved)
+        user = self._draft_user_prompt(decision, retrieved, web_results)
         # LLM 自主工具检索（function calling），失败回退普通生成
         draft = self.llm.chat_with_tools(system, user, retrieval.WRITING_TOOLS, retrieval.execute_tool)
         if draft:

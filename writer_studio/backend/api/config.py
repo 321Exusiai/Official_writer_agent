@@ -41,6 +41,8 @@ class ConfigBody(BaseModel):
     temperature: float = 0.7
     max_tokens: int = 8000
     enabled: bool = False
+    search_provider: str = "tavily"
+    search_api_key: str = ""
 
 
 @router.get("/config")
@@ -49,6 +51,8 @@ def get_config():
     d = cfg.model_dump()
     if d.get("api_key"):
         d["api_key"] = "••••" + d["api_key"][-4:]  # 脱敏
+    if d.get("search_api_key"):
+        d["search_api_key"] = "••••" + d["search_api_key"][-4:]
     return d
 
 
@@ -58,6 +62,8 @@ def set_config(body: ConfigBody):
     payload = body.model_dump()
     if payload["api_key"].startswith("••••"):
         payload["api_key"] = cfg.api_key  # 保留原 key（用户未重填）
+    if payload["search_api_key"].startswith("••••"):
+        payload["search_api_key"] = cfg.search_api_key
     for k, v in payload.items():
         setattr(cfg, k, v)
     save_config(cfg)

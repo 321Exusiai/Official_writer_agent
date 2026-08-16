@@ -143,3 +143,6 @@ class LLMConfig(BaseModel):
     temperature: float = 0.7
     max_tokens: int = 8000
     enabled: bool = False
+    # 联网搜索（可选）：填 key 启用运行时联网检索最新政策/讲话
+    search_provider: str = "tavily"
+    search_api_key: str = ""
