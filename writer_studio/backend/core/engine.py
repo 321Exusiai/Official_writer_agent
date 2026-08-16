@@ -138,6 +138,29 @@ class WorkflowEngine:
         self._emit("plan", "planning", payload)
         return payload
 
+    def update_plan(self, doc_type: str, media_style: str) -> dict:
+        """用户手动覆盖文种/风格，重新生成方案。"""
+        if self.state not in (EngineState.WAITING_APPROVAL,):
+            raise RuntimeError("当前不在方案确认阶段")
+        doc = Registry.by_id("doctypes", doc_type)
+        if not doc:
+            raise ValueError(f"文种不存在：{doc_type}")
+        st = Registry.by_id("styles", media_style)
+        if not st:
+            raise ValueError(f"风格不存在：{media_style}")
+        self.plan.doc_type = doc_type
+        self.plan.media_style = media_style
+        self.plan.estimated_length = f"{doc['typical_length_range'][0]}-{doc['typical_length_range'][1]}字"
+        self.plan.structure_outline = doc["structure_mode"]
+        style_match = style.check_style_doc_match(media_style, doc_type)
+        self.project.plan = self.plan
+        payload = self.plan.model_dump()
+        payload["doc_type_name"] = doc["name_cn"]
+        payload["style_name"] = st["name"]
+        payload["style_match"] = style_match
+        self._emit("plan", "planning", payload)
+        return payload
+
     def _audience_focus(self, audience: str) -> str:
         a = (audience or "").lower()
         if any(k in a for k in ("领导", "上级", "汇报")):

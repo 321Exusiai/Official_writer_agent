@@ -88,9 +88,25 @@ class RollbackBody(BaseModel):
     step: str
 
 
+class PlanBody(BaseModel):
+    doc_type: str
+    media_style: str
+
+
 @router.post("/projects/{pid}/workflow/rollback")
 def rollback(pid: str, body: RollbackBody):
     eng = get_engine(pid)
     result = eng.rollback_to(body.step)
+    _persist(pid, eng)
+    return result
+
+
+@router.post("/projects/{pid}/workflow/plan")
+def update_plan(pid: str, body: PlanBody):
+    eng = get_engine(pid)
+    try:
+        result = eng.update_plan(body.doc_type, body.media_style)
+    except (ValueError, RuntimeError) as e:
+        raise HTTPException(400, str(e))
     _persist(pid, eng)
     return result

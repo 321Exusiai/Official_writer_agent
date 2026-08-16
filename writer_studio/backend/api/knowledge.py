@@ -36,3 +36,15 @@ def list_formulaic():
 @router.get("/knowledge/policy")
 def list_policy():
     return list(Registry.load("policy").values())
+
+
+@router.get("/knowledge/doctypes")
+def list_doctypes(domain: str = ""):
+    items = Registry.filter("doctypes", domain=domain or None)
+    return [{"id": d["id"], "name_cn": d["name_cn"], "domain": d["domain"]} for d in items]
+
+
+@router.get("/knowledge/styles")
+def list_styles(domain: str = ""):
+    items = Registry.filter("styles", domain=domain or None)
+    return [{"id": s["id"], "name": s["name"], "domain": s["domain"]} for s in items]

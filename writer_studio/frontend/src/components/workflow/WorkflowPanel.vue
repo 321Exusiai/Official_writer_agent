@@ -51,6 +51,18 @@
           <div class="plan-item"><span class="plan-k">篇幅</span><span class="plan-v">{{ cur.plan.estimated_length }}</span></div>
         </div>
         <p v-if="cur.plan.style_match === false" class="warn-text">⚠️ 风格与文种不匹配，建议调整</p>
+        <div class="adjust-box">
+          <div class="adjust-row">
+            <label class="adjust-label">文种</label>
+            <select class="ios-input" v-model="selDocType" @change="onDocTypeChange">
+              <option v-for="d in doctypeOptions" :key="d.id" :value="d.id">{{ d.name_cn }}</option>
+            </select>
+            <label class="adjust-label">风格</label>
+            <select class="ios-input" v-model="selStyle" @change="onStyleChange">
+              <option v-for="s in styleOptions" :key="s.id" :value="s.id">{{ s.name }}</option>
+            </select>
+          </div>
+        </div>
       </GlassCard>
       <div class="actions">
         <Button @click="confirm">确认方案，开始写作</Button>
@@ -131,7 +143,7 @@
 </template>
 
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { useWorkflowStore } from '../../stores/workflow'
 import { useProjectStore } from '../../stores/project'
 import { api } from '../../api/client'
@@ -159,6 +171,10 @@ const draftContent = computed(() => {
 })
 const versions = computed(() => cur.value.versions)
 const modeName = computed(() => (cur.value.plan ? cur.value.plan.writing_mode : ''))
+const doctypeOptions = ref([])
+const styleOptions = ref([])
+const selDocType = ref('')
+const selStyle = ref('')
 
 function findings() { return (cur.value.review && cur.value.review.findings) || [] }
 function heatCount(key) { return findings().filter((f) => f.severity === key).length }
@@ -166,6 +182,34 @@ function heatPct(key) {
   const total = findings().length || 1
   return Math.round((heatCount(key) / total) * 100)
 }
+
+async function loadPlanOptions() {
+  try {
+    const mode = cur.value.plan && cur.value.plan.writing_mode
+    const domain = mode === 'administrative' ? 'official' : 'media'
+    doctypeOptions.value = await api.get(`/knowledge/doctypes?domain=${domain}`)
+    styleOptions.value = await api.get(`/knowledge/styles?domain=${domain}`)
+    if (cur.value.plan) {
+      selDocType.value = cur.value.plan.doc_type
+      selStyle.value = cur.value.plan.media_style
+    }
+  } catch { /* ignore */ }
+}
+
+async function applyPlanChange() {
+  if (!pid.value || !selDocType.value || !selStyle.value) return
+  const plan = await api.post(`/projects/${pid.value}/workflow/plan`, {
+    doc_type: selDocType.value, media_style: selStyle.value,
+  })
+  store.items[pid.value].plan = plan
+}
+
+function onDocTypeChange() { applyPlanChange() }
+function onStyleChange() { applyPlanChange() }
+
+watch(() => cur.value.state, (s) => {
+  if (s === 'waiting_approval') loadPlanOptions()
+})
 
 function answer(index) { store.answer(pid.value, String(index)) }
 function submitAnswer() {
@@ -224,6 +268,10 @@ function sevText(s) {
 .plan-item { display: flex; flex-direction: column; gap: 2px; }
 .plan-k { color: var(--color-ink-muted); font-size: 12px; }
 .plan-v { font-weight: 600; font-size: 14px; }
+.adjust-box { margin-top: 12px; border-top: 1px solid var(--glass-border); padding-top: 10px; }
+.adjust-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.adjust-label { font-size: 12px; color: var(--color-ink-muted); }
+.adjust-row select { flex: 1; min-width: 100px; }
 .draft-text { white-space: pre-wrap; font-family: var(--font-ui); font-size: 13px; line-height: 1.7; color: var(--color-ink-body); }
 .score-row { display: flex; align-items: center; gap: 10px; }
 .score { font-size: 32px; font-weight: 700; color: var(--color-accent); }
