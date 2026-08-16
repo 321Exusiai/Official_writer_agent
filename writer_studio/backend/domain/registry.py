@@ -51,6 +51,12 @@ class Registry:
             cls._validate_doctypes(data)
         elif name == "modes":
             cls._validate_modes(data)
+        elif name == "exemplars":
+            if len(data) < 20:
+                raise RegistryError(f"exemplars 应 ≥20 篇范文，实为 {len(data)}")
+        elif name == "terminology":
+            if len(data) < 25:
+                raise RegistryError(f"terminology 应 ≥25 条术语，实为 {len(data)}")
 
     @classmethod
     def _validate_styles(cls, data):

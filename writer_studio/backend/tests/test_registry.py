@@ -39,6 +39,18 @@ class TestRegistry(unittest.TestCase):
         style = Registry.by_id("styles", "government_admin")
         self.assertEqual(style["domain"], "official")
 
+    def test_load_exemplars(self):
+        self.assertGreaterEqual(len(Registry.load("exemplars")), 20)
+
+    def test_load_terminology(self):
+        self.assertGreaterEqual(len(Registry.load("terminology")), 25)
+
+    def test_load_transitions(self):
+        self.assertGreaterEqual(len(Registry.load("transitions")), 5)
+
+    def test_load_formulaic(self):
+        self.assertGreaterEqual(len(Registry.load("formulaic")), 5)
+
 
 if __name__ == "__main__":
     unittest.main()

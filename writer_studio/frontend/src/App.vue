@@ -76,10 +76,12 @@
 
       <aside class="pane">
         <div class="pane-tabs">
-          <button class="pane-tab" :class="{ on: !showConfig }" @click="showConfig = false">过程</button>
-          <button class="pane-tab" :class="{ on: showConfig }" @click="showConfig = true">设置</button>
+          <button class="pane-tab" :class="{ on: rightTab === 'process' }" @click="rightTab = 'process'">过程</button>
+          <button class="pane-tab" :class="{ on: rightTab === 'knowledge' }" @click="rightTab = 'knowledge'">资料</button>
+          <button class="pane-tab" :class="{ on: rightTab === 'config' }" @click="rightTab = 'config'">设置</button>
         </div>
-        <ProcessPanel v-if="!showConfig" />
+        <ProcessPanel v-if="rightTab === 'process'" />
+        <KnowledgePanel v-else-if="rightTab === 'knowledge'" />
         <ConfigPanel v-else />
       </aside>
     </div>
@@ -95,12 +97,13 @@ import ProjectBrowser from './components/project/ProjectBrowser.vue'
 import WorkflowPanel from './components/workflow/WorkflowPanel.vue'
 import ProcessPanel from './components/workflow/ProcessPanel.vue'
 import ConfigPanel from './components/config/ConfigPanel.vue'
+import KnowledgePanel from './components/knowledge/KnowledgePanel.vue'
 import Button from './components/ui/Button.vue'
 
 const theme = useThemeStore()
 const projectStore = useProjectStore()
 const workflow = useWorkflowStore()
-const showConfig = ref(false)
+const rightTab = ref('process')
 
 const themes = [
   { id: 'starry', label: '星月夜' },
