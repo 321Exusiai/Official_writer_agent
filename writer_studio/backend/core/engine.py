@@ -244,7 +244,14 @@ class WorkflowEngine:
         return "\n".join(lines)
 
     def _llm_draft(self, doc, decision: dict, retrieved: dict = None):
-        return self.llm.chat(self._core_prompt(doc), self._draft_user_prompt(decision, retrieved), temperature=0.7)
+        from . import retrieval
+        system = self._core_prompt(doc)
+        user = self._draft_user_prompt(decision, retrieved)
+        # LLM 自主工具检索（function calling），失败回退普通生成
+        draft = self.llm.chat_with_tools(system, user, retrieval.WRITING_TOOLS, retrieval.execute_tool)
+        if draft:
+            return draft
+        return self.llm.chat(system, user, temperature=0.7)
 
     def _rule_draft(self, doc) -> str:
         b = self.brief

@@ -83,5 +83,60 @@ class LLMClient:
         raw = self.chat(system, user, temperature=temperature)
         return _parse_json(raw) if raw else None
 
+    def chat_with_tools(self, system, user, tools, executor, max_rounds=3):
+        """LLM 自主工具调用闭环（OpenAI 兼容 function calling）。
+
+        tools: [{name, description, parameters(json schema)}]
+        executor: callable(tool_name, args_dict) -> str，执行工具返回结果文本。
+        返回最终文本；未配置/失败返回 None（调用方降级）。
+        """
+        if not self.available:
+            return None
+        messages = [
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
+        ]
+        url = self.config.api_base.rstrip("/") + "/chat/completions"
+        for _ in range(max_rounds):
+            payload = {
+                "model": self.config.model,
+                "messages": messages,
+                "temperature": self.config.temperature,
+                "max_tokens": self.config.max_tokens,
+                "tools": tools,
+                "tool_choice": "auto",
+            }
+            try:
+                resp = self._client.post(
+                    url, json=payload,
+                    headers={"Authorization": f"Bearer {self.config.api_key}"},
+                )
+                if resp.status_code != 200:
+                    return None
+                data = resp.json()
+                msg = (data.get("choices") or [{}])[0].get("message", {})
+            except httpx.HTTPError:
+                return None
+
+            tool_calls = msg.get("tool_calls")
+            if not tool_calls:
+                return msg.get("content")
+
+            messages.append(msg)
+            for tc in tool_calls:
+                fn = tc.get("function", {})
+                name = fn.get("name", "")
+                try:
+                    args = json.loads(fn.get("arguments", "{}"))
+                except json.JSONDecodeError:
+                    args = {}
+                result = executor(name, args) or ""
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": tc.get("id", ""),
+                    "content": result,
+                })
+        return None
+
     def close(self):
         self._client.close()

@@ -2,6 +2,8 @@
 import unittest
 
 from writer_studio.backend.core.retrieval import (
+    WRITING_TOOLS,
+    execute_tool,
     format_retrieval_context,
     retrieve_for_brief,
     search_policy,
@@ -39,6 +41,20 @@ class TestRetrieval(unittest.TestCase):
         r = retrieve_for_brief(brief, plan)
         ctx = format_retrieval_context(r)
         self.assertIn("高质量发展", ctx)
+
+    def test_execute_tool_search_policy(self):
+        result = execute_tool("search_policy", {"keyword": "高质量发展"})
+        self.assertIn("高质量发展", result)
+
+    def test_execute_tool_lookup_term(self):
+        result = execute_tool("lookup_term", {"term": "新质生产力"})
+        self.assertIn("新质生产力", result)
+
+    def test_writing_tools_schema(self):
+        self.assertEqual(len(WRITING_TOOLS), 3)
+        names = [t["function"]["name"] for t in WRITING_TOOLS]
+        self.assertIn("search_policy", names)
+        self.assertIn("lookup_term", names)
 
 
 if __name__ == "__main__":

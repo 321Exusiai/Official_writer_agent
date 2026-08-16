@@ -70,3 +70,67 @@ def format_retrieval_context(retrieved: dict) -> str:
         for e in retrieved["exemplars"]:
             lines.append(f"- 《{e.get('title', '')}》：{(e.get('structure_skeleton', '') or '')[:60]}")
     return "\n".join(lines)
+
+
+# ── LLM 自主工具调用（function calling） ──
+
+WRITING_TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "search_policy",
+            "description": "检索相关政策表述、领导讲话金句、公文规范用语（如'高质量发展''乡村振兴'）",
+            "parameters": {
+                "type": "object",
+                "properties": {"keyword": {"type": "string", "description": "主题关键词"}},
+                "required": ["keyword"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "lookup_term",
+            "description": "查询术语的准确定义、使用语境、常见误用（如'新质生产力'）",
+            "parameters": {
+                "type": "object",
+                "properties": {"term": {"type": "string", "description": "要查询的术语"}},
+                "required": ["term"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "search_exemplars",
+            "description": "检索标杆范文的结构骨架（按文种）",
+            "parameters": {
+                "type": "object",
+                "properties": {"doc_type": {"type": "string", "description": "文种，如'通讯''通知'"}},
+                "required": ["doc_type"],
+            },
+        },
+    },
+]
+
+
+def execute_tool(name: str, args: dict) -> str:
+    """执行检索工具，返回结果文本（供 chat_with_tools 回传）。"""
+    if name == "search_policy":
+        hits = search_policy(args.get("keyword", ""))
+        if not hits:
+            return "未检索到相关政策表述"
+        return "\n".join(f"- {p['text']}（{p.get('source', '')}）" for p in hits)
+    if name == "lookup_term":
+        term = args.get("term", "")
+        terms = Registry.load("terminology")
+        info = terms.get(term)
+        if not info:
+            return f"未找到术语：{term}"
+        return f"{term}：{info.get('definition', '')}（误用提示：{info.get('common_misuse', '')}）"
+    if name == "search_exemplars":
+        hits = search_exemplars("", args.get("doc_type", ""), "")
+        if not hits:
+            return "未检索到相关范文"
+        return "\n".join(f"- 《{e.get('title', '')}》：{(e.get('structure_skeleton', '') or '')[:80]}" for e in hits)
+    return ""
