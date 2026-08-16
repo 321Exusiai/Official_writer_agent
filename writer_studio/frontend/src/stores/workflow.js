@@ -2,89 +2,125 @@ import { defineStore } from 'pinia'
 import { api } from '../api/client'
 import { subscribeProject } from '../api/events'
 
-export const useWorkflowStore = defineStore('workflow', {
-  state: () => ({
+function emptyItem() {
+  return {
     state: 'idle',
     events: [],
-    routing: null,      // 当前路由问题
-    question: null,     // 当前问卷问题
-    plan: null,         // 生成的方案
-    draft: '',          // 初稿
-    versions: [],       // 一文多体
-    review: null,       // 审查结果
+    routing: null,
+    question: null,
+    plan: null,
+    draft: '',
+    versions: [],
+    review: null,
     busy: false,
     error: null,
+  }
+}
+
+export const useWorkflowStore = defineStore('workflow', {
+  state: () => ({
+    activePid: null,
+    items: {}, // { pid: item }
+    unsub: null, // 当前 SSE 订阅清理函数
   }),
+  getters: {
+    cur(state) {
+      return state.items[state.activePid] || emptyItem()
+    },
+  },
   actions: {
-    reset() {
-      this.state = 'idle'; this.events = []; this.routing = null
-      this.question = null; this.plan = null; this.draft = ''
-      this.versions = []; this.review = null; this.error = null
+    ensure(pid) {
+      if (!this.items[pid]) this.items[pid] = emptyItem()
+      this.activePid = pid
+      return this.items[pid]
+    },
+    setActive(pid) {
+      this.activePid = pid
+      if (!this.items[pid]) this.items[pid] = emptyItem()
     },
     async start(pid) {
-      this.reset()
-      this.busy = true
-      this.routing = await api.post(`/projects/${pid}/workflow/start`)
-      this.state = 'routing'
-      this.busy = false
+      const s = this.ensure(pid)
+      Object.assign(s, emptyItem())
+      s.busy = true
+      s.routing = await api.post(`/projects/${pid}/workflow/start`)
+      s.state = 'routing'
+      s.busy = false
     },
     async answer(pid, text) {
-      this.busy = true
-      this.error = null
+      const s = this.ensure(pid)
+      s.busy = true
+      s.error = null
       const result = await api.post(`/projects/${pid}/workflow/answer`, { text })
-      this.applyResult(result)
-      this.busy = false
+      this.applyResult(s, result)
+      s.busy = false
     },
-    applyResult(result) {
+    applyResult(s, result) {
       if (!result) return
       if (result.options) {
-        // 路由问题（含 node/question/options）
-        this.routing = result; this.question = null; this.state = 'routing'
+        s.routing = result; s.question = null; s.state = 'routing'
       } else if (result.index) {
-        // 问卷问题（含 index/total/question/why_ask/hint）
-        this.question = result; this.routing = null; this.state = 'questioning'
+        s.question = result; s.routing = null; s.state = 'questioning'
       } else if (result.doc_type || result.writing_mode) {
-        // 方案（plan）
-        this.plan = result; this.state = 'waiting_approval'
+        s.plan = result; s.state = 'waiting_approval'
       }
     },
     async confirm(pid) {
-      this.busy = true
-      this.draft = await api.post(`/projects/${pid}/workflow/confirm`)
-      this.state = 'reviewing'
-      this.busy = false
+      const s = this.ensure(pid)
+      s.busy = true
+      s.draft = await api.post(`/projects/${pid}/workflow/confirm`)
+      s.state = 'reviewing'
+      s.busy = false
     },
     async review(pid) {
-      this.busy = true
-      this.review = await api.post(`/projects/${pid}/workflow/review`)
-      this.state = 'reviewed'
-      this.busy = false
+      const s = this.ensure(pid)
+      s.busy = true
+      s.review = await api.post(`/projects/${pid}/workflow/review`)
+      s.state = 'reviewed'
+      s.busy = false
     },
     async finalize(pid) {
-      this.busy = true
+      const s = this.ensure(pid)
+      s.busy = true
       const r = await api.post(`/projects/${pid}/workflow/finalize`)
-      this.versions = r.versions || []
-      this.state = 'completed'
-      this.busy = false
+      s.versions = r.versions || []
+      s.state = 'completed'
+      s.busy = false
       return r
     },
+    async rollback(pid, step) {
+      const s = this.ensure(pid)
+      const r = await api.post(`/projects/${pid}/workflow/rollback`, { step })
+      if (step === 'routing' || step === 'questioning') {
+        s.plan = null; s.draft = ''; s.versions = []; s.review = null
+      } else if (step === 'planning' || step === 'writing') {
+        s.draft = ''; s.versions = []; s.review = null
+      } else if (step === 'reviewing') {
+        s.review = null
+      }
+      s.routing = null; s.question = null
+      s.state = r.state
+      if (step === 'routing') this.start(pid)
+    },
     attachEvents(pid) {
-      return subscribeProject(pid, (ev) => {
-        this.events.push(ev)
-        this.handleEvent(ev)
+      if (this.unsub) this.unsub()
+      const s = this.ensure(pid)
+      this.unsub = subscribeProject(pid, (ev) => {
+        s.events.push(ev)
+        this.handleEvent(s, ev)
       })
     },
-    handleEvent(ev) {
+    handleEvent(s, ev) {
       switch (ev.type) {
-        case 'routing': this.routing = ev.payload; this.state = 'routing'; break
-        case 'routing_complete': this.state = 'questioning'; break
-        case 'question': this.question = ev.payload; break
-        case 'plan': this.plan = ev.payload; this.state = 'waiting_approval'; break
-        case 'draft_ready': this.draft = ev.payload.word_count; break
-        case 'multi_doc': this.versions = ev.payload.versions || []; break
-        case 'review_done': this.review = ev.payload; this.state = 'reviewed'; break
-        case 'finalize': this.state = 'completed'; break
-        case 'error': this.error = ev.payload.message; break
+        case 'routing': s.routing = ev.payload; s.state = 'routing'; break
+        case 'routing_complete': s.state = 'questioning'; break
+        case 'question': s.question = ev.payload; break
+        case 'plan': s.plan = ev.payload; s.state = 'waiting_approval'; break
+        case 'draft_ready': s.state = 'reviewing'; break
+        case 'multi_doc': s.versions = ev.payload.versions || []; break
+        case 'review_done': s.review = ev.payload; s.state = 'reviewed'; break
+        case 'finalize': s.state = 'completed'; break
+        case 'rollback': break
+        case 'error': s.error = ev.payload.message; break
       }
     },
   },

@@ -342,3 +342,34 @@ class WorkflowEngine:
 
     def get_state(self) -> dict:
         return {"state": self.state.value, "seq": self._seq}
+
+    # ── 回退 ──
+    def rollback_to(self, step: str) -> dict:
+        """回退到指定步骤，清空后续状态，返回新状态。
+
+        step ∈ routing / questioning / planning / writing / reviewing
+        """
+        self.project.final_draft = ""
+        if step == "routing":
+            self.brief = Brief(); self.plan = Plan()
+            self._routing_node = "root"; self._questions = []; self._q_index = 0
+            self.project.brief = None; self.project.plan = None
+            self.project.draft = ""; self.project.versions = []; self.project.review_results = []
+            self.state = EngineState.ROUTING
+        elif step == "questioning":
+            self.plan = Plan()
+            self._questions = []; self._q_index = 0
+            self.project.plan = None
+            self.project.draft = ""; self.project.versions = []; self.project.review_results = []
+            self.state = EngineState.QUESTIONING
+        elif step == "planning":
+            self.project.draft = ""; self.project.versions = []; self.project.review_results = []
+            self.state = EngineState.WAITING_APPROVAL
+        elif step == "writing":
+            self.project.draft = ""; self.project.versions = []; self.project.review_results = []
+            self.state = EngineState.WAITING_APPROVAL
+        elif step == "reviewing":
+            self.project.review_results = []
+            self.state = EngineState.REVIEWING
+        self._emit("rollback", step, {"to": step})
+        return {"state": self.state.value, "step": step}

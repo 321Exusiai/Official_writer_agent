@@ -144,7 +144,7 @@
 </template>
 
 <script setup>
-import { onMounted, onBeforeUnmount, ref } from 'vue'
+import { onMounted, onBeforeUnmount, ref, watch } from 'vue'
 import { useThemeStore } from './stores/theme'
 import { useProjectStore } from './stores/project'
 import { useWorkflowStore } from './stores/workflow'
@@ -166,16 +166,23 @@ const themes = [
   { id: 'apple', label: '苹果极简' },
 ]
 
-let unsubscribe = null
-
 async function startWorkflow() {
   const pid = projectStore.active && projectStore.active.id
   if (!pid) return
-  workflow.reset()
   await workflow.start(pid)
-  if (unsubscribe) unsubscribe()
-  unsubscribe = workflow.attachEvents(pid)
+  workflow.attachEvents(pid)
 }
+
+// 切换项目时：隔离工作流状态 + 订阅该项目 SSE
+watch(
+  () => projectStore.active && projectStore.active.id,
+  (pid) => {
+    if (pid) {
+      workflow.setActive(pid)
+      workflow.attachEvents(pid)
+    }
+  },
+)
 
 onMounted(() => {
   theme.apply()
@@ -183,7 +190,7 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
-  if (unsubscribe) unsubscribe()
+  if (workflow.unsub) workflow.unsub()
 })
 </script>
 

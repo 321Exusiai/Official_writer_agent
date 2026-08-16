@@ -70,6 +70,21 @@ class TestEngine(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             eng.answer("随便")  # IDLE 状态不可作答
 
+    def test_rollback_to_writing(self):
+        eng, p = run_full_flow(["根据上级要求", "部署安全检查工作", "各二级单位", "通知"])
+        r = eng.rollback_to("writing")
+        self.assertEqual(r["state"], "waiting_approval")
+        self.assertEqual(p.draft, "")
+        self.assertEqual(p.versions, [])
+        self.assertEqual(p.review_results, [])
+
+    def test_rollback_to_questioning(self):
+        eng, p = run_full_flow(["根据上级要求", "部署安全检查工作", "各二级单位", "通知"])
+        r = eng.rollback_to("questioning")
+        self.assertEqual(r["state"], "questioning")
+        self.assertIsNone(p.plan)
+        self.assertEqual(p.draft, "")
+
 
 if __name__ == "__main__":
     unittest.main()

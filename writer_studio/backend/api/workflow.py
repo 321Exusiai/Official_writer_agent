@@ -82,3 +82,15 @@ def finalize(pid: str):
 def state(pid: str):
     eng = get_engine(pid)
     return eng.get_state()
+
+
+class RollbackBody(BaseModel):
+    step: str
+
+
+@router.post("/projects/{pid}/workflow/rollback")
+def rollback(pid: str, body: RollbackBody):
+    eng = get_engine(pid)
+    result = eng.rollback_to(body.step)
+    _persist(pid, eng)
+    return result

@@ -1,12 +1,31 @@
 <template>
   <div class="process-panel">
+    <div v-if="projectName" class="proj-name">{{ projectName }}</div>
+
+    <!-- 步骤导航（可点击回退到已完成步骤） -->
+    <div class="step-nav">
+      <button
+        v-for="s in steps"
+        :key="s.key"
+        class="step-nav-item"
+        :class="{ on: currentStepIdx === s.idx, done: currentStepIdx > s.idx, clickable: currentStepIdx > s.idx }"
+        :disabled="currentStepIdx <= s.idx || s.key === 'completed'"
+        :title="currentStepIdx > s.idx && s.key !== 'completed' ? `回退到「${s.label}」` : ''"
+        @click="rollback(s.key)"
+      >
+        <span class="sn-num">{{ s.idx + 1 }}</span>
+        <span class="sn-label">{{ s.label }}</span>
+      </button>
+    </div>
+
+    <!-- 事件时间线（只读细节） -->
     <div v-if="!events.length" class="empty-state">
-      <div style="font-size: 32px">📡</div>
-      <div>决策过程将在这里实时呈现</div>
+      <div style="font-size: 28px">📡</div>
+      <div>选择项目后开始写作，过程将在这里实时呈现</div>
     </div>
     <div v-else class="timeline">
       <div v-for="ev in events" :key="ev.seq" class="timeline-item">
-        <div class="timeline-dot" :class="'dot-' + ev.step" />
+        <div class="timeline-dot" />
         <div class="timeline-body">
           <div class="timeline-head">
             <span class="timeline-step">{{ stepLabel(ev.step) }}</span>
@@ -24,9 +43,32 @@
 <script setup>
 import { computed } from 'vue'
 import { useWorkflowStore } from '../../stores/workflow'
+import { useProjectStore } from '../../stores/project'
 
 const store = useWorkflowStore()
-const events = computed(() => store.events)
+const projectStore = useProjectStore()
+
+const events = computed(() => store.cur.events)
+const projectName = computed(() => (projectStore.active ? projectStore.active.name : ''))
+const pid = computed(() => projectStore.active && projectStore.active.id)
+
+const steps = [
+  { key: 'routing', label: '路由', idx: 0 },
+  { key: 'questioning', label: '问卷', idx: 1 },
+  { key: 'planning', label: '方案', idx: 2 },
+  { key: 'writing', label: '写作', idx: 3 },
+  { key: 'reviewing', label: '审查', idx: 4 },
+  { key: 'completed', label: '交付', idx: 5 },
+]
+
+const STATE_IDX = { idle: -1, routing: 0, questioning: 1, waiting_approval: 2, reviewing: 3, reviewed: 4, completed: 5 }
+const currentStepIdx = computed(() => STATE_IDX[store.cur.state] ?? -1)
+
+function rollback(step) {
+  if (!pid.value || step === 'completed') return
+  if (currentStepIdx.value <= steps.find((s) => s.key === step).idx) return
+  store.rollback(pid.value, step)
+}
 
 const STEP_LABELS = {
   routing: '场景路由',
@@ -37,7 +79,6 @@ const STEP_LABELS = {
   finalize: '交付',
   error: '出错',
 }
-
 function stepLabel(step) { return STEP_LABELS[step] || step }
 
 function detail(ev) {
@@ -56,6 +97,7 @@ function detail(ev) {
     case 'multi_doc': return `生成 ${(p.versions || []).length} 个版本`
     case 'review_start': return '开始审查'
     case 'review_done': return `得分 ${p.score} · ${(p.findings || []).length} 个问题`
+    case 'rollback': return `已回退到「${STEP_LABELS[p.to] || p.to}」`
     case 'finalize': return '交付完成'
     case 'error': return p.message || ''
     default: return ev.type
@@ -68,13 +110,32 @@ function roleName(role) {
 </script>
 
 <style scoped>
-.process-panel { display: flex; flex-direction: column; }
+.process-panel { display: flex; flex-direction: column; gap: 14px; }
+.proj-name { font-size: 14px; font-weight: 700; }
+.step-nav { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.step-nav-item {
+  display: flex; align-items: center; gap: 6px;
+  border: 1px solid var(--glass-border); background: none;
+  color: var(--color-ink-muted); padding: 7px 8px; border-radius: 10px;
+  font-size: 12px; font-weight: 600; cursor: default; font-family: var(--font-ui);
+  transition: all 0.2s;
+}
+.step-nav-item.clickable { cursor: pointer; }
+.step-nav-item.clickable:hover { border-color: var(--color-accent); color: var(--color-ink-body); }
+.step-nav-item.done { color: var(--color-ink-body); }
+.step-nav-item.on { border-color: var(--color-accent); color: var(--color-accent); }
+.sn-num {
+  width: 18px; height: 18px; border-radius: 50%; flex-shrink: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 11px; background: var(--glass-highlight);
+}
+.step-nav-item.on .sn-num { background: var(--color-accent); color: #1D1D1F; }
+.sn-label { font-size: 11px; }
 .timeline { display: flex; flex-direction: column; }
-.timeline-item { display: flex; gap: 10px; margin-bottom: 14px; }
+.timeline-item { display: flex; gap: 10px; margin-bottom: 12px; }
 .timeline-dot {
-  width: 10px; height: 10px; border-radius: 50%;
-  background: var(--color-accent);
-  margin-top: 4px; flex-shrink: 0;
+  width: 9px; height: 9px; border-radius: 50%;
+  background: var(--color-accent); margin-top: 4px; flex-shrink: 0;
   box-shadow: 0 0 8px var(--color-accent);
 }
 .timeline-body { flex: 1; }

@@ -1,12 +1,12 @@
 <template>
   <div class="workflow-panel">
     <!-- 路由阶段 -->
-    <div v-if="store.state === 'routing' && store.routing" class="animate-enter">
+    <div v-if="cur.state === 'routing' && cur.routing" class="animate-enter">
       <h3 class="step-title">场景路由</h3>
-      <p class="step-question">{{ store.routing.question }}</p>
+      <p class="step-question">{{ cur.routing.question }}</p>
       <div class="option-list">
         <button
-          v-for="o in store.routing.options"
+          v-for="o in cur.routing.options"
           :key="o.index"
           class="option-card ios-card"
           @click="answer(o.index)"
@@ -18,16 +18,16 @@
     </div>
 
     <!-- 问卷阶段 -->
-    <div v-else-if="store.state === 'questioning' && store.question" class="animate-enter">
+    <div v-else-if="cur.state === 'questioning' && cur.question" class="animate-enter">
       <h3 class="step-title">需求问卷</h3>
       <div class="step-track" style="margin-bottom: 12px">
         <span class="step-badge step-current">
-          <span class="step-num">{{ store.question.index }}</span>{{ store.question.total }} 题
+          <span class="step-num">{{ cur.question.index }}</span>{{ cur.question.total }} 题
         </span>
       </div>
-      <p class="step-question">{{ store.question.question }}</p>
-      <p v-if="store.question.why_ask" class="why-ask">💡 {{ store.question.why_ask }}</p>
-      <p v-if="store.question.hint" class="hint-text">示例：{{ store.question.hint }}</p>
+      <p class="step-question">{{ cur.question.question }}</p>
+      <p v-if="cur.question.why_ask" class="why-ask">💡 {{ cur.question.why_ask }}</p>
+      <p v-if="cur.question.hint" class="hint-text">示例：{{ cur.question.hint }}</p>
       <textarea
         class="ios-input answer-input"
         v-model="answerText"
@@ -41,16 +41,16 @@
     </div>
 
     <!-- 方案确认（HITL-1） -->
-    <div v-else-if="store.state === 'waiting_approval' && store.plan" class="animate-enter">
+    <div v-else-if="cur.state === 'waiting_approval' && cur.plan" class="animate-enter">
       <h3 class="step-title">写作方案</h3>
       <GlassCard>
         <div class="plan-grid">
           <div class="plan-item"><span class="plan-k">写作模式</span><span class="plan-v">{{ modeName }}</span></div>
-          <div class="plan-item"><span class="plan-k">文种</span><span class="plan-v">{{ store.plan.doc_type_name }}</span></div>
-          <div class="plan-item"><span class="plan-k">风格</span><span class="plan-v">{{ store.plan.style_name }}</span></div>
-          <div class="plan-item"><span class="plan-k">篇幅</span><span class="plan-v">{{ store.plan.estimated_length }}</span></div>
+          <div class="plan-item"><span class="plan-k">文种</span><span class="plan-v">{{ cur.plan.doc_type_name }}</span></div>
+          <div class="plan-item"><span class="plan-k">风格</span><span class="plan-v">{{ cur.plan.style_name }}</span></div>
+          <div class="plan-item"><span class="plan-k">篇幅</span><span class="plan-v">{{ cur.plan.estimated_length }}</span></div>
         </div>
-        <p v-if="store.plan.style_match === false" class="warn-text">⚠️ 风格与文种不匹配，建议调整</p>
+        <p v-if="cur.plan.style_match === false" class="warn-text">⚠️ 风格与文种不匹配，建议调整</p>
       </GlassCard>
       <div class="actions">
         <Button @click="confirm">确认方案，开始写作</Button>
@@ -58,7 +58,7 @@
     </div>
 
     <!-- 写作/审查 -->
-    <div v-else-if="store.state === 'reviewing'" class="animate-enter">
+    <div v-else-if="cur.state === 'reviewing'" class="animate-enter">
       <h3 class="step-title">文稿生成</h3>
       <GlassCard>
         <pre class="draft-text">{{ draftContent }}</pre>
@@ -69,15 +69,15 @@
     </div>
 
     <!-- 审查结果 -->
-    <div v-else-if="store.state === 'reviewed' && store.review" class="animate-enter">
+    <div v-else-if="cur.state === 'reviewed' && store.review" class="animate-enter">
       <h3 class="step-title">审查结果</h3>
       <GlassCard>
         <div class="score-row">
-          <span class="score" :class="{ low: store.review.score < 70 }">{{ store.review.score }}</span>
-          <span class="score-label">分 · {{ store.review.passed ? '通过' : '未通过' }}</span>
-          <span class="badge" :class="store.review.mode === 'llm' ? 'badge-llm' : 'badge-rule'">{{ store.review.mode === 'llm' ? 'LLM' : '规则模式' }}</span>
+          <span class="score" :class="{ low: cur.review.score < 70 }">{{ cur.review.score }}</span>
+          <span class="score-label">分 · {{ cur.review.passed ? '通过' : '未通过' }}</span>
+          <span class="badge" :class="cur.review.mode === 'llm' ? 'badge-llm' : 'badge-rule'">{{ cur.review.mode === 'llm' ? 'LLM' : '规则模式' }}</span>
         </div>
-        <div v-if="store.review.findings && store.review.findings.length" class="heatmap">
+        <div v-if="cur.review.findings && cur.review.findings.length" class="heatmap">
           <div v-for="s in severities" :key="s.key" class="heat-row">
             <span class="heat-label">{{ s.label }}</span>
             <div class="heat-bar">
@@ -86,8 +86,8 @@
             <span class="heat-count">{{ heatCount(s.key) }}</span>
           </div>
         </div>
-        <div v-if="store.review.findings && store.review.findings.length" class="findings">
-          <div v-for="(f, i) in store.review.findings" :key="i" class="finding">
+        <div v-if="cur.review.findings && cur.review.findings.length" class="findings">
+          <div v-for="(f, i) in cur.review.findings" :key="i" class="finding">
             <span class="sev" :class="'sev-' + f.severity">{{ sevText(f.severity) }}</span>
             <span class="issue">{{ f.issue }}</span>
             <span class="sugg">{{ f.suggestion }}</span>
@@ -110,7 +110,7 @@
     </div>
 
     <!-- 交付 -->
-    <div v-else-if="store.state === 'completed'" class="animate-enter">
+    <div v-else-if="cur.state === 'completed'" class="animate-enter">
       <h3 class="step-title">交付完成 🎉</h3>
       <GlassCard>
         <div v-if="versions.length" class="multi-doc">
@@ -140,6 +140,7 @@ import GlassCard from '../ui/GlassCard.vue'
 
 const store = useWorkflowStore()
 const projectStore = useProjectStore()
+const cur = computed(() => store.cur)
 const answerText = ref('')
 const editing = ref(false)
 const draftEdit = ref('')
@@ -156,10 +157,10 @@ const draftContent = computed(() => {
   const p = projectStore.active
   return (p && p.draft) || '（草稿生成中…）'
 })
-const versions = computed(() => store.versions)
-const modeName = computed(() => (store.plan ? store.plan.writing_mode : ''))
+const versions = computed(() => cur.value.versions)
+const modeName = computed(() => (cur.value.plan ? cur.value.plan.writing_mode : ''))
 
-function findings() { return (store.review && store.review.findings) || [] }
+function findings() { return (cur.value.review && cur.value.review.findings) || [] }
 function heatCount(key) { return findings().filter((f) => f.severity === key).length }
 function heatPct(key) {
   const total = findings().length || 1
