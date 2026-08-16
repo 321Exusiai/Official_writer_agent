@@ -75,26 +75,32 @@
       </main>
 
       <aside class="pane">
-        <h2 class="pane-title">过程</h2>
-        <ProcessPanel />
+        <div class="pane-tabs">
+          <button class="pane-tab" :class="{ on: !showConfig }" @click="showConfig = false">过程</button>
+          <button class="pane-tab" :class="{ on: showConfig }" @click="showConfig = true">设置</button>
+        </div>
+        <ProcessPanel v-if="!showConfig" />
+        <ConfigPanel v-else />
       </aside>
     </div>
   </div>
 </template>
 
 <script setup>
-import { onMounted, onBeforeUnmount } from 'vue'
+import { onMounted, onBeforeUnmount, ref } from 'vue'
 import { useThemeStore } from './stores/theme'
 import { useProjectStore } from './stores/project'
 import { useWorkflowStore } from './stores/workflow'
 import ProjectBrowser from './components/project/ProjectBrowser.vue'
 import WorkflowPanel from './components/workflow/WorkflowPanel.vue'
 import ProcessPanel from './components/workflow/ProcessPanel.vue'
+import ConfigPanel from './components/config/ConfigPanel.vue'
 import Button from './components/ui/Button.vue'
 
 const theme = useThemeStore()
 const projectStore = useProjectStore()
 const workflow = useWorkflowStore()
+const showConfig = ref(false)
 
 const themes = [
   { id: 'starry', label: '星月夜' },
@@ -153,6 +159,10 @@ onBeforeUnmount(() => {
 .theme-btn.on { background: var(--color-accent); color: #1D1D1F; }
 :root[data-theme="apple"] .theme-btn.on { color: #fff; }
 .pane-title { font-size: 14px; font-weight: 700; margin-bottom: 12px; color: var(--color-ink-muted); }
+.pane-tabs { display: flex; gap: 4px; margin-bottom: 14px; background: var(--glass-highlight); border: 1px solid var(--glass-border); border-radius: 10px; padding: 3px; }
+.pane-tab { flex: 1; border: none; background: none; color: var(--color-ink-muted); padding: 6px 0; border-radius: 7px; font-size: 13px; font-weight: 600; cursor: pointer; font-family: var(--font-ui); }
+.pane-tab.on { background: var(--color-accent); color: #1D1D1F; }
+:root[data-theme="apple"] .pane-tab.on { color: #fff; }
 .workspace { display: flex; flex-direction: column; gap: 16px; }
 .ws-head { display: flex; justify-content: space-between; align-items: center; }
 .ws-title { font-size: 18px; font-weight: 700; }
