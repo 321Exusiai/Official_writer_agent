@@ -136,6 +136,7 @@ class AgentResponse(BaseModel):
 
 
 class LLMConfig(BaseModel):
+    name: str = "默认配置"
     provider: str = "openai"
     api_base: str = ""
     api_key: str = ""
