@@ -1,7 +1,7 @@
 {
-  "proj_890ea9d3": {
-    "id": "proj_890ea9d3",
-    "name": "端到端验证",
+  "proj_29a86b22": {
+    "id": "proj_29a86b22",
+    "name": "研学报告",
     "description": "",
     "status": "draft",
     "brief": null,
@@ -10,7 +10,8 @@
     "final_draft": "",
     "versions": [],
     "review_results": [],
-    "created_at": "2026-08-15 23:30:59",
-    "updated_at": "2026-08-15 23:30:59"
+    "references": [],
+    "created_at": "2026-08-16 11:24:07",
+    "updated_at": "2026-08-16 11:24:07"
   }
 }

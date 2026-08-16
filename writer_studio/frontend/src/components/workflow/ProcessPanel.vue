@@ -49,6 +49,9 @@ function detail(ev) {
     case 'plan': return `文种 ${p.doc_type_name || ''} · 风格 ${p.style_name || ''}`
     case 'plan_confirmed': return '方案已确认'
     case 'write_start': return '开始起草'
+    case 'retrieval': return `检索到 术语${(p.terms || []).length} · 政策${(p.policies || []).length} · 范文${(p.exemplars || []).length}`
+    case 'consult': return `【${roleName(p.role)}】${(p.suggestions || []).slice(0, 1).join('；')}`
+    case 'decision': return (p.decision || '').slice(0, 40)
     case 'draft_ready': return `初稿 ${p.word_count} 字`
     case 'multi_doc': return `生成 ${(p.versions || []).length} 个版本`
     case 'review_start': return '开始审查'
@@ -57,6 +60,10 @@ function detail(ev) {
     case 'error': return p.message || ''
     default: return ev.type
   }
+}
+
+function roleName(role) {
+  return { writer: '主笔', reviewer: '审稿人', style: '风格', doctype: '文种', knowledge: '知识库', profile: '画像' }[role] || role
 }
 </script>
 

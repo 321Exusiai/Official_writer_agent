@@ -96,6 +96,14 @@ class DocVersion(BaseModel):
     extracted_from: str = ""
 
 
+class ReferenceArticle(BaseModel):
+    id: str = ""
+    title: str = ""
+    content: str = ""
+    source: str = ""
+    created_at: str = ""
+
+
 class Project(BaseModel):
     id: str = ""
     name: str = ""
@@ -107,6 +115,7 @@ class Project(BaseModel):
     final_draft: str = ""
     versions: List[DocVersion] = Field(default_factory=list)
     review_results: List[ReviewResult] = Field(default_factory=list)
+    references: List[ReferenceArticle] = Field(default_factory=list)
     created_at: str = ""
     updated_at: str = ""
 

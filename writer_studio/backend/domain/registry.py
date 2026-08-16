@@ -57,6 +57,9 @@ class Registry:
         elif name == "terminology":
             if len(data) < 25:
                 raise RegistryError(f"terminology 应 ≥25 条术语，实为 {len(data)}")
+        elif name == "policy":
+            if len(data) < 30:
+                raise RegistryError(f"policy 应 ≥30 条政策/讲话/规范表述，实为 {len(data)}")
 
     @classmethod
     def _validate_styles(cls, data):

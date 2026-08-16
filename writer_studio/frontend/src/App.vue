@@ -3,39 +3,94 @@
     <!-- 背景层：星月夜 / 经典流光 / 苹果极简 -->
     <div class="app-bg" :class="{ fluid: theme.theme === 'classic', minimal: theme.theme === 'apple' }">
       <svg v-if="theme.theme === 'starry'" viewBox="0 0 1000 1000" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
-        <rect width="1000" height="1000" fill="#0D162B" />
-        <rect width="1000" height="1000" fill="url(#sky)" />
         <defs>
-          <radialGradient id="sky" cx="50%" cy="20%" r="90%">
-            <stop offset="0%" stop-color="#1C3765" />
-            <stop offset="50%" stop-color="#0D162B" />
-            <stop offset="100%" stop-color="#0D1917" />
+          <filter id="blurLg"><feGaussianBlur stdDeviation="24"/></filter>
+          <filter id="blurMd"><feGaussianBlur stdDeviation="12"/></filter>
+          <filter id="blurSm"><feGaussianBlur stdDeviation="6"/></filter>
+          <radialGradient id="swirlLight" cx="50%" cy="50%" r="50%">
+            <stop offset="0%" stop-color="#4F7EA4" stop-opacity="0.8"/>
+            <stop offset="100%" stop-color="#003153" stop-opacity="0"/>
+          </radialGradient>
+          <radialGradient id="swirlMid" cx="50%" cy="50%" r="50%">
+            <stop offset="0%" stop-color="#2a6a9b" stop-opacity="0.7"/>
+            <stop offset="100%" stop-color="#00213B" stop-opacity="0"/>
+          </radialGradient>
+          <radialGradient id="swirlDark" cx="50%" cy="50%" r="50%">
+            <stop offset="0%" stop-color="#005085" stop-opacity="0.6"/>
+            <stop offset="100%" stop-color="#05101a" stop-opacity="0"/>
+          </radialGradient>
+          <radialGradient id="starHalo" cx="50%" cy="50%" r="50%">
+            <stop offset="0%" stop-color="#DFCB5C" stop-opacity="0.95"/>
+            <stop offset="20%" stop-color="#DFCB5C" stop-opacity="0.6"/>
+            <stop offset="50%" stop-color="#1C3765" stop-opacity="0.3"/>
+            <stop offset="100%" stop-color="#1C3765" stop-opacity="0"/>
+          </radialGradient>
+          <radialGradient id="moonHalo" cx="50%" cy="50%" r="50%">
+            <stop offset="0%" stop-color="#E7D674" stop-opacity="1"/>
+            <stop offset="15%" stop-color="#DFCB5C" stop-opacity="0.8"/>
+            <stop offset="40%" stop-color="#648BA8" stop-opacity="0.4"/>
+            <stop offset="100%" stop-color="#1C3765" stop-opacity="0"/>
           </radialGradient>
         </defs>
-        <g fill="none" stroke="#4F7EA4" opacity="0.35">
-          <ellipse cx="300" cy="320" rx="160" ry="55" stroke-width="34">
-            <animateTransform attributeName="transform" type="rotate" from="0 300 320" to="360 300 320" dur="45s" repeatCount="indefinite" />
-          </ellipse>
-          <ellipse cx="320" cy="330" rx="120" ry="40" stroke-width="18" stroke="#648BA8">
-            <animateTransform attributeName="transform" type="rotate" from="360 320 330" to="0 320 330" dur="38s" repeatCount="indefinite" />
-          </ellipse>
-          <ellipse cx="700" cy="280" rx="190" ry="65" stroke-width="30">
-            <animateTransform attributeName="transform" type="rotate" from="0 700 280" to="-360 700 280" dur="55s" repeatCount="indefinite" />
-          </ellipse>
-          <ellipse cx="720" cy="300" rx="130" ry="42" stroke-width="16" stroke="#8DB3C3">
-            <animateTransform attributeName="transform" type="rotate" from="-360 720 300" to="0 720 300" dur="42s" repeatCount="indefinite" />
-          </ellipse>
+
+        <rect width="100%" height="100%" fill="#00172D"/>
+
+        <!-- 背景星点 -->
+        <g fill="#FFF">
+          <circle cx="100" cy="200" r="1.5" opacity="0.8"/><circle cx="250" cy="80" r="1" opacity="0.6"/>
+          <circle cx="450" cy="150" r="2" opacity="0.9"/><circle cx="650" cy="90" r="1.5" opacity="0.5"/>
+          <circle cx="850" cy="120" r="2.5" opacity="0.8"/><circle cx="950" cy="250" r="1" opacity="0.7"/>
+          <circle cx="150" cy="350" r="2" opacity="0.9"/><circle cx="350" cy="450" r="1.5" opacity="0.6"/>
+          <circle cx="550" cy="350" r="2.5" opacity="0.8"/><circle cx="750" cy="480" r="1" opacity="0.5"/>
+          <circle cx="920" cy="380" r="2" opacity="0.7"/><circle cx="50" cy="550" r="1.5" opacity="0.8"/>
+          <circle cx="250" cy="650" r="2" opacity="0.6"/><circle cx="450" cy="750" r="1" opacity="0.9"/>
+          <circle cx="650" cy="650" r="2.5" opacity="0.5"/><circle cx="850" cy="750" r="1.5" opacity="0.8"/>
+          <circle cx="950" cy="600" r="1" opacity="0.7"/><circle cx="150" cy="850" r="2" opacity="0.9"/>
+          <circle cx="350" cy="950" r="1.5" opacity="0.6"/><circle cx="550" cy="850" r="2.5" opacity="0.8"/>
+          <circle cx="750" cy="950" r="1" opacity="0.5"/><circle cx="920" cy="880" r="2" opacity="0.7"/>
         </g>
-        <circle cx="810" cy="190" r="55" fill="#DFCB5C" opacity="0.95" />
-        <circle cx="830" cy="175" r="55" fill="#0D162B" opacity="0.35" />
-        <circle cx="790" cy="200" r="8" fill="#E3D896" opacity="0.7" />
-        <g fill="#E7D674">
-          <circle cx="120" cy="140" r="4"><animate attributeName="opacity" values="1;0.3;1" dur="3s" repeatCount="indefinite" /></circle>
-          <circle cx="520" cy="110" r="3"><animate attributeName="opacity" values="1;0.4;1" dur="4s" repeatCount="indefinite" /></circle>
-          <circle cx="400" cy="180" r="5"><animate attributeName="opacity" values="1;0.3;1" dur="3.5s" repeatCount="indefinite" /></circle>
-          <circle cx="640" cy="500" r="3"><animate attributeName="opacity" values="1;0.4;1" dur="5s" repeatCount="indefinite" /></circle>
-          <circle cx="200" cy="600" r="4"><animate attributeName="opacity" values="1;0.3;1" dur="4.2s" repeatCount="indefinite" /></circle>
-          <circle cx="880" cy="620" r="4"><animate attributeName="opacity" values="1;0.35;1" dur="3.8s" repeatCount="indefinite" /></circle>
+
+        <!-- 流动漩涡 -->
+        <g>
+          <animateTransform attributeName="transform" type="rotate" from="0 300 300" to="360 300 300" dur="45s" repeatCount="indefinite"/>
+          <ellipse cx="300" cy="300" rx="450" ry="200" fill="url(#swirlLight)" filter="url(#blurLg)" transform="rotate(30 300 300)"/>
+          <ellipse cx="300" cy="300" rx="300" ry="150" fill="url(#swirlMid)" filter="url(#blurMd)" transform="rotate(-20 300 300)"/>
+        </g>
+        <g>
+          <animateTransform attributeName="transform" type="rotate" from="360 750 400" to="0 750 400" dur="60s" repeatCount="indefinite"/>
+          <ellipse cx="750" cy="400" rx="500" ry="250" fill="url(#swirlMid)" filter="url(#blurLg)" transform="rotate(-45 750 400)"/>
+          <ellipse cx="750" cy="400" rx="200" ry="400" fill="url(#swirlLight)" filter="url(#blurMd)" transform="rotate(15 750 400)"/>
+        </g>
+        <g>
+          <animateTransform attributeName="transform" type="rotate" from="0 400 800" to="360 400 800" dur="50s" repeatCount="indefinite"/>
+          <ellipse cx="400" cy="800" rx="400" ry="250" fill="url(#swirlDark)" filter="url(#blurLg)" transform="rotate(60 400 800)"/>
+        </g>
+
+        <!-- 月亮 -->
+        <g>
+          <animateTransform attributeName="transform" type="rotate" from="0 850 200" to="360 850 200" dur="30s" repeatCount="indefinite"/>
+          <circle cx="850" cy="200" r="180" fill="url(#moonHalo)" filter="url(#blurSm)"/>
+          <ellipse cx="850" cy="200" rx="140" ry="70" fill="url(#swirlLight)" opacity="0.3" filter="url(#blurSm)" transform="rotate(45 850 200)"/>
+        </g>
+
+        <!-- 星晕 -->
+        <g>
+          <animateTransform attributeName="transform" type="rotate" from="360 200 150" to="0 200 150" dur="25s" repeatCount="indefinite"/>
+          <circle cx="200" cy="150" r="120" fill="url(#starHalo)" filter="url(#blurSm)"/>
+          <ellipse cx="200" cy="150" rx="90" ry="40" fill="url(#swirlLight)" opacity="0.4" filter="url(#blurSm)" transform="rotate(-30 200 150)"/>
+        </g>
+        <g>
+          <animateTransform attributeName="transform" type="rotate" from="0 150 550" to="360 150 550" dur="22s" repeatCount="indefinite"/>
+          <circle cx="150" cy="550" r="100" fill="url(#starHalo)" filter="url(#blurSm)"/>
+        </g>
+        <g>
+          <animateTransform attributeName="transform" type="rotate" from="360 500 450" to="0 500 450" dur="35s" repeatCount="indefinite"/>
+          <circle cx="500" cy="450" r="80" fill="url(#starHalo)" filter="url(#blurSm)" opacity="0.8"/>
+        </g>
+        <g>
+          <animateTransform attributeName="transform" type="rotate" from="0 750 750" to="360 750 750" dur="28s" repeatCount="indefinite"/>
+          <circle cx="750" cy="750" r="110" fill="url(#starHalo)" filter="url(#blurSm)"/>
+          <ellipse cx="750" cy="750" rx="80" ry="30" fill="url(#swirlLight)" opacity="0.3" filter="url(#blurSm)" transform="rotate(70 750 750)"/>
         </g>
       </svg>
     </div>
@@ -137,9 +192,6 @@ onBeforeUnmount(() => {
 .title-bar {
   display: flex; justify-content: space-between; align-items: center;
   padding: 14px 24px;
-  backdrop-filter: var(--blur-glass);
-  -webkit-backdrop-filter: var(--blur-glass);
-  border-bottom: 1px solid var(--glass-border);
   position: sticky; top: 0; z-index: 10;
 }
 .brand { display: flex; align-items: center; gap: 10px; }

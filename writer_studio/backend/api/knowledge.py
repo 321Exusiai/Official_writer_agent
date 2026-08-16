@@ -31,3 +31,8 @@ def list_transitions():
 @router.get("/knowledge/formulaic")
 def list_formulaic():
     return Registry.load("formulaic")
+
+
+@router.get("/knowledge/policy")
+def list_policy():
+    return list(Registry.load("policy").values())

@@ -48,3 +48,50 @@ def delete_project(pid: str):
     if not store.delete_project(pid):
         raise HTTPException(404, "项目不存在")
     return {"deleted": pid}
+
+
+class UrlImportBody(BaseModel):
+    url: str
+
+
+class TextImportBody(BaseModel):
+    title: str = ""
+    content: str = ""
+    source: str = "手动粘贴"
+
+
+@router.post("/projects/{pid}/references/url")
+def import_url_reference(pid: str, body: UrlImportBody):
+    from ..core import importer
+    p = store.get_project(pid)
+    if not p:
+        raise HTTPException(404, "项目不存在")
+    try:
+        ref = importer.import_from_url(body.url)
+    except Exception as e:
+        raise HTTPException(400, f"导入失败：{e}")
+    p.references.append(ref)
+    store.update_project(pid, p)
+    return ref
+
+
+@router.post("/projects/{pid}/references/text")
+def import_text_reference(pid: str, body: TextImportBody):
+    from ..core import importer
+    p = store.get_project(pid)
+    if not p:
+        raise HTTPException(404, "项目不存在")
+    ref = importer.import_from_text(body.title, body.content, body.source)
+    p.references.append(ref)
+    store.update_project(pid, p)
+    return ref
+
+
+@router.delete("/projects/{pid}/references/{ref_id}")
+def delete_reference(pid: str, ref_id: str):
+    p = store.get_project(pid)
+    if not p:
+        raise HTTPException(404, "项目不存在")
+    p.references = [r for r in p.references if r.id != ref_id]
+    store.update_project(pid, p)
+    return {"deleted": ref_id}

@@ -160,9 +160,17 @@ class WorkflowEngine:
         mode = "llm" if self.llm_available else "rule"
         self._emit("write_start", "writing", {"mode": mode})
         doc = Registry.by_id("doctypes", self.plan.doc_type)
+        # RAG：基于简报自主检索政策/术语/范文
+        from . import retrieval
+        retrieved = retrieval.retrieve_for_brief(self.brief, self.plan, self.plan.media_style)
+        self._emit("retrieval", "writing", {
+            "terms": [t["term"] for t in retrieved["terms"]],
+            "policies": [p["text"] for p in retrieved["policies"]],
+            "exemplars": [e["title"] for e in retrieved["exemplars"]],
+        })
         if mode == "llm":
             decision = self._consult()
-            draft = self._llm_draft(doc, decision) or self._rule_draft(doc)
+            draft = self._llm_draft(doc, decision, retrieved) or self._rule_draft(doc)
         else:
             draft = self._rule_draft(doc)
         self.project.draft = draft
@@ -215,7 +223,7 @@ class WorkflowEngine:
         ]
         return "\n".join(lines)
 
-    def _draft_user_prompt(self, decision: dict) -> str:
+    def _draft_user_prompt(self, decision: dict, retrieved: dict = None) -> str:
         b = self.brief
         lines = [
             "请根据上述要求生成一篇完整公文。",
@@ -225,13 +233,18 @@ class WorkflowEngine:
             f"核心素材：{b.key_materials or '（未填）'}",
             f"差异化视角：{b.differentiator or '（未填）'}",
         ]
+        if retrieved:
+            from . import retrieval
+            ctx = retrieval.format_retrieval_context(retrieved)
+            if ctx:
+                lines.append(f"\n【知识库检索到的参考（请自然融入，不要照抄）】\n{ctx}")
         if decision and decision.get("decision"):
             lines.append(f"\n【协商决策摘要】\n{decision['decision']}")
         lines.append("\n请直接输出正文，不要输出任何说明或元信息。")
         return "\n".join(lines)
 
-    def _llm_draft(self, doc, decision: dict):
-        return self.llm.chat(self._core_prompt(doc), self._draft_user_prompt(decision), temperature=0.7)
+    def _llm_draft(self, doc, decision: dict, retrieved: dict = None):
+        return self.llm.chat(self._core_prompt(doc), self._draft_user_prompt(decision, retrieved), temperature=0.7)
 
     def _rule_draft(self, doc) -> str:
         b = self.brief
