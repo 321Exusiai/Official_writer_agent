@@ -77,6 +77,15 @@
           <span class="score-label">分 · {{ store.review.passed ? '通过' : '未通过' }}</span>
           <span class="badge" :class="store.review.mode === 'llm' ? 'badge-llm' : 'badge-rule'">{{ store.review.mode === 'llm' ? 'LLM' : '规则模式' }}</span>
         </div>
+        <div v-if="store.review.findings && store.review.findings.length" class="heatmap">
+          <div v-for="s in severities" :key="s.key" class="heat-row">
+            <span class="heat-label">{{ s.label }}</span>
+            <div class="heat-bar">
+              <div class="heat-fill" :class="'fill-' + s.key" :style="{ width: heatPct(s.key) + '%' }" />
+            </div>
+            <span class="heat-count">{{ heatCount(s.key) }}</span>
+          </div>
+        </div>
         <div v-if="store.review.findings && store.review.findings.length" class="findings">
           <div v-for="(f, i) in store.review.findings" :key="i" class="finding">
             <span class="sev" :class="'sev-' + f.severity">{{ sevText(f.severity) }}</span>
@@ -87,8 +96,17 @@
         <div v-else class="hint-text">未发现问题</div>
       </GlassCard>
       <div class="actions">
+        <Button variant="secondary" @click="toggleEdit">{{ editing ? '收起编辑' : '编辑草稿 (HITL)' }}</Button>
         <Button @click="finalize">确认无误，完成交付</Button>
       </div>
+      <GlassCard v-if="editing">
+        <p class="hint-text">在下方直接修改草稿，保存后可重新审查。</p>
+        <textarea class="ios-input draft-edit" v-model="draftEdit" rows="10" />
+        <div class="actions">
+          <Button variant="secondary" @click="saveDraft">保存修改</Button>
+          <Button @click="reReview">保存并重新审查</Button>
+        </div>
+      </GlassCard>
     </div>
 
     <!-- 交付 -->
@@ -123,6 +141,15 @@ import GlassCard from '../ui/GlassCard.vue'
 const store = useWorkflowStore()
 const projectStore = useProjectStore()
 const answerText = ref('')
+const editing = ref(false)
+const draftEdit = ref('')
+
+const severities = [
+  { key: 'critical', label: '严重' },
+  { key: 'major', label: '重要' },
+  { key: 'minor', label: '轻微' },
+  { key: 'suggestion', label: '建议' },
+]
 
 const pid = computed(() => projectStore.active && projectStore.active.id)
 const draftContent = computed(() => {
@@ -131,6 +158,13 @@ const draftContent = computed(() => {
 })
 const versions = computed(() => store.versions)
 const modeName = computed(() => (store.plan ? store.plan.writing_mode : ''))
+
+function findings() { return (store.review && store.review.findings) || [] }
+function heatCount(key) { return findings().filter((f) => f.severity === key).length }
+function heatPct(key) {
+  const total = findings().length || 1
+  return Math.round((heatCount(key) / total) * 100)
+}
 
 function answer(index) { store.answer(pid.value, String(index)) }
 function submitAnswer() {
@@ -142,8 +176,26 @@ function confirm() { store.confirm(pid.value) }
 function runReview() { store.review(pid.value) }
 async function finalize() {
   await store.finalize(pid.value)
-  // 刷新项目草稿
   if (pid.value) projectStore.active = await api.get(`/projects/${pid.value}`)
+}
+function toggleEdit() {
+  editing.value = !editing.value
+  if (editing.value) draftEdit.value = draftContent.value
+}
+async function saveDraft() {
+  if (pid.value) {
+    await api.patch(`/projects/${pid.value}/draft`, { draft: draftEdit.value })
+    projectStore.active = await api.get(`/projects/${pid.value}`)
+    editing.value = false
+  }
+}
+async function reReview() {
+  if (pid.value) {
+    await api.patch(`/projects/${pid.value}/draft`, { draft: draftEdit.value })
+    projectStore.active = await api.get(`/projects/${pid.value}`)
+    editing.value = false
+    store.review(pid.value)
+  }
 }
 function sevText(s) {
   return { critical: '严重', major: '重要', minor: '轻微', suggestion: '建议' }[s] || s
@@ -176,6 +228,17 @@ function sevText(s) {
 .score { font-size: 32px; font-weight: 700; color: var(--color-accent); }
 .score.low { color: var(--color-danger); }
 .score-label { color: var(--color-ink-muted); font-size: 13px; }
+.heatmap { margin-top: 12px; display: flex; flex-direction: column; gap: 6px; }
+.heat-row { display: flex; align-items: center; gap: 8px; }
+.heat-label { font-size: 11px; color: var(--color-ink-muted); width: 30px; flex-shrink: 0; }
+.heat-bar { flex: 1; height: 8px; border-radius: 4px; background: var(--glass-highlight); overflow: hidden; }
+.heat-fill { height: 100%; border-radius: 4px; transition: width 0.4s var(--ease-out-expo); }
+.fill-critical { background: var(--color-danger); }
+.fill-major { background: #FFB45A; }
+.fill-minor { background: #A78BFA; }
+.fill-suggestion { background: var(--color-ink-muted); }
+.heat-count { font-size: 11px; color: var(--color-ink-body); width: 20px; text-align: right; }
+.draft-edit { resize: vertical; min-height: 160px; margin-bottom: 4px; }
 .findings { margin-top: 12px; display: flex; flex-direction: column; gap: 8px; }
 .finding { padding: 10px; border-radius: 12px; background: var(--glass-highlight); border: 1px solid var(--glass-border); }
 .sev { display: inline-block; font-size: 11px; font-weight: 700; padding: 1px 6px; border-radius: 4px; margin-right: 6px; }

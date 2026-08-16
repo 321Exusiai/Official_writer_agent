@@ -14,6 +14,10 @@ class AnswerBody(BaseModel):
     text: str
 
 
+class DraftBody(BaseModel):
+    draft: str
+
+
 def get_engine(pid: str) -> WorkflowEngine:
     project = store.get_project(pid)
     if not project:
@@ -55,6 +59,15 @@ def review(pid: str):
     result = eng.review()
     _persist(pid, eng)
     return result
+
+
+@router.patch("/projects/{pid}/draft")
+def update_draft(pid: str, body: DraftBody):
+    """HITL-2：用户手动编辑草稿后写回。"""
+    eng = get_engine(pid)
+    eng.project.draft = body.draft
+    _persist(pid, eng)
+    return {"saved": True, "word_count": len(body.draft)}
 
 
 @router.post("/projects/{pid}/workflow/finalize")
