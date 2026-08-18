@@ -151,6 +151,7 @@ class WorkflowEngine:
         payload["doc_type_name"] = doc["name_cn"]
         payload["style_name"] = Registry.by_id("styles", style_id)["name"]
         payload["style_match"] = style_match
+        payload["structure_detail"] = f"{doc['opening_template']}\n{doc['body_template']}\n{doc['closing_template']}"
         self.state = EngineState.WAITING_APPROVAL
         self._emit("plan", "planning", payload)
         return payload
@@ -175,6 +176,7 @@ class WorkflowEngine:
         payload["doc_type_name"] = doc["name_cn"]
         payload["style_name"] = st["name"]
         payload["style_match"] = style_match
+        payload["structure_detail"] = f"{doc['opening_template']}\n{doc['body_template']}\n{doc['closing_template']}"
         self._emit("plan", "planning", payload)
         return payload
 

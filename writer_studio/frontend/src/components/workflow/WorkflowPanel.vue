@@ -66,6 +66,12 @@
             </select>
           </div>
         </div>
+        <div v-if="cur.plan.structure_detail" class="structure-box">
+          <button class="structure-toggle" @click="showStructure = !showStructure">
+            {{ showStructure ? '收起结构大纲 ▾' : '展开结构大纲 ▸' }}
+          </button>
+          <pre v-if="showStructure" class="structure-detail">{{ cur.plan.structure_detail }}</pre>
+        </div>
       </GlassCard>
       <div class="actions">
         <Button @click="confirm">确认方案，开始写作</Button>
@@ -159,6 +165,7 @@ const cur = computed(() => store.cur)
 const answerText = ref('')
 const editing = ref(false)
 const draftEdit = ref('')
+const showStructure = ref(false)
 
 const severities = [
   { key: 'critical', label: '严重' },
@@ -276,6 +283,9 @@ function sevText(s) {
 .adjust-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .adjust-label { font-size: 12px; color: var(--color-ink-muted); }
 .adjust-row select { flex: 1; min-width: 100px; }
+.structure-box { margin-top: 12px; border-top: 1px solid var(--glass-border); padding-top: 10px; }
+.structure-toggle { background: none; border: none; color: var(--color-accent); font-size: 12px; font-weight: 600; cursor: pointer; font-family: var(--font-ui); }
+.structure-detail { white-space: pre-wrap; font-family: var(--font-ui); font-size: 12px; line-height: 1.7; color: var(--color-ink-body); background: rgba(0,0,0,0.15); padding: 10px; border-radius: 10px; margin-top: 8px; }
 .draft-text { white-space: pre-wrap; font-family: var(--font-ui); font-size: 13px; line-height: 1.7; color: var(--color-ink-body); }
 .score-row { display: flex; align-items: center; gap: 10px; }
 .score { font-size: 32px; font-weight: 700; color: var(--color-accent); }
