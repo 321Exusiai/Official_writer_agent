@@ -7,14 +7,20 @@ from writer_studio.backend.domain.registry import Registry, RegistryError
 class TestRegistry(unittest.TestCase):
     def test_load_styles_has_five_domains(self):
         styles = Registry.load("styles")
-        self.assertEqual(len(styles), 6)
+        self.assertEqual(len(styles), 10)
         media = Registry.filter("styles", domain="media")
         official = Registry.filter("styles", domain="official")
-        self.assertEqual(len(media), 5)
+        self.assertEqual(len(media), 9)
         self.assertEqual(len(official), 1)
-        # youth 模式应有专属风格
-        youth = [s for s in styles.values() if "youth_engagement" in s.get("modes", [])]
-        self.assertGreaterEqual(len(youth), 1)
+        # 每个模式（除行政外）应 ≥3 种可选风格
+        from collections import Counter
+        cnt = Counter()
+        for s in styles.values():
+            for m in s.get("modes", []):
+                cnt[m] += 1
+        for mode, n in cnt.items():
+            if mode != "administrative":
+                self.assertGreaterEqual(n, 3, f"{mode} 可选风格不足3种")
 
     def test_vocab_pool_never_missing(self):
         styles = Registry.load("styles")

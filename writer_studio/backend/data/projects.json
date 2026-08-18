@@ -1,1 +1,23 @@
-{}
+{
+  "proj_c88dc47d": {
+    "id": "proj_c88dc47d",
+    "name": "A",
+    "description": "",
+    "status": "draft",
+    "brief": null,
+    "plan": null,
+    "draft": "",
+    "final_draft": "",
+    "versions": [],
+    "review_results": [],
+    "review_history": [],
+    "references": [],
+    "favorite_terms": [],
+    "favorite_phrases": [],
+    "style_requirements": "",
+    "work_requirements": "",
+    "questionnaire_summary": "",
+    "created_at": "2026-08-18 13:52:10",
+    "updated_at": "2026-08-18 13:53:46"
+  }
+}

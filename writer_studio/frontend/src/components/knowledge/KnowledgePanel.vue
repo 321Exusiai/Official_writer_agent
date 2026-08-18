@@ -4,23 +4,7 @@
       <button v-for="t in tabs" :key="t.id" class="k-tab" :class="{ on: tab === t.id }" @click="tab = t.id">{{ t.label }}</button>
     </div>
 
-    <button class="import-btn" @click="showImport = !showImport">＋ 导入资料</button>
-
-    <!-- 便捷导入面板 -->
-    <div v-if="showImport" class="ios-card import-box animate-enter">
-      <p class="hint-text">{{ activeProject ? `导入到「${activeProject.name}」` : '先在左侧选中一个项目再导入' }}</p>
-      <div class="import-row">
-        <input class="ios-input" v-model="importUrl" placeholder="粘贴网页 URL，一键导入" @keyup.enter="doImportUrl" />
-        <Button @click="doImportUrl" :disabled="!activeProject">导入网页</Button>
-      </div>
-      <div class="import-divider">或粘贴文本</div>
-      <input class="ios-input" v-model="importTitle" placeholder="标题（可选）" />
-      <textarea class="ios-input" v-model="importText" rows="5" placeholder="粘贴参考文本内容…" />
-      <div class="import-row">
-        <Button variant="secondary" @click="doImportText" :disabled="!activeProject || !importText.trim()">导入文本</Button>
-      </div>
-      <p v-if="importMsg" class="hint-text" :class="{ ok: importOk }">{{ importMsg }}</p>
-    </div>
+    <p class="hint-text">内置知识库 · 导入外部资料请到「我的 → 项目档案」</p>
 
     <input v-if="['exemplars', 'terminology', 'policy'].includes(tab)" v-model="query" class="ios-input" placeholder="搜索…" />
 
@@ -78,18 +62,6 @@
         </div>
       </div>
     </div>
-
-    <!-- 我的语料（项目导入） -->
-    <div v-else class="k-list">
-      <div v-if="!references.length" class="hint-text">还没有导入资料，点击上方「＋ 导入资料」</div>
-      <div v-for="r in references" :key="r.id" class="k-item" @click="toggle(r.id)">
-        <div class="k-title">{{ r.title }}<span class="k-meta">{{ r.source.slice(0, 20) }}</span></div>
-        <div v-if="open === r.id" class="k-detail">
-          <div class="k-text">{{ r.content.slice(0, 300) }}</div>
-          <button class="ref-del" @click.stop="removeRef(r.id)">删除</button>
-        </div>
-      </div>
-    </div>
   </div>
 </template>
 
@@ -97,7 +69,6 @@
 import { ref, computed, onMounted } from 'vue'
 import { api } from '../../api/client'
 import { useProjectStore } from '../../stores/project'
-import Button from '../ui/Button.vue'
 
 const projectStore = useProjectStore()
 
@@ -107,7 +78,6 @@ const tabs = [
   { id: 'policy', label: '政策讲话' },
   { id: 'transitions', label: '过渡句' },
   { id: 'formulaic', label: '格式化' },
-  { id: 'mines', label: '我的语料' },
 ]
 const tab = ref('exemplars')
 const query = ref('')
@@ -117,15 +87,6 @@ const terms = ref({})
 const transitions = ref({})
 const formulaic = ref({})
 const policies = ref([])
-const references = ref([])
-const showImport = ref(false)
-const importUrl = ref('')
-const importTitle = ref('')
-const importText = ref('')
-const importMsg = ref('')
-const importOk = ref(false)
-
-const activeProject = computed(() => projectStore.active)
 
 const filteredPolicies = computed(() => {
   const kw = query.value
@@ -146,61 +107,12 @@ const filteredTerms = computed(() => {
 
 function toggle(id) { open.value = open.value === id ? '' : id }
 
-function refreshReferences() {
-  const p = projectStore.active
-  references.value = (p && p.references) || []
-}
-
-async function doImportUrl() {
-  const pid = activeProject.value && activeProject.value.id
-  if (!pid || !importUrl.value.trim()) return
-  try {
-    await api.post(`/projects/${pid}/references/url`, { url: importUrl.value.trim() })
-    importUrl.value = ''
-    importMsg.value = '导入成功'
-    importOk.value = true
-    projectStore.active = await api.get(`/projects/${pid}`)
-    refreshReferences()
-  } catch (e) {
-    importMsg.value = '导入失败：' + e.message
-    importOk.value = false
-  }
-}
-
-async function doImportText() {
-  const pid = activeProject.value && activeProject.value.id
-  if (!pid || !importText.value.trim()) return
-  try {
-    await api.post(`/projects/${pid}/references/text`, {
-      title: importTitle.value, content: importText.value,
-    })
-    importTitle.value = ''
-    importText.value = ''
-    importMsg.value = '导入成功'
-    importOk.value = true
-    projectStore.active = await api.get(`/projects/${pid}`)
-    refreshReferences()
-  } catch (e) {
-    importMsg.value = '导入失败：' + e.message
-    importOk.value = false
-  }
-}
-
-async function removeRef(refId) {
-  const pid = activeProject.value && activeProject.value.id
-  if (!pid) return
-  await api.del(`/projects/${pid}/references/${refId}`)
-  projectStore.active = await api.get(`/projects/${pid}`)
-  refreshReferences()
-}
-
 onMounted(async () => {
   exemplars.value = await api.get('/knowledge/exemplars')
   terms.value = await api.get('/knowledge/terminology')
   transitions.value = await api.get('/knowledge/transitions')
   formulaic.value = await api.get('/knowledge/formulaic')
   policies.value = await api.get('/knowledge/policy')
-  refreshReferences()
 })
 </script>
 
