@@ -26,8 +26,11 @@
         </span>
       </div>
       <p class="step-question">{{ cur.question.question }}</p>
-      <p v-if="cur.question.why_ask" class="why-ask">💡 {{ cur.question.why_ask }}</p>
-      <p v-if="cur.question.hint" class="hint-text">示例：{{ cur.question.hint }}</p>
+      <div v-if="cur.question.why_ask" class="guide-box">
+        <span class="guide-tag">写作说明</span>
+        <p class="why-ask">{{ cur.question.why_ask }}</p>
+      </div>
+      <p v-if="cur.question.hint" class="hint-text">参考：{{ cur.question.hint }}</p>
       <textarea
         class="ios-input answer-input"
         v-model="answerText"
@@ -250,7 +253,9 @@ function sevText(s) {
 .workflow-panel { display: flex; flex-direction: column; gap: 16px; }
 .step-title { font-size: 18px; font-weight: 700; }
 .step-question { font-size: 15px; font-weight: 600; margin: 8px 0; }
-.why-ask { color: var(--color-accent); font-size: 13px; margin: 6px 0; }
+.guide-box { background: var(--glass-highlight); border: 1px solid var(--glass-border); border-radius: 12px; padding: 10px 12px; margin: 8px 0; }
+.guide-tag { display: inline-block; font-size: 11px; color: var(--color-accent); border: 1px solid var(--color-accent-focus); border-radius: 6px; padding: 1px 8px; margin-bottom: 4px; }
+.why-ask { color: var(--color-ink-body); font-size: 13px; line-height: 1.7; margin: 0; }
 .hint-text { color: var(--color-ink-muted); font-size: 12px; margin: 4px 0; }
 .warn-text { color: var(--color-danger); font-size: 13px; margin-top: 8px; }
 .option-list { display: flex; flex-direction: column; gap: 8px; }
