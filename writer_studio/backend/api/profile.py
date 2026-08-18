@@ -39,15 +39,18 @@ class PrefBody(BaseModel):
 class FavoriteBody(BaseModel):
     kind: str  # term | phrase
     value: str
+    project_id: str = ""  # 空 = 综合收藏夹；指定 = 项目收藏
 
 
-class TextRefBody(BaseModel):
-    title: str = ""
-    content: str = ""
-
-
-class UrlRefBody(BaseModel):
-    url: str
+def _favorite_target(project_id: str):
+    """返回 (容器list, 保存函数)。综合收藏夹在 UserProfile，项目收藏在 Project。"""
+    if project_id:
+        p = store.get_project(project_id)
+        if not p:
+            raise HTTPException(404, "项目不存在")
+        return p, lambda: store.update_project(project_id, p)
+    prof = load_profile()
+    return prof, lambda: save_profile(prof)
 
 
 @router.get("/profile")
@@ -84,64 +87,34 @@ def update_preferences(body: PrefBody):
 
 @router.post("/profile/favorites")
 def add_favorite(body: FavoriteBody):
-    p = load_profile()
-    target = p.favorite_terms if body.kind == "term" else p.favorite_phrases
-    if body.value not in target:
-        target.append(body.value)
-    save_profile(p)
-    return {"added": body.value, "count": len(target)}
+    target, save = _favorite_target(body.project_id)
+    lst = target.favorite_terms if body.kind == "term" else target.favorite_phrases
+    if body.value not in lst:
+        lst.append(body.value)
+    save()
+    return {"added": body.value, "count": len(lst), "project_id": body.project_id}
 
 
 @router.delete("/profile/favorites")
-def remove_favorite(kind: str, value: str):
-    p = load_profile()
-    target = p.favorite_terms if kind == "term" else p.favorite_phrases
-    if value in target:
-        target.remove(value)
-    save_profile(p)
+def remove_favorite(kind: str, value: str, project_id: str = ""):
+    target, save = _favorite_target(project_id)
+    lst = target.favorite_terms if kind == "term" else target.favorite_phrases
+    if value in lst:
+        lst.remove(value)
+    save()
     return {"removed": value}
 
 
-@router.post("/profile/references/url")
-def add_ref_url(body: UrlRefBody):
-    p = load_profile()
-    try:
-        ref = importer.import_from_url(body.url)
-    except Exception as e:
-        raise HTTPException(400, f"导入失败：{e}")
-    ref.analysis = profile.analyze_reference(ref.content, ref.title)
-    p.reference_articles.append(ref)
-    save_profile(p)
-    return ref
-
-
-@router.post("/profile/references/text")
-def add_ref_text(body: TextRefBody):
-    p = load_profile()
-    ref = importer.import_from_text(body.title, body.content)
-    ref.analysis = profile.analyze_reference(ref.content, ref.title)
-    p.reference_articles.append(ref)
-    save_profile(p)
-    return ref
-
-
-@router.post("/profile/references/{rid}/analyze")
-def analyze_ref(rid: str):
-    p = load_profile()
-    for ref in p.reference_articles:
-        if ref.id == rid:
-            ref.analysis = profile.analyze_reference(ref.content, ref.title)
-            save_profile(p)
-            return ref
-    raise HTTPException(404, "参考文本不存在")
-
-
-@router.delete("/profile/references/{rid}")
-def delete_ref(rid: str):
-    p = load_profile()
-    p.reference_articles = [r for r in p.reference_articles if r.id != rid]
-    save_profile(p)
-    return {"deleted": rid}
+@router.get("/profile/favorites")
+def get_favorites(project_id: str = ""):
+    """获取综合收藏夹（空）或项目收藏夹。"""
+    if project_id:
+        p = store.get_project(project_id)
+        if not p:
+            raise HTTPException(404, "项目不存在")
+        return {"terms": p.favorite_terms, "phrases": p.favorite_phrases}
+    prof = load_profile()
+    return {"terms": prof.favorite_terms, "phrases": prof.favorite_phrases}
 
 
 @router.post("/profile/analyze")

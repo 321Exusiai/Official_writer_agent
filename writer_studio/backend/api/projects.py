@@ -64,6 +64,22 @@ class TextImportBody(BaseModel):
     source: str = "手动粘贴"
 
 
+def _ingest_reference(p, ref):
+    """导入参考文本：AI 解读 + 自动归纳高频词汇/引语句进项目收藏。"""
+    from ..core import profile
+    ref.analysis = profile.analyze_reference(ref.content, ref.title)
+    p.references.append(ref)
+    fav = profile.extract_favorites(ref.content)
+    for t in fav["terms"]:
+        if t and t not in p.favorite_terms:
+            p.favorite_terms.append(t)
+    for ph in fav["phrases"]:
+        if ph and ph not in p.favorite_phrases:
+            p.favorite_phrases.append(ph)
+    store.update_project(p.id, p)
+    return ref
+
+
 @router.post("/projects/{pid}/references/url")
 def import_url_reference(pid: str, body: UrlImportBody):
     from ..core import importer
@@ -74,9 +90,7 @@ def import_url_reference(pid: str, body: UrlImportBody):
         ref = importer.import_from_url(body.url)
     except Exception as e:
         raise HTTPException(400, f"导入失败：{e}")
-    p.references.append(ref)
-    store.update_project(pid, p)
-    return ref
+    return _ingest_reference(p, ref)
 
 
 @router.post("/projects/{pid}/references/text")
@@ -86,9 +100,7 @@ def import_text_reference(pid: str, body: TextImportBody):
     if not p:
         raise HTTPException(404, "项目不存在")
     ref = importer.import_from_text(body.title, body.content, body.source)
-    p.references.append(ref)
-    store.update_project(pid, p)
-    return ref
+    return _ingest_reference(p, ref)
 
 
 @router.delete("/projects/{pid}/references/{ref_id}")

@@ -75,6 +75,17 @@ def finalize(pid: str):
     eng = get_engine(pid)
     result = eng.finalize()
     _persist(pid, eng)
+    # 审查历史汇总进用户画像（weakness / bias）
+    try:
+        from ..core.profile import analyze_profile
+        from .profile import load_profile, save_profile
+        prof = load_profile()
+        analysis = analyze_profile(store.list_projects())
+        prof.weaknesses = analysis["weaknesses"]
+        prof.bias_warnings = analysis["bias_warnings"]
+        save_profile(prof)
+    except Exception:
+        pass
     return result
 
 

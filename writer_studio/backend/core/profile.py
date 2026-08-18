@@ -83,13 +83,21 @@ def summarize_questionnaire(brief: Brief) -> str:
     return "\n".join(lines)
 
 
+def extract_favorites(text: str, limit_terms: int = 5, limit_phrases: int = 3) -> dict:
+    """从参考文本提取可收藏的高频词与引语句（解读后自动归纳用）。"""
+    words = re.findall(r"[\u4e00-\u9fff]{2,4}", text)
+    terms = [w for w, _ in Counter(words).most_common(12) if len(set(w)) > 1][:limit_terms]
+    phrases = re.findall(r'["“]([^"”]{8,60})["”]', text)[:limit_phrases]
+    return {"terms": terms, "phrases": phrases}
+
+
 def analyze_profile(projects: list) -> dict:
-    """基于项目与审查历史分析弱点与 bias，返回 {"weaknesses", "bias_warnings", "summary"}。"""
+    """基于项目与审查历史（含多次写作）分析弱点与 bias，返回 {"weaknesses", "bias_warnings", "summary"}。"""
     error_keys = Counter()
     modes = Counter()
     for p in projects:
         modes[p.brief.writing_mode if p.brief else "?"] += 1
-        for r in p.review_results:
+        for r in list(p.review_results) + list(p.review_history):
             for f in r.findings:
                 if f.error_key:
                     error_keys[f.error_key] += 1

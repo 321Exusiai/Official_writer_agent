@@ -116,7 +116,10 @@ class Project(BaseModel):
     final_draft: str = ""
     versions: List[DocVersion] = Field(default_factory=list)
     review_results: List[ReviewResult] = Field(default_factory=list)
-    references: List[ReferenceArticle] = Field(default_factory=list)
+    review_history: List[ReviewResult] = Field(default_factory=list)  # 多次写作的累计审查历史
+    references: List[ReferenceArticle] = Field(default_factory=list)  # 项目参考文本（唯一归属）
+    favorite_terms: List[str] = Field(default_factory=list)    # 项目级收藏：词汇
+    favorite_phrases: List[str] = Field(default_factory=list)  # 项目级收藏：句子
     style_requirements: str = ""      # 项目风格要求
     work_requirements: str = ""       # 工作要求
     questionnaire_summary: str = ""   # 问卷总结（AI 生成）
@@ -125,16 +128,15 @@ class Project(BaseModel):
 
 
 class UserProfile(BaseModel):
-    """用户专属数据库：画像 / 收藏 / 参考文本。"""
+    """用户画像与综合收藏夹（参考文本统一归属项目）。"""
 
     id: str = "user_self"
     name: str = "我"
     preferences: List[str] = Field(default_factory=list)      # 写作偏好（如"喜欢短句""避免官方腔"）
     weaknesses: List[str] = Field(default_factory=list)       # 常见弱点
     bias_warnings: List[str] = Field(default_factory=list)    # 潜在 bias 预警
-    favorite_terms: List[str] = Field(default_factory=list)   # 喜欢的词汇
-    favorite_phrases: List[str] = Field(default_factory=list) # 喜欢的句子
-    reference_articles: List[ReferenceArticle] = Field(default_factory=list)  # 用户级参考文本
+    favorite_terms: List[str] = Field(default_factory=list)   # 综合收藏夹：词汇
+    favorite_phrases: List[str] = Field(default_factory=list) # 综合收藏夹：句子
     created_at: str = ""
     updated_at: str = ""
 

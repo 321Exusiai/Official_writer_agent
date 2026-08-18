@@ -116,16 +116,21 @@
       </aside>
 
       <main class="pane workspace">
-        <div v-if="!projectStore.active" class="empty-state">
-          <div style="font-size: 48px">✍️</div>
-          <div>在左侧选择或新建一个项目，开始沉浸式写作</div>
+        <div v-if="!projectStore.active">
+          <ProfilePanel />
         </div>
         <template v-else>
           <div class="ws-head">
             <h2 class="ws-title">{{ projectStore.active.name }}</h2>
-            <Button variant="secondary" @click="startWorkflow">开始写作</Button>
+            <div class="ws-actions">
+              <Button variant="secondary" @click="workView = workView === 'write' ? 'profile' : 'write'">
+                {{ workView === 'write' ? '👤 画像' : '✍️ 写作' }}
+              </Button>
+              <Button @click="startWorkflow">开始写作</Button>
+            </div>
           </div>
-          <WorkflowPanel />
+          <WorkflowPanel v-if="workView === 'write'" />
+          <ProfilePanel v-else />
         </template>
       </main>
 
@@ -142,6 +147,7 @@
         <ConfigPanel v-else />
       </aside>
     </div>
+    <FavoritesPanel ref="favPanel" />
   </div>
 </template>
 
@@ -156,9 +162,13 @@ import ProcessPanel from './components/workflow/ProcessPanel.vue'
 import ConfigPanel from './components/config/ConfigPanel.vue'
 import KnowledgePanel from './components/knowledge/KnowledgePanel.vue'
 import MySpace from './components/profile/MySpace.vue'
+import ProfilePanel from './components/profile/ProfilePanel.vue'
+import FavoritesPanel from './components/profile/FavoritesPanel.vue'
 import Button from './components/ui/Button.vue'
 
 const theme = useThemeStore()
+const favPanel = ref(null)
+const workView = ref('write')
 const projectStore = useProjectStore()
 const workflow = useWorkflowStore()
 const rightTab = ref('process')
@@ -187,12 +197,22 @@ watch(
   },
 )
 
+function onKeydown(e) {
+  // Ctrl+Shift+K 快捷呼出收藏面板
+  if (e.ctrlKey && e.shiftKey && (e.key === 'K' || e.key === 'k')) {
+    e.preventDefault()
+    favPanel.value && favPanel.value.open()
+  }
+}
+
 onMounted(() => {
   theme.apply()
   projectStore.fetch()
+  window.addEventListener('keydown', onKeydown)
 })
 
 onBeforeUnmount(() => {
+  window.removeEventListener('keydown', onKeydown)
   if (workflow.unsub) workflow.unsub()
 })
 </script>
@@ -230,5 +250,6 @@ onBeforeUnmount(() => {
 :root[data-theme="apple"] .pane-tab.on { color: #fff; }
 .workspace { display: flex; flex-direction: column; gap: 16px; }
 .ws-head { display: flex; justify-content: space-between; align-items: center; }
+.ws-actions { display: flex; gap: 8px; }
 .ws-title { font-size: 18px; font-weight: 700; }
 </style>

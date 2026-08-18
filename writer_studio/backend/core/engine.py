@@ -57,6 +57,23 @@ class WorkflowEngine:
 
     # ── 路由 / 问卷 ──
     def start(self):
+        """启动（或重新启动）一次写作流程：重置流程状态，保留项目个性化数据。"""
+        self.brief = Brief()
+        self.plan = Plan()
+        self._routing_node = "root"
+        self._questions = []
+        self._q_index = 0
+        self.events = []
+        self._seq = 0
+        # 项目：保留个性化数据（references/requirements/summary/review_history/favorites），清空本次流程产物
+        self.project.brief = None
+        self.project.plan = None
+        self.project.draft = ""
+        self.project.final_draft = ""
+        self.project.versions = []
+        if self.project.review_results:
+            self.project.review_history.extend(self.project.review_results)
+            self.project.review_results = []
         self.state = EngineState.ROUTING
         q = brief_mod.routing_question("root")
         self._emit("routing", "routing", q)
@@ -376,6 +393,9 @@ class WorkflowEngine:
         self.state = EngineState.COMPLETED
         self.project.status = ProjectStatus.COMPLETED
         self.project.final_draft = self.project.draft
+        # 审查历史归档（累计多次写作）
+        if self.project.review_results:
+            self.project.review_history.extend(self.project.review_results)
         payload = {
             "final_draft": self.project.final_draft,
             "versions": [v.model_dump() for v in self.project.versions],

@@ -69,7 +69,11 @@ async function create() {
 }
 
 function select(p) { store.select(p) }
-function remove(p) { store.remove(p.id) }
+function remove(p) {
+  // 删除确认：项目含个性化数据（参考文本/偏好/审查历史），防误删
+  if (!window.confirm(`确定删除项目「${p.name}」？\n该项目下的参考文本、写作偏好与审查历史将一并删除，且不可恢复。`)) return
+  store.remove(p.id)
+}
 
 onMounted(() => store.fetch())
 </script>
