@@ -58,8 +58,23 @@ def diagnose(text: str, mode: str) -> list:
                 suggestion=err["prescription"],
                 error_key=eid,
                 source="rule",
+                dimension=err.get("dimension", ""),
             ))
     return findings
+
+
+def compute_dimension_scores(findings: list) -> list:
+    """按维度聚合扣分：每维度基础 100，该维度发现按严重度扣分。"""
+    dims = {}
+    for f in findings:
+        d = f.dimension or "其他"
+        dims[d] = dims.get(d, 0) + SEVERITY_WEIGHT.get(f.severity.value, 0)
+    if not dims:
+        return [{"name": "整体", "score": 100.0, "deducted": 0}]
+    return [
+        {"name": name, "score": round(max(0.0, 100.0 - deducted), 1), "deducted": deducted}
+        for name, deducted in sorted(dims.items(), key=lambda x: -x[1])
+    ]
 
 
 def check_subject_ratio(text: str) -> list:
@@ -113,7 +128,7 @@ def check_admin_format(text: str) -> list:
 
 
 def review(text: str, mode: str, round_name: str = "审查") -> ReviewResult:
-    """规则版审查：模式错误诊断 + 模式专属检查，产出单一 ReviewResult。"""
+    """规则版审查：模式错误诊断 + 模式专属检查，产出单一 ReviewResult（含逐维度得分）。"""
     findings = diagnose(text, mode)
     if mode == "strategic_narrative":
         findings.extend(check_subject_ratio(text))
@@ -123,6 +138,7 @@ def review(text: str, mode: str, round_name: str = "审查") -> ReviewResult:
         round_name=round_name,
         findings=findings,
         score=score(findings),
+        dimension_scores=compute_dimension_scores(findings),
         passed=score(findings) >= PASS_THRESHOLD
         and not any(f.severity == ReviewSeverity.CRITICAL for f in findings),
     )

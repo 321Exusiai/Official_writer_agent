@@ -107,6 +107,16 @@
             <span class="heat-count">{{ heatCount(s.key) }}</span>
           </div>
         </div>
+        <div v-if="cur.review.dimension_scores && cur.review.dimension_scores.length" class="dim-scores">
+          <div class="dim-title">逐维度得分</div>
+          <div v-for="d in cur.review.dimension_scores" :key="d.name" class="dim-row">
+            <span class="dim-name">{{ d.name }}</span>
+            <div class="dim-bar">
+              <div class="dim-fill" :class="{ low: d.score < 70 }" :style="{ width: d.score + '%' }" />
+            </div>
+            <span class="dim-score" :class="{ low: d.score < 70 }">{{ d.score }}</span>
+          </div>
+        </div>
         <div v-if="cur.review.findings && cur.review.findings.length" class="findings">
           <div v-for="(f, i) in cur.review.findings" :key="i" class="finding">
             <span class="sev" :class="'sev-' + f.severity">{{ sevText(f.severity) }}</span>
@@ -142,6 +152,7 @@
           </div>
         </div>
       </GlassCard>
+      <MultiDocCompare v-if="versions.length >= 2" :versions="versions" />
     </div>
 
     <div v-else class="empty-state">
@@ -158,6 +169,7 @@ import { useProjectStore } from '../../stores/project'
 import { api } from '../../api/client'
 import Button from '../ui/Button.vue'
 import GlassCard from '../ui/GlassCard.vue'
+import MultiDocCompare from './MultiDocCompare.vue'
 
 const store = useWorkflowStore()
 const projectStore = useProjectStore()
@@ -301,6 +313,15 @@ function sevText(s) {
 .fill-minor { background: #A78BFA; }
 .fill-suggestion { background: var(--color-ink-muted); }
 .heat-count { font-size: 11px; color: var(--color-ink-body); width: 20px; text-align: right; }
+.dim-scores { margin-top: 12px; display: flex; flex-direction: column; gap: 6px; }
+.dim-title { font-size: 12px; font-weight: 700; color: var(--color-ink-body); margin-bottom: 2px; }
+.dim-row { display: flex; align-items: center; gap: 8px; }
+.dim-name { font-size: 12px; color: var(--color-ink-muted); width: 52px; flex-shrink: 0; }
+.dim-bar { flex: 1; height: 8px; border-radius: 4px; background: var(--glass-highlight); overflow: hidden; }
+.dim-fill { height: 100%; border-radius: 4px; background: var(--color-accent); transition: width 0.4s var(--ease-out-expo); }
+.dim-fill.low { background: var(--color-danger); }
+.dim-score { font-size: 12px; font-weight: 700; color: var(--color-accent); width: 34px; text-align: right; }
+.dim-score.low { color: var(--color-danger); }
 .draft-edit { resize: vertical; min-height: 160px; margin-bottom: 4px; }
 .findings { margin-top: 12px; display: flex; flex-direction: column; gap: 8px; }
 .finding { padding: 10px; border-radius: 12px; background: var(--glass-highlight); border: 1px solid var(--glass-border); }

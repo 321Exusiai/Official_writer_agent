@@ -64,6 +64,22 @@
       </div>
       <p v-if="msg" class="msg" :class="{ ok: msgOk }">{{ msg }}</p>
     </div>
+
+    <!-- 辅助轨道（免费 GLM-4-Flash） -->
+    <div class="ios-card edit-box assistant-box">
+      <h4 class="edit-title">⚙️ 辅助轨道 · GLM-4-Flash（免费）</h4>
+      <p class="hint-text">免费模型当"随叫随到的小帮手"：整理资料库、分析用户画像、多角色协商、工具决策等内部轻任务；<b>写文章与深度审查仍走上方主 API</b>。</p>
+      <label class="toggle-row">
+        <input type="checkbox" v-model="assistant.enabled" />
+        <span>启用辅助轨道</span>
+      </label>
+      <input class="ios-input" v-model="assistant.api_key" type="password" placeholder="智谱 GLM API Key（免费额度）" />
+      <input class="ios-input" v-model="assistant.model" placeholder="模型名（默认 glm-4-flash）" />
+      <div class="actions">
+        <Button variant="secondary" @click="saveAssistant">保存辅助配置</Button>
+      </div>
+      <p v-if="assistantMsg" class="msg" :class="{ ok: assistantOk }">{{ assistantMsg }}</p>
+    </div>
   </div>
 </template>
 
@@ -80,6 +96,9 @@ const editingIndex = ref(-2) // -2 不编辑 / -1 新建 / >=0 编辑第 i 个
 const form = ref(emptyForm())
 const msg = ref('')
 const msgOk = ref(false)
+const assistant = ref({ enabled: false, provider: 'zhipu', api_base: 'https://open.bigmodel.cn/api/paas/v4', api_key: '', model: 'glm-4-flash', temperature: 0.3, max_tokens: 2000 })
+const assistantMsg = ref('')
+const assistantOk = ref(false)
 
 function emptyForm() {
   return { name: '', provider: 'openai', api_base: '', api_key: '', model: '', temperature: 0.7, max_tokens: 8000, enabled: false, search_provider: 'tavily', search_api_key: '' }
@@ -94,6 +113,18 @@ async function load() {
   configs.value = d.configs
   activeIndex.value = d.active_index
   templates.value = d.templates || {}
+  if (d.assistant) assistant.value = { ...assistant.value, ...d.assistant }
+}
+
+async function saveAssistant() {
+  try {
+    await api.post('/config/assistant', assistant.value)
+    assistantMsg.value = '辅助轨道配置已保存'
+    assistantOk.value = true
+  } catch (e) {
+    assistantMsg.value = '保存失败：' + e.message
+    assistantOk.value = false
+  }
 }
 
 function startNew() {
@@ -186,6 +217,7 @@ onMounted(load)
 .mini-btn.danger:hover { border-color: var(--color-danger); }
 .mini-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 .edit-box { display: flex; flex-direction: column; gap: 8px; }
+.assistant-box { margin-top: 4px; border-color: var(--color-accent-focus); }
 .edit-title { font-size: 14px; font-weight: 700; }
 .config-row { display: flex; align-items: center; gap: 10px; }
 .config-label { font-size: 13px; color: var(--color-ink-muted); width: 80px; flex-shrink: 0; }

@@ -27,7 +27,7 @@ class EngineState(str, Enum):
 class WorkflowEngine:
     """驱动单个项目的完整工作流，事件经 `events` 列表暴露（供 SSE 推送）。"""
 
-    def __init__(self, project: Project, llm=None):
+    def __init__(self, project: Project, llm=None, assistant_llm=None):
         self.project = project
         self.state = EngineState.IDLE
         self.events: list = []
@@ -38,7 +38,8 @@ class WorkflowEngine:
         self.brief = Brief()
         self.plan = Plan()
         self.mode = ""
-        self.llm = llm  # LLMClient 或 None
+        self.llm = llm  # 主 LLMClient（写作/审查）
+        self.assistant_llm = assistant_llm  # 辅助 LLMClient（轻任务：协商/决策）
 
     @property
     def llm_available(self) -> bool:
@@ -240,18 +241,23 @@ class WorkflowEngine:
         return results
 
     def _consult(self) -> dict:
-        """多角色协商 + 集中决策，返回 decision。"""
+        """多角色协商 + 集中决策，返回 decision。
+
+        双轨制：协商/决策是短输出轻任务，优先用辅助轨道（GLM-4-Flash），
+        未启用则回退主模型，都不可用则走规则降级。
+        """
         from . import agents
+        helper = self.assistant_llm if (self.assistant_llm and self.assistant_llm.available) else self.llm
         context = {
             "brief": self.brief.model_dump(),
             "plan": self.plan.model_dump(),
             "style_match": style.check_style_doc_match(self.plan.media_style, self.plan.doc_type),
             "user_memory": "",
         }
-        responses = agents.consult(self.llm, "写作方案评审", context)
+        responses = agents.consult(helper, "写作方案评审", context)
         for rid, r in responses.items():
             self._emit("consult", "writing", r.model_dump())
-        decision = agents.decide(self.llm, "写作方案最终决策", responses)
+        decision = agents.decide(helper, "写作方案最终决策", responses)
         self._emit("decision", "writing", decision)
         return decision
 
@@ -346,6 +352,7 @@ class WorkflowEngine:
                 result.findings.extend(llm_findings)
                 result.score = review.score(result.findings)
                 result.passed = review.is_passed([result])
+                result.dimension_scores = review.compute_dimension_scores(result.findings)
         self.project.review_results = [result]
         payload = {
             "round_name": result.round_name,

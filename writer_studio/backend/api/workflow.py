@@ -3,7 +3,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from ..core.engine import WorkflowEngine
-from .config import get_client
+from .config import get_assistant_client, get_client
 from .projects import store
 
 router = APIRouter(tags=["workflow"])
@@ -23,7 +23,8 @@ def get_engine(pid: str) -> WorkflowEngine:
     if not project:
         raise HTTPException(404, "项目不存在")
     if pid not in ENGINES:
-        ENGINES[pid] = WorkflowEngine(project, llm=get_client())
+        # 双轨制：主模型写作/审查，辅助模型（GLM-4-Flash）协商/决策
+        ENGINES[pid] = WorkflowEngine(project, llm=get_client(), assistant_llm=get_assistant_client())
     return ENGINES[pid]
 
 

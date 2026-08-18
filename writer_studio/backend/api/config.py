@@ -1,7 +1,7 @@
-"""LLM 多配置管理路由：多 API 配置增删改 + 切换启用 + 快捷模板 + 连通测试。
+"""LLM 双轨配置管理路由：主 API 多配置 + 辅助轨道（免费 GLM-4-Flash）。
 
 存储结构 data/llm_config.json：
-    {"configs": [LLMConfig...], "active_index": N}
+    {"configs": [LLMConfig...], "active_index": N, "assistant": AssistantConfig}
 """
 import json
 import os
@@ -11,7 +11,7 @@ from fastapi import APIRouter
 from pydantic import BaseModel
 
 from ..core.llm import LLMClient
-from ..domain.schemas import LLMConfig
+from ..domain.schemas import AssistantConfig, LLMConfig
 
 router = APIRouter(tags=["config"])
 _CONFIG_PATH = Path(__file__).resolve().parent.parent / "data" / "llm_config.json"
@@ -41,11 +41,27 @@ def load_config_set():
                       api_base="https://api.deepseek.com/v1", model="deepseek-chat").model_dump()], 0
 
 
-def save_config_set(configs: list, active_index: int):
+def save_config_set(configs: list, active_index: int, assistant: dict = None):
+    payload = {"configs": configs, "active_index": active_index}
+    if assistant is not None:
+        payload["assistant"] = assistant
     _CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
     tmp = _CONFIG_PATH.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps({"configs": configs, "active_index": active_index}, ensure_ascii=False, indent=2), encoding="utf-8")
+    tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     os.replace(tmp, _CONFIG_PATH)
+
+
+def load_assistant_config() -> AssistantConfig:
+    """读取辅助轨道配置（免费 GLM-4-Flash）。"""
+    if _CONFIG_PATH.exists():
+        try:
+            data = json.loads(_CONFIG_PATH.read_text(encoding="utf-8"))
+            a = data.get("assistant")
+            if a:
+                return AssistantConfig(**a)
+        except Exception:
+            pass
+    return AssistantConfig()
 
 
 def get_active_config() -> LLMConfig:
@@ -57,6 +73,11 @@ def get_active_config() -> LLMConfig:
 
 def get_client() -> LLMClient:
     return LLMClient(get_active_config())
+
+
+def get_assistant_client() -> LLMClient:
+    """辅助轨道客户端（轻任务：资料整理/画像/协商/工具决策）。"""
+    return LLMClient(load_assistant_config())
 
 
 def _mask(key: str) -> str:
@@ -84,6 +105,16 @@ class IndexBody(BaseModel):
     index: int
 
 
+class AssistantBody(BaseModel):
+    enabled: bool = False
+    provider: str = "zhipu"
+    api_base: str = "https://open.bigmodel.cn/api/paas/v4"
+    api_key: str = ""
+    model: str = "glm-4-flash"
+    temperature: float = 0.3
+    max_tokens: int = 2000
+
+
 @router.get("/config")
 def get_configs():
     configs, idx = load_config_set()
@@ -93,7 +124,23 @@ def get_configs():
         d["api_key"] = _mask(d.get("api_key", ""))
         d["search_api_key"] = _mask(d.get("search_api_key", ""))
         masked.append(d)
-    return {"configs": masked, "active_index": idx, "templates": PROVIDER_TEMPLATES}
+    assistant = load_assistant_config().model_dump()
+    if assistant.get("api_key"):
+        assistant["api_key"] = _mask(assistant["api_key"])
+    return {"configs": masked, "active_index": idx, "templates": PROVIDER_TEMPLATES, "assistant": assistant}
+
+
+@router.post("/config/assistant")
+def save_assistant(body: AssistantBody):
+    """保存辅助轨道配置（免费 GLM-4-Flash）。"""
+    cfg = load_assistant_config()
+    payload = body.model_dump()
+    if payload["api_key"].startswith("••••"):
+        payload["api_key"] = cfg.api_key
+    assistant = AssistantConfig(**payload)
+    configs, idx = load_config_set()
+    save_config_set(configs, idx, assistant.model_dump())
+    return {"saved": True, "enabled": assistant.enabled, "model": assistant.model}
 
 
 @router.post("/config/save")

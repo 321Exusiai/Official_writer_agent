@@ -77,6 +77,7 @@ class ReviewFinding(BaseModel):
     suggestion: str = ""
     error_key: str = ""
     source: str = "rule"  # rule | llm
+    dimension: str = ""  # 维度标签（语言/事实/格式/结构/主体性/客观性/表达）
 
 
 class ReviewResult(BaseModel):
@@ -84,6 +85,7 @@ class ReviewResult(BaseModel):
     passed: bool = True
     score: float = 100.0
     findings: List[ReviewFinding] = Field(default_factory=list)
+    dimension_scores: List[dict] = Field(default_factory=list)  # [{name, weight, score, deducted}]
     draft_version: int = 0
 
 
@@ -168,3 +170,15 @@ class LLMConfig(BaseModel):
     # 联网搜索（可选）：填 key 启用运行时联网检索最新政策/讲话
     search_provider: str = "tavily"
     search_api_key: str = ""
+
+
+class AssistantConfig(BaseModel):
+    """辅助轨道配置（免费 GLM-4-Flash）：内部轻任务，随叫随到的小帮手。"""
+
+    enabled: bool = False
+    provider: str = "zhipu"
+    api_base: str = "https://open.bigmodel.cn/api/paas/v4"
+    api_key: str = ""
+    model: str = "glm-4-flash"
+    temperature: float = 0.3
+    max_tokens: int = 2000
