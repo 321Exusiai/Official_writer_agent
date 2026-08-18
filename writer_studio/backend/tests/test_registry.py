@@ -7,11 +7,14 @@ from writer_studio.backend.domain.registry import Registry, RegistryError
 class TestRegistry(unittest.TestCase):
     def test_load_styles_has_five_domains(self):
         styles = Registry.load("styles")
-        self.assertEqual(len(styles), 5)
+        self.assertEqual(len(styles), 6)
         media = Registry.filter("styles", domain="media")
         official = Registry.filter("styles", domain="official")
-        self.assertEqual(len(media), 4)
+        self.assertEqual(len(media), 5)
         self.assertEqual(len(official), 1)
+        # youth 模式应有专属风格
+        youth = [s for s in styles.values() if "youth_engagement" in s.get("modes", [])]
+        self.assertGreaterEqual(len(youth), 1)
 
     def test_vocab_pool_never_missing(self):
         styles = Registry.load("styles")
@@ -22,11 +25,14 @@ class TestRegistry(unittest.TestCase):
 
     def test_load_doctypes_16_with_domains(self):
         doctypes = Registry.load("doctypes")
-        self.assertEqual(len(doctypes), 16)
+        self.assertEqual(len(doctypes), 17)
         media = Registry.filter("doctypes", domain="media")
         official = Registry.filter("doctypes", domain="official")
-        self.assertEqual(len(media), 5)
+        self.assertEqual(len(media), 6)
         self.assertEqual(len(official), 11)
+        # 新媒体推文文种仅适用 youth_engagement
+        sp = doctypes["social_post"]
+        self.assertEqual(sp["modes"], ["youth_engagement"])
 
     def test_load_modes_5(self):
         modes = Registry.load("modes")

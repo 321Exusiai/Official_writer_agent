@@ -81,7 +81,7 @@
     </div>
 
     <!-- 审查结果 -->
-    <div v-else-if="cur.state === 'reviewed' && store.review" class="animate-enter">
+    <div v-else-if="cur.state === 'reviewed' && cur.review" class="animate-enter">
       <h3 class="step-title">审查结果</h3>
       <GlassCard>
         <div class="score-row">
@@ -186,9 +186,8 @@ function heatPct(key) {
 async function loadPlanOptions() {
   try {
     const mode = cur.value.plan && cur.value.plan.writing_mode
-    const domain = mode === 'administrative' ? 'official' : 'media'
-    doctypeOptions.value = await api.get(`/knowledge/doctypes?domain=${domain}`)
-    styleOptions.value = await api.get(`/knowledge/styles?domain=${domain}`)
+    doctypeOptions.value = await api.get(`/knowledge/doctypes?mode=${mode}`)
+    styleOptions.value = await api.get(`/knowledge/styles?mode=${mode}`)
     if (cur.value.plan) {
       selDocType.value = cur.value.plan.doc_type
       selStyle.value = cur.value.plan.media_style

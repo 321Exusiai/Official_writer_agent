@@ -78,11 +78,18 @@ def _material_score(doc_id, materials, domain):
     return min(1.0, total)
 
 
+def _doctypes_for_mode(mode: str) -> list:
+    """按写作模式筛选候选文种（modes 映射）。"""
+    items = list(Registry.load("doctypes").values())
+    hits = [d for d in items if mode in d.get("modes", [])]
+    return hits or [d for d in items if d["domain"] == "media"]  # 兜底媒体类
+
+
 def identify_doc_type(brief: Brief):
-    """返回 (doc_type_id, score) 全量排序列表（只含目标 domain 文种）。"""
-    target_domain = "official" if brief.writing_mode == "administrative" else "media"
+    """返回 (doc_type_id, score) 全量排序列表（只含当前模式适用的文种）。"""
+    doctypes = _doctypes_for_mode(brief.writing_mode)
+    target_domain = "official" if all(d["domain"] == "official" for d in doctypes) else "media"
     w = WEIGHT_MATRIX[target_domain]
-    doctypes = Registry.filter("doctypes", domain=target_domain)
     scores = []
     for dt in doctypes:
         did = dt["id"]

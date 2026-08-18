@@ -39,12 +39,20 @@ def list_policy():
 
 
 @router.get("/knowledge/doctypes")
-def list_doctypes(domain: str = ""):
-    items = Registry.filter("doctypes", domain=domain or None)
+def list_doctypes(domain: str = "", mode: str = ""):
+    items = list(Registry.load("doctypes").values())
+    if mode:
+        items = [d for d in items if mode in d.get("modes", [])]
+    elif domain:
+        items = [d for d in items if d["domain"] == domain]
     return [{"id": d["id"], "name_cn": d["name_cn"], "domain": d["domain"]} for d in items]
 
 
 @router.get("/knowledge/styles")
-def list_styles(domain: str = ""):
-    items = Registry.filter("styles", domain=domain or None)
+def list_styles(domain: str = "", mode: str = ""):
+    items = list(Registry.load("styles").values())
+    if mode:
+        items = [s for s in items if mode in s.get("modes", [])]
+    elif domain:
+        items = [s for s in items if s["domain"] == domain]
     return [{"id": s["id"], "name": s["name"], "domain": s["domain"]} for s in items]

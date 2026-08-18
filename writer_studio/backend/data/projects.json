@@ -4,14 +4,41 @@
     "name": "研学报告",
     "description": "",
     "status": "draft",
-    "brief": null,
-    "plan": null,
+    "brief": {
+      "writing_mode": "informational",
+      "subtype": "news_brief",
+      "purpose": "1",
+      "primary_audience": "",
+      "secondary_audiences": [],
+      "deep_meaning": "1",
+      "strategic_anchor": "1",
+      "opportunity_context": "",
+      "key_materials": "1",
+      "differentiator": "1",
+      "length_hint": null,
+      "style_intensity": 1.0,
+      "raw_answers": {
+        "info_5w1h": "1",
+        "info_lead": "1",
+        "info_quotes": "1",
+        "info_value": "1",
+        "info_plan": "1"
+      }
+    },
+    "plan": {
+      "doc_type": "feature",
+      "media_style": "people_daily",
+      "audience_focus": "external",
+      "estimated_length": "1500-3000字",
+      "structure_outline": "总—分—总递进式：开篇定位→分站展开→总结升华",
+      "writing_mode": "informational"
+    },
     "draft": "",
     "final_draft": "",
     "versions": [],
     "review_results": [],
     "references": [],
     "created_at": "2026-08-16 11:24:07",
-    "updated_at": "2026-08-16 11:48:10"
+    "updated_at": "2026-08-18 08:26:31"
   }
 }

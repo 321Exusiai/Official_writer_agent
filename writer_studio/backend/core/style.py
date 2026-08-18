@@ -27,14 +27,17 @@ def _style_hint_score(style_id, text):
 
 
 def auto_select_style(brief: Brief, doc_type_id: str) -> str:
-    """根据文种 domain + 简报受众/目的选择风格。"""
+    """按写作模式 + 文种 domain 选择风格。"""
     dt = Registry.by_id("doctypes", doc_type_id)
     domain = dt["domain"] if dt else "media"
-    candidates = Registry.filter("styles", domain=domain)
+    mode = getattr(brief, "writing_mode", "")
+    candidates = [s for s in Registry.load("styles").values() if mode in s.get("modes", [])]
+    if not candidates:
+        candidates = Registry.filter("styles", domain=domain)
     if not candidates:
         return "government_admin" if domain == "official" else "people_daily"
-    if domain == "official":
-        return candidates[0]["id"]  # 官方轨道仅一种风格
+    if all(s["domain"] == "official" for s in candidates):
+        return candidates[0]["id"]  # 官方轨道
     text = f"{brief.primary_audience} {brief.purpose}"
     best = max(candidates, key=lambda s: _style_hint_score(s["id"], text))
     return best["id"]

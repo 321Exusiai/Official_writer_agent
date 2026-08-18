@@ -75,11 +75,12 @@ class Registry:
 
     @classmethod
     def _validate_doctypes(cls, data):
-        if len(data) != 16:
-            raise RegistryError(f"doctypes 应为 16 个文种，实为 {len(data)}")
+        if len(data) != 17:
+            raise RegistryError(f"doctypes 应为 17 个文种，实为 {len(data)}")
         for did, d in data.items():
             assert "domain" in d, f"doctypes.{did} 缺 domain"
             assert d["domain"] in ("media", "official"), f"doctypes.{did}.domain 非法"
+            assert "modes" in d and d["modes"], f"doctypes.{did} 缺 modes 适用映射"
 
     @classmethod
     def _validate_modes(cls, data):
