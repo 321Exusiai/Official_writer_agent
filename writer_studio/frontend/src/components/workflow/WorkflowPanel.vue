@@ -41,6 +41,17 @@
       <div class="actions">
         <Button @click="submitAnswer">提交回答</Button>
       </div>
+      <div v-if="cur.answers && cur.answers.length" class="answers-review">
+        <button class="structure-toggle" @click="showAnswers = !showAnswers">
+          {{ showAnswers ? '收起已答回顾 ▾' : `已答 ${cur.answers.length} 题 · 展开回顾 ▸` }}
+        </button>
+        <div v-if="showAnswers" class="answers-list">
+          <div v-for="(a, i) in cur.answers" :key="i" class="answer-item">
+            <span class="aq">{{ i + 1 }}. {{ a.question.slice(0, 26) }}</span>
+            <span class="aa">{{ a.answer.slice(0, 60) }}</span>
+          </div>
+        </div>
+      </div>
     </div>
 
     <!-- 方案确认（HITL-1） -->
@@ -153,6 +164,9 @@
         </div>
       </GlassCard>
       <MultiDocCompare v-if="versions.length >= 2" :versions="versions" />
+      <div class="actions">
+        <Button variant="secondary" @click="exportProject">导出项目 JSON</Button>
+      </div>
     </div>
 
     <div v-else class="empty-state">
@@ -178,6 +192,7 @@ const answerText = ref('')
 const editing = ref(false)
 const draftEdit = ref('')
 const showStructure = ref(false)
+const showAnswers = ref(false)
 
 const severities = [
   { key: 'critical', label: '严重' },
@@ -237,6 +252,17 @@ function submitAnswer() {
   if (!answerText.value.trim()) return
   store.answer(pid.value, answerText.value.trim())
   answerText.value = ''
+}
+
+async function exportProject() {
+  if (!pid.value) return
+  const data = await api.get(`/projects/${pid.value}/export`)
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
+  const a = document.createElement('a')
+  a.href = URL.createObjectURL(blob)
+  a.download = `${(projectStore.active && projectStore.active.name) || 'project'}.json`
+  a.click()
+  URL.revokeObjectURL(a.href)
 }
 function confirm() { store.confirm(pid.value) }
 function runReview() { store.review(pid.value) }
@@ -298,6 +324,11 @@ function sevText(s) {
 .structure-box { margin-top: 12px; border-top: 1px solid var(--glass-border); padding-top: 10px; }
 .structure-toggle { background: none; border: none; color: var(--color-accent); font-size: 12px; font-weight: 600; cursor: pointer; font-family: var(--font-ui); }
 .structure-detail { white-space: pre-wrap; font-family: var(--font-ui); font-size: 12px; line-height: 1.7; color: var(--color-ink-body); background: rgba(0,0,0,0.15); padding: 10px; border-radius: 10px; margin-top: 8px; }
+.answers-review { margin-top: 12px; border-top: 1px solid var(--glass-border); padding-top: 10px; }
+.answers-list { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+.answer-item { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; border-radius: 10px; background: var(--glass-highlight); }
+.aq { font-size: 12px; font-weight: 600; color: var(--color-ink-body); }
+.aa { font-size: 12px; color: var(--color-ink-muted); }
 .draft-text { white-space: pre-wrap; font-family: var(--font-ui); font-size: 13px; line-height: 1.7; color: var(--color-ink-body); }
 .score-row { display: flex; align-items: center; gap: 10px; }
 .score { font-size: 32px; font-weight: 700; color: var(--color-accent); }

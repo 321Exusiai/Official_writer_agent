@@ -111,3 +111,12 @@ def delete_reference(pid: str, ref_id: str):
     p.references = [r for r in p.references if r.id != ref_id]
     store.update_project(pid, p)
     return {"deleted": ref_id}
+
+
+@router.get("/projects/{pid}/export")
+def export_project(pid: str):
+    """导出项目完整数据（JSON），含个性化数据。"""
+    p = store.get_project(pid)
+    if not p:
+        raise HTTPException(404, "项目不存在")
+    return p.model_dump()

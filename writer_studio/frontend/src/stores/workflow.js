@@ -12,6 +12,7 @@ function emptyItem() {
     draft: '',
     versions: [],
     review: null,
+    answers: [], // 问卷已答回顾 [{question, answer}]
     busy: false,
     error: null,
   }
@@ -50,6 +51,10 @@ export const useWorkflowStore = defineStore('workflow', {
       const s = this.ensure(pid)
       s.busy = true
       s.error = null
+      // 记录已答（问卷进度回顾）
+      if (s.question && s.question.index) {
+        s.answers.push({ question: s.question.question, answer: text })
+      }
       const result = await api.post(`/projects/${pid}/workflow/answer`, { text })
       this.applyResult(s, result)
       s.busy = false
