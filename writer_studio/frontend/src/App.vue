@@ -101,6 +101,22 @@
         <span class="brand-dot" />
         <h1>公文写作工作室</h1>
       </div>
+      <div class="global-search">
+        <input class="ios-input search-input" v-model="searchQ" placeholder="🔍 全局搜索…" @input="doSearch" @keyup.enter="doSearch" @blur="closeSearch" />
+        <div v-if="searchOpen" class="search-drop">
+          <div v-if="searchResults.projects.length">
+            <div class="sd-title">项目</div>
+            <div v-for="p in searchResults.projects" :key="p.id" class="sd-item" @mousedown.prevent="openSearchProject(p.id)">
+              📁 {{ p.name }}<span v-if="p.matched_refs"> · 参考{{ p.matched_refs }}</span><span v-if="p.matched_favs"> · 收藏{{ p.matched_favs }}</span>
+            </div>
+          </div>
+          <div v-if="searchResults.favorites.length">
+            <div class="sd-title">综合收藏</div>
+            <div v-for="(f, i) in searchResults.favorites" :key="i" class="sd-item">⭐ {{ f }}</div>
+          </div>
+          <div v-if="!searchResults.projects.length && !searchResults.favorites.length" class="sd-item muted">无匹配结果</div>
+        </div>
+      </div>
       <div class="theme-switch">
         <button v-for="t in themes" :key="t.id" class="theme-btn" :class="{ on: theme.theme === t.id }" @click="theme.setTheme(t.id)">
           {{ t.label }}
@@ -165,10 +181,34 @@ import MySpace from './components/profile/MySpace.vue'
 import ProfilePanel from './components/profile/ProfilePanel.vue'
 import FavoritesPanel from './components/profile/FavoritesPanel.vue'
 import Button from './components/ui/Button.vue'
+import { api } from './api/client'
 
 const theme = useThemeStore()
 const favPanel = ref(null)
 const workView = ref('write')
+const searchQ = ref('')
+const searchOpen = ref(false)
+const searchResults = ref({ projects: [], favorites: [] })
+
+async function doSearch() {
+  const q = searchQ.value.trim()
+  if (!q) { searchOpen.value = false; return }
+  searchResults.value = await api.get(`/search?q=${encodeURIComponent(q)}`)
+  searchOpen.value = true
+}
+
+function closeSearch() {
+  setTimeout(() => { searchOpen.value = false }, 200)
+}
+
+async function openSearchProject(id) {
+  searchOpen.value = false
+  const p = await api.get(`/projects/${id}`)
+  projectStore.select(p)
+  projectStore.active = p
+  workflow.setActive(id)
+  workflow.attachEvents(id)
+}
 const projectStore = useProjectStore()
 const workflow = useWorkflowStore()
 const rightTab = ref('process')
@@ -243,6 +283,18 @@ onBeforeUnmount(() => {
 }
 .theme-btn.on { background: var(--color-accent); color: #1D1D1F; }
 :root[data-theme="apple"] .theme-btn.on { color: #fff; }
+.global-search { position: relative; flex: 0 1 320px; }
+.search-input { width: 100%; }
+.search-drop {
+  position: absolute; top: 42px; right: 0; width: 340px; z-index: 100;
+  background: var(--glass-bg); backdrop-filter: var(--blur-glass);
+  border: 1px solid var(--glass-border); border-radius: 14px; padding: 10px;
+  display: flex; flex-direction: column; gap: 4px; box-shadow: 0 8px 30px rgba(0,0,0,0.3);
+}
+.sd-title { font-size: 11px; font-weight: 700; color: var(--color-ink-muted); padding: 4px 6px; }
+.sd-item { font-size: 13px; padding: 8px 10px; border-radius: 10px; cursor: pointer; color: var(--color-ink-body); }
+.sd-item:hover { background: var(--glass-highlight); }
+.sd-item.muted { color: var(--color-ink-muted); cursor: default; }
 .pane-title { font-size: 14px; font-weight: 700; margin-bottom: 12px; color: var(--color-ink-muted); }
 .pane-tabs { display: flex; gap: 4px; margin-bottom: 14px; background: var(--glass-highlight); border: 1px solid var(--glass-border); border-radius: 10px; padding: 3px; }
 .pane-tab { flex: 1; border: none; background: none; color: var(--color-ink-muted); padding: 6px 0; border-radius: 7px; font-size: 13px; font-weight: 600; cursor: pointer; font-family: var(--font-ui); }

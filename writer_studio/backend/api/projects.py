@@ -120,3 +120,26 @@ def export_project(pid: str):
     if not p:
         raise HTTPException(404, "项目不存在")
     return p.model_dump()
+
+
+@router.get("/search")
+def global_search(q: str = ""):
+    """全局搜索：跨项目匹配名称/草稿/参考文本/收藏 + 用户综合收藏夹。"""
+    if not q or not q.strip():
+        return {"projects": [], "favorites": []}
+    kw = q.strip().lower()
+    results = []
+    for p in store.list_projects():
+        hit = kw in (p.name or "").lower() or kw in (p.draft or "").lower() or kw in (p.description or "").lower()
+        refs = [r for r in p.references if kw in (r.title or "").lower() or kw in (r.content or "").lower()]
+        favs = [t for t in list(p.favorite_terms) + list(p.favorite_phrases) if kw in (t or "").lower()]
+        if hit or refs or favs:
+            results.append({"id": p.id, "name": p.name, "matched_refs": len(refs), "matched_favs": len(favs)})
+    favorites = []
+    try:
+        from .profile import load_profile
+        prof = load_profile()
+        favorites = [t for t in list(prof.favorite_terms) + list(prof.favorite_phrases) if kw in (t or "").lower()]
+    except Exception:
+        pass
+    return {"projects": results, "favorites": favorites}
