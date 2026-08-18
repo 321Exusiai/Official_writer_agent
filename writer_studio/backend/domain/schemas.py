@@ -102,6 +102,7 @@ class ReferenceArticle(BaseModel):
     content: str = ""
     source: str = ""
     created_at: str = ""
+    analysis: str = ""  # AI 解读：词汇/句式/表达方式/写作风格
 
 
 class Project(BaseModel):
@@ -116,6 +117,24 @@ class Project(BaseModel):
     versions: List[DocVersion] = Field(default_factory=list)
     review_results: List[ReviewResult] = Field(default_factory=list)
     references: List[ReferenceArticle] = Field(default_factory=list)
+    style_requirements: str = ""      # 项目风格要求
+    work_requirements: str = ""       # 工作要求
+    questionnaire_summary: str = ""   # 问卷总结（AI 生成）
+    created_at: str = ""
+    updated_at: str = ""
+
+
+class UserProfile(BaseModel):
+    """用户专属数据库：画像 / 收藏 / 参考文本。"""
+
+    id: str = "user_self"
+    name: str = "我"
+    preferences: List[str] = Field(default_factory=list)      # 写作偏好（如"喜欢短句""避免官方腔"）
+    weaknesses: List[str] = Field(default_factory=list)       # 常见弱点
+    bias_warnings: List[str] = Field(default_factory=list)    # 潜在 bias 预警
+    favorite_terms: List[str] = Field(default_factory=list)   # 喜欢的词汇
+    favorite_phrases: List[str] = Field(default_factory=list) # 喜欢的句子
+    reference_articles: List[ReferenceArticle] = Field(default_factory=list)  # 用户级参考文本
     created_at: str = ""
     updated_at: str = ""
 
