@@ -132,10 +132,12 @@
       <aside class="pane">
         <div class="pane-tabs">
           <button class="pane-tab" :class="{ on: rightTab === 'process' }" @click="rightTab = 'process'">过程</button>
-          <button class="pane-tab" :class="{ on: rightTab === 'knowledge' }" @click="rightTab = 'knowledge'">资料</button>
+          <button class="pane-tab" :class="{ on: rightTab === 'mine' }" @click="rightTab = 'mine'">我的</button>
+          <button class="pane-tab" :class="{ on: rightTab === 'knowledge' }" @click="rightTab = 'knowledge'">知识库</button>
           <button class="pane-tab" :class="{ on: rightTab === 'config' }" @click="rightTab = 'config'">设置</button>
         </div>
         <ProcessPanel v-if="rightTab === 'process'" />
+        <MySpace v-else-if="rightTab === 'mine'" />
         <KnowledgePanel v-else-if="rightTab === 'knowledge'" />
         <ConfigPanel v-else />
       </aside>
@@ -153,6 +155,7 @@ import WorkflowPanel from './components/workflow/WorkflowPanel.vue'
 import ProcessPanel from './components/workflow/ProcessPanel.vue'
 import ConfigPanel from './components/config/ConfigPanel.vue'
 import KnowledgePanel from './components/knowledge/KnowledgePanel.vue'
+import MySpace from './components/profile/MySpace.vue'
 import Button from './components/ui/Button.vue'
 
 const theme = useThemeStore()

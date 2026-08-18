@@ -39,6 +39,10 @@ def patch_project(pid: str, body: ProjectCreate):
     p.name = body.name
     if body.description:
         p.description = body.description
+    # 有简报时自动生成问卷总结（供"我的空间"项目详情展示）
+    if p.brief and not p.questionnaire_summary:
+        from ..core.profile import summarize_questionnaire
+        p.questionnaire_summary = summarize_questionnaire(p.brief)
     store.update_project(pid, p)
     return p
 
