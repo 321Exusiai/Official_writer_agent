@@ -4,6 +4,7 @@
 - 风格-文种匹配约束：official 文种默认只配 official 风格，media 文种默认 media 风格；
 - 词汇池统一五类键，强度缩放统一逐类截取。
 """
+
 from ..domain.registry import Registry
 from ..domain.schemas import Brief
 
@@ -52,9 +53,12 @@ def suggest_blend(primary_audience: str, purpose: str, secondary_audiences) -> d
     secondaries = secondary_audiences or []
     if not secondaries:
         return {
-            "primary_style": primary_id, "primary_weight": 1.0,
-            "secondary_style": "", "secondary_weight": 0.0,
-            "apply_to": "", "reasoning": "单一受众，全篇使用主风格",
+            "primary_style": primary_id,
+            "primary_weight": 1.0,
+            "secondary_style": "",
+            "secondary_weight": 0.0,
+            "apply_to": "",
+            "reasoning": "单一受众，全篇使用主风格",
         }
 
     secondary_scores = {}
@@ -75,9 +79,12 @@ def suggest_blend(primary_audience: str, purpose: str, secondary_audiences) -> d
         secondary_weight = 1.0 - primary_weight
 
     return {
-        "primary_style": primary_id, "primary_weight": round(primary_weight, 3),
-        "secondary_style": best_secondary, "secondary_weight": round(secondary_weight, 3),
-        "apply_to": "", "reasoning": f"主受众 {primary_audience} 与次要受众 {', '.join(secondaries)} 风格需求不同",
+        "primary_style": primary_id,
+        "primary_weight": round(primary_weight, 3),
+        "secondary_style": best_secondary,
+        "secondary_weight": round(secondary_weight, 3),
+        "apply_to": "",
+        "reasoning": f"主受众 {primary_audience} 与次要受众 {', '.join(secondaries)} 风格需求不同",
     }
 
 

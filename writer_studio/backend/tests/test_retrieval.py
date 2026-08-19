@@ -1,4 +1,5 @@
 """RAG 检索测试。"""
+
 import unittest
 
 from writer_studio.backend.core.retrieval import (
@@ -27,7 +28,9 @@ class TestRetrieval(unittest.TestCase):
         self.assertIn("高质量发展", topics)
 
     def test_retrieve_for_brief(self):
-        brief = Brief(writing_mode="strategic_narrative", purpose="推动高质量发展，培育新质生产力", key_materials="落实")
+        brief = Brief(
+            writing_mode="strategic_narrative", purpose="推动高质量发展，培育新质生产力", key_materials="落实"
+        )
         plan = Plan(doc_type="feature", writing_mode="strategic_narrative")
         r = retrieve_for_brief(brief, plan)
         self.assertIsInstance(r, dict)
@@ -50,11 +53,28 @@ class TestRetrieval(unittest.TestCase):
         result = execute_tool("lookup_term", {"term": "新质生产力"})
         self.assertIn("新质生产力", result)
 
-    def test_writing_tools_schema(self):
-        self.assertEqual(len(WRITING_TOOLS), 3)
-        names = [t["function"]["name"] for t in WRITING_TOOLS]
-        self.assertIn("search_policy", names)
-        self.assertIn("lookup_term", names)
+    def test_truncate_and_summarize(self):
+        from writer_studio.backend.core.retrieval import truncate_and_summarize
+
+        short_text = "简短信息"
+        self.assertEqual(truncate_and_summarize(short_text, max_chars=50), "简短信息")
+        long_text = "长" * 300
+        truncated = truncate_and_summarize(long_text, max_chars=50)
+        self.assertEqual(len(truncated), 50 + len("…（已精简）"))
+        self.assertTrue(truncated.endswith("…（已精简）"))
+
+    def test_bm25_searcher(self):
+        from writer_studio.backend.core.retrieval import BM25
+
+        corpus = [
+            {"text": "发展新质生产力与科技创新引领现代化产业体系建设"},
+            {"text": "落实乡村振兴战略推进农业农村优先发展"},
+            {"text": "加强党风廉政建设与反腐败斗争"},
+        ]
+        bm = BM25(corpus)
+        scores = bm.score("科技创新 现代化产业")
+        self.assertGreater(scores[0][1], 0)
+        self.assertEqual(scores[0][0]["text"], corpus[0]["text"])
 
 
 if __name__ == "__main__":

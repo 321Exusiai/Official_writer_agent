@@ -1,7 +1,8 @@
 """统一注册表测试：加载、完整性校验、过滤。"""
+
 import unittest
 
-from writer_studio.backend.domain.registry import Registry, RegistryError
+from writer_studio.backend.domain.registry import Registry
 
 
 class TestRegistry(unittest.TestCase):
@@ -14,6 +15,7 @@ class TestRegistry(unittest.TestCase):
         self.assertEqual(len(official), 1)
         # 每个模式（除行政外）应 ≥3 种可选风格
         from collections import Counter
+
         cnt = Counter()
         for s in styles.values():
             for m in s.get("modes", []):
@@ -43,7 +45,7 @@ class TestRegistry(unittest.TestCase):
     def test_load_modes_5(self):
         modes = Registry.load("modes")
         self.assertEqual(len(modes), 5)
-        for mid, m in modes.items():
+        for _mid, m in modes.items():
             self.assertIn("review_dimensions", m)
             self.assertIn("questions", m)
 

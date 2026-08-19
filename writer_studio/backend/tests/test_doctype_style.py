@@ -1,4 +1,5 @@
 """文种识别与风格适配测试。"""
+
 import unittest
 
 from writer_studio.backend.core.doctype import identify_doc_type
@@ -13,7 +14,9 @@ from writer_studio.backend.domain.schemas import Brief
 
 class TestDocType(unittest.TestCase):
     def test_admin_mode_returns_official_doctypes(self):
-        brief = Brief(writing_mode="administrative", purpose="请示关于举办学术论坛的事项", primary_audience="上级领导机关")
+        brief = Brief(
+            writing_mode="administrative", purpose="请示关于举办学术论坛的事项", primary_audience="上级领导机关"
+        )
         ranked = identify_doc_type(brief)
         self.assertGreater(len(ranked), 0)
         self.assertEqual(ranked[0][0], "request")  # 请示关键词 + 上级受众

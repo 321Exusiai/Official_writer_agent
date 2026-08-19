@@ -2,6 +2,7 @@
 
 支持 Tavily（默认）与博查 Boya；未配置 key 时 search_web 返回 []。
 """
+
 import httpx
 
 

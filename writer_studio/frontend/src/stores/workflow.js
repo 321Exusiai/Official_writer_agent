@@ -83,6 +83,90 @@ export const useWorkflowStore = defineStore('workflow', {
       s.state = 'reviewed'
       s.busy = false
     },
+    async fixFinding(pid, index) {
+      const s = this.ensure(pid)
+      s.busy = true
+      s.error = null
+      try {
+        s.review = await api.post(`/projects/${pid}/workflow/review/fix`, { index })
+        s.state = 'reviewed'
+        return s.review
+      } catch (e) {
+        s.error = (e && e.message) || '自动修复失败'
+        throw e
+      } finally {
+        s.busy = false
+      }
+    },
+    async autoHeal(pid) {
+      const s = this.ensure(pid)
+      s.busy = true
+      s.error = null
+      try {
+        const res = await api.post(`/projects/${pid}/workflow/auto_heal`)
+        await this.review(pid)
+        return res
+      } catch (e) {
+        s.error = (e && e.message) || '自愈执行失败'
+        throw e
+      } finally {
+        s.busy = false
+      }
+    },
+    async chunkedDraft(pid) {
+      const s = this.ensure(pid)
+      s.busy = true
+      s.error = null
+      try {
+        const res = await api.post(`/projects/${pid}/workflow/chunked_draft`)
+        s.draft = res.draft
+        s.state = 'reviewing'
+        return res
+      } catch (e) {
+        s.error = (e && e.message) || '分段起草失败'
+        throw e
+      } finally {
+        s.busy = false
+      }
+    },
+    async redTeamReview(pid) {
+      const s = this.ensure(pid)
+      s.busy = true
+      s.error = null
+      try {
+        const res = await api.post(`/projects/${pid}/workflow/red_team`)
+        return res
+      } catch (e) {
+        s.error = (e && e.message) || '红蓝军压力测试失败'
+        throw e
+      } finally {
+        s.busy = false
+      }
+    },
+    async inlineTransform(pid, selection, action, context = '') {
+      return await api.post(`/projects/${pid}/workflow/inline_transform`, {
+        selection,
+        action,
+        context,
+      })
+    },
+    async setWeights(pid, weights) {
+      return await api.post(`/projects/${pid}/workflow/weights`, { weights })
+    },
+    async getRevisions(pid) {
+      return await api.get(`/projects/${pid}/revisions`)
+    },
+    async restoreRevision(pid, revId) {
+      const s = this.ensure(pid)
+      s.busy = true
+      try {
+        const p = await api.post(`/projects/${pid}/revisions/${revId}/restore`)
+        s.draft = p.draft
+        return p
+      } finally {
+        s.busy = false
+      }
+    },
     async finalize(pid) {
       const s = this.ensure(pid)
       s.busy = true

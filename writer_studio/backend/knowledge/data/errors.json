@@ -6,7 +6,11 @@
     "pattern": "大家纷纷表示|一致认为|深刻感受到|圆满成功|顺利结束|取得了丰硕成果",
     "severity": "major",
     "prescription": "用亲历者的真实感言替代空泛表态，删除套话",
-    "dimension": "语言"
+    "dimension": "语言",
+    "fix": {
+      "action": "delete",
+      "pattern": "大家纷纷表示|一致认为|深刻感受到|圆满成功|顺利结束|取得了丰硕成果"
+    }
   },
   "absolute_claims": {
     "id": "absolute_claims",
@@ -15,7 +19,11 @@
     "pattern": "全国首个|全国第一|全球唯一|史上最|独一无二",
     "severity": "major",
     "prescription": "删除绝对化表述；如需强调领先地位，用具体数据说明",
-    "dimension": "事实"
+    "dimension": "事实",
+    "fix": {
+      "action": "delete",
+      "pattern": "全国首个|全国第一|全球唯一|史上最|独一无二"
+    }
   },
   "ai_flavor": {
     "id": "ai_flavor",
@@ -24,7 +32,11 @@
     "pattern": "总而言之|值得一提的是|毫无疑问|不可否认的是|综上所述|众所周知",
     "severity": "minor",
     "prescription": "删除AI套话，直接陈述观点",
-    "dimension": "语言"
+    "dimension": "语言",
+    "fix": {
+      "action": "delete",
+      "pattern": "总而言之|值得一提的是|毫无疑问|不可否认的是|综上所述|众所周知"
+    }
   },
   "date_with_zero": {
     "id": "date_with_zero",
@@ -33,7 +45,12 @@
     "pattern": "\\d{4}年0\\d月",
     "severity": "major",
     "prescription": "成文日期不编虚位：2025年7月27日，而非2025年07月",
-    "dimension": "格式"
+    "dimension": "格式",
+    "fix": {
+      "action": "replace",
+      "pattern": "(\\d{4}年)0(\\d月)",
+      "replacement": "\\1\\2"
+    }
   },
   "evaluative_language": {
     "id": "evaluative_language",
@@ -42,7 +59,11 @@
     "pattern": "高度重视|隆重举行|热烈庆祝|圆满落幕",
     "severity": "major",
     "prescription": "行政公文禁用评价性词汇，直接陈述事实",
-    "dimension": "格式"
+    "dimension": "格式",
+    "fix": {
+      "action": "delete",
+      "pattern": "高度重视|隆重举行|热烈庆祝|圆满落幕"
+    }
   },
   "literary_metaphor": {
     "id": "literary_metaphor",
@@ -51,7 +72,11 @@
     "pattern": "犹如|仿佛|宛如|好似一幅|仿佛一首",
     "severity": "major",
     "prescription": "行政公文禁用比喻拟人等修辞，用直笔陈述",
-    "dimension": "表达"
+    "dimension": "表达",
+    "fix": {
+      "action": "delete",
+      "pattern": "犹如|仿佛|宛如|好似一幅|仿佛一首"
+    }
   },
   "passive_narrative": {
     "id": "passive_narrative",
@@ -69,7 +94,11 @@
     "pattern": "领导高度重视|圆满成功|取得丰硕成果|充满激情与活力|家人们|宝宝们",
     "severity": "major",
     "prescription": "去爹味去官腔去AI味，用青年听得懂的话说",
-    "dimension": "语言"
+    "dimension": "语言",
+    "fix": {
+      "action": "delete",
+      "pattern": "领导高度重视|圆满成功|取得丰硕成果|充满激情与活力|家人们|宝宝们"
+    }
   },
   "subjective_judgment": {
     "id": "subjective_judgment",
@@ -78,7 +107,11 @@
     "pattern": "我认为|笔者认为|可见其|显然可见",
     "severity": "minor",
     "prescription": "客观报告剥离主观评价，让事实自己说话",
-    "dimension": "客观性"
+    "dimension": "客观性",
+    "fix": {
+      "action": "delete",
+      "pattern": "我认为|笔者认为|可见其|显然可见"
+    }
   },
   "inverted_pyramid_break": {
     "id": "inverted_pyramid_break",
@@ -88,5 +121,70 @@
     "severity": "minor",
     "prescription": "导语即高潮，最重要信息放第一段第一句",
     "dimension": "结构"
+  },
+  "make_abstract_vs_concrete": {
+    "id": "make_abstract_vs_concrete",
+    "name": "作出与做出混淆",
+    "mode": "all",
+    "pattern": "做出(决定|贡献|部署|承诺|努力|批示|安排|规定)",
+    "severity": "minor",
+    "prescription": "公文抽象行为与决定一律规范使用'作出'（如'作出决定'、'作出贡献'）",
+    "dimension": "语言",
+    "fix": {
+      "action": "replace",
+      "pattern": "做出(决定|贡献|部署|承诺|努力|批示|安排|规定)",
+      "replacement": "作出\\1"
+    }
+  },
+  "redundant_cutoff": {
+    "id": "redundant_cutoff",
+    "name": "截至目前为止冗余",
+    "mode": "all",
+    "pattern": "截至目前为止",
+    "severity": "minor",
+    "prescription": "公文应精简严谨，'截至目前为止'中'为止'多余，应规范为'截至目前'",
+    "dimension": "语言",
+    "fix": {
+      "action": "replace",
+      "pattern": "截至目前为止",
+      "replacement": "截至目前"
+    }
+  },
+  "urgent_wait": {
+    "id": "urgent_wait",
+    "name": "亟待与急待错用",
+    "mode": "all",
+    "pattern": "急待(解决|落实|处理|推进|整改)",
+    "severity": "minor",
+    "prescription": "公文规范书面语应使用'亟待'而非口语化的'急待'",
+    "dimension": "语言",
+    "fix": {
+      "action": "replace",
+      "pattern": "急待(解决|落实|处理|推进|整改)",
+      "replacement": "亟待\\1"
+    }
+  },
+  "cross_difficulty": {
+    "id": "cross_difficulty",
+    "name": "渡过与度过错用",
+    "mode": "all",
+    "pattern": "度过(难关|危机|险滩|困境)",
+    "severity": "minor",
+    "prescription": "涉水越过障碍与险阻时规范使用'渡过'（渡过难关/危机），时间岁月用'度过'",
+    "dimension": "语言",
+    "fix": {
+      "action": "replace",
+      "pattern": "度过(难关|危机|险滩|困境)",
+      "replacement": "渡过\\1"
+    }
+  },
+  "combined_doctype_invalid": {
+    "id": "combined_doctype_invalid",
+    "name": "自造拼凑文种",
+    "mode": "administrative",
+    "pattern": "请示报告|报告请示|通知决定|批复函",
+    "severity": "critical",
+    "prescription": "根据《党政机关公文处理工作条例》，公文文种必须单一合法，严禁拼凑使用（如请示报告应拆分为请示或报告）",
+    "dimension": "格式"
   }
 }

@@ -1,4 +1,5 @@
 """知识库路由：范文 / 术语 / 过渡句 / 格式化用语 查询。"""
+
 from fastapi import APIRouter
 
 from ..domain.registry import Registry
@@ -56,3 +57,55 @@ def list_styles(domain: str = "", mode: str = ""):
     elif domain:
         items = [s for s in items if s["domain"] == domain]
     return [{"id": s["id"], "name": s["name"], "domain": s["domain"]} for s in items]
+
+
+# ── 单位专有知识库与自定义模板 ──
+from pydantic import BaseModel, Field
+from ..storage.custom_kb import CustomKnowledgeStore, TemplateStore
+from ..domain.schemas import TemplateConfig
+
+
+class CustomItemCreate(BaseModel):
+    title: str
+    content: str
+    category: str = "policy"
+    tags: list[str] = Field(default_factory=list)
+    source: str = ""
+
+
+@router.get("/knowledge/custom")
+def list_custom_knowledge():
+    """获取单位专有知识条目列表。"""
+    return CustomKnowledgeStore.load_all()
+
+
+@router.post("/knowledge/custom", status_code=201)
+def add_custom_knowledge(body: CustomItemCreate):
+    """新增单位专有知识条目。"""
+    return CustomKnowledgeStore.add_item(
+        title=body.title,
+        content=body.content,
+        category=body.category,
+        tags=body.tags,
+        source=body.source,
+    )
+
+
+@router.delete("/knowledge/custom/{item_id}")
+def delete_custom_knowledge(item_id: str):
+    """删除单位专有知识条目。"""
+    success = CustomKnowledgeStore.delete_item(item_id)
+    return {"deleted": success, "id": item_id}
+
+
+@router.get("/knowledge/templates")
+def list_templates():
+    """获取可用公文排版模板列表。"""
+    return TemplateStore.load_all()
+
+
+@router.post("/knowledge/templates")
+def add_template(config: TemplateConfig):
+    """新增/更新公文排版模板。"""
+    return TemplateStore.add_template(config)
+

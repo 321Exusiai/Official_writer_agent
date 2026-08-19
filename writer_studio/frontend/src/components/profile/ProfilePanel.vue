@@ -5,8 +5,15 @@
       <Button variant="secondary" @click="runAnalysis">重新分析</Button>
     </div>
 
+    <div v-if="loading" class="skeleton-row">
+      <div class="skeleton sk-line w60"></div>
+      <div class="skeleton sk-line w80"></div>
+      <div class="skeleton sk-block"></div>
+      <div class="skeleton sk-line w40"></div>
+    </div>
+
     <!-- 总览 -->
-    <div v-if="analysis" class="pp-overview">
+    <div v-else-if="analysis" class="pp-overview">
       <span class="ov-item">📁 {{ projects.length }} 个项目</span>
       <span class="ov-item">⚠️ {{ analysis.weaknesses.length }} 项弱点</span>
       <span class="ov-item">🧭 {{ analysis.bias_warnings.length }} 条 bias 预警</span>
@@ -17,6 +24,11 @@
       <!-- 偏好 -->
       <div class="ios-card pp-card">
         <div class="pp-label">写作偏好</div>
+        <label class="mem-toggle" :class="{ on: profile.memory_enabled }">
+          <input type="checkbox" v-model="profile.memory_enabled" @change="toggleMemory" />
+          <span class="mem-switch"></span>
+          <span class="mem-text">助手长期记忆：自动从对话提炼偏好</span>
+        </label>
         <div class="chip-row">
           <span v-for="(pref, i) in profile.preferences" :key="i" class="chip">{{ pref }}</span>
           <button v-if="!addingPref" class="mini-add" @click="addingPref = true">＋</button>
@@ -83,6 +95,7 @@ const projectStore = useProjectStore()
 const profile = ref({ preferences: [], favorite_terms: [], favorite_phrases: [] })
 const projects = ref([])
 const analysis = ref(null)
+const loading = ref(true)
 const addingPref = ref(false)
 const newPref = ref('')
 const newFav = ref('')
@@ -91,10 +104,15 @@ const favKind = ref('term')
 function statusText(s) { return { draft: '草稿', in_progress: '进行中', completed: '已完成', archived: '已归档' }[s] || s }
 
 async function load() {
-  const d = await api.get('/profile/overview')
-  profile.value = d.profile
-  projects.value = d.projects
-  analysis.value = d.analysis
+  loading.value = true
+  try {
+    const d = await api.get('/profile/overview')
+    profile.value = d.profile
+    projects.value = d.projects
+    analysis.value = d.analysis
+  } finally {
+    loading.value = false
+  }
 }
 
 async function addPref() {
@@ -103,6 +121,10 @@ async function addPref() {
   newPref.value = ''
   addingPref.value = false
   await api.post('/profile/preferences', { preferences: profile.value.preferences })
+}
+
+async function toggleMemory() {
+  await api.post('/profile/memory', { enabled: !!profile.value.memory_enabled })
 }
 
 async function addFav() {
@@ -159,4 +181,18 @@ onMounted(load)
 .proj-name { font-weight: 600; font-size: 13px; }
 .proj-desc { color: var(--color-ink-muted); font-size: 11px; }
 .proj-arrow { color: var(--color-ink-muted); }
+.mem-toggle { display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 12px; color: var(--color-ink-muted); }
+.mem-toggle input { display: none; }
+.mem-switch {
+  width: 38px; height: 22px; border-radius: 999px; background: var(--glass-highlight);
+  border: 1px solid var(--glass-border); position: relative; transition: all 0.25s var(--ease-out-expo); flex-shrink: 0;
+}
+.mem-switch::after {
+  content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px;
+  border-radius: 50%; background: var(--color-ink-muted); transition: all 0.25s var(--ease-out-expo);
+}
+.mem-toggle.on .mem-switch { background: var(--color-accent); border-color: var(--color-accent); }
+.mem-toggle.on .mem-switch::after { left: 18px; background: #1D1D1F; }
+:root[data-theme="apple"] .mem-toggle.on .mem-switch::after { background: #fff; }
+.mem-toggle.on .mem-text { color: var(--color-ink-body); }
 </style>

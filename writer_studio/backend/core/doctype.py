@@ -4,6 +4,7 @@
 - media（媒体类）重"叙事/新闻价值"关键词；
 - official（行政类）重"格式/行文方向"关键词。
 """
+
 from ..domain.registry import Registry
 from ..domain.schemas import Brief
 

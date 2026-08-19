@@ -1,4 +1,5 @@
 """用户专属数据库测试：参考文本解读 + 画像分析 + API。"""
+
 import os
 import tempfile
 import unittest
@@ -7,7 +8,13 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from writer_studio.backend.api import profile as prof
-from writer_studio.backend.core.profile import analyze_profile, analyze_reference, summarize_questionnaire
+from writer_studio.backend.core.profile import (
+    analyze_profile,
+    analyze_reference,
+    enhance_profile_summary,
+    extract_preferences_from_dialog,
+    summarize_questionnaire,
+)
 from writer_studio.backend.domain.schemas import Brief, Project, ReviewFinding, ReviewResult, ReviewSeverity
 from writer_studio.backend.main import app
 
@@ -33,6 +40,29 @@ class TestProfileCore(unittest.TestCase):
         p = Project(id="p1", name="x", brief=Brief(writing_mode="strategic_narrative"), review_results=[r])
         a = analyze_profile([p])
         self.assertTrue(any("空泛套话" in w for w in a["weaknesses"]))
+
+    def test_extract_preferences_strong(self):
+        prefs = extract_preferences_from_dialog("我喜欢用短句，语气活泼一点。")
+        self.assertTrue(any("短句" in p for p in prefs))
+
+    def test_extract_preferences_weak_requires_topic(self):
+        # "多用" 是弱信号，需同时出现主题词
+        prefs = extract_preferences_from_dialog("请多用数据支撑，少用官腔。")
+        self.assertTrue(any("官腔" in p for p in prefs))
+
+    def test_extract_preferences_ignores_command(self):
+        prefs = extract_preferences_from_dialog("帮我写一篇通知")
+        self.assertEqual(prefs, [])
+
+    def test_extract_preferences_dedup(self):
+        prefs = extract_preferences_from_dialog("我喜欢短句。我喜欢短句。")
+        self.assertLessEqual(len(prefs), 1)
+
+    def test_enhance_summary_without_llm_keeps_rule(self):
+        a = {"weaknesses": ["空泛套话"], "bias_warnings": [], "summary": "规则版"}
+        out = enhance_profile_summary(a, None)
+        self.assertEqual(out["summary"], "规则版")
+        self.assertNotIn("enhanced", out)
 
 
 class TestProfileAPI(unittest.TestCase):
@@ -68,6 +98,15 @@ class TestProfileAPI(unittest.TestCase):
         d = r.json()
         self.assertIn("profile", d)
         self.assertIn("analysis", d)
+
+    def test_memory_toggle(self):
+        r = client.post("/api/profile/memory", json={"enabled": False})
+        self.assertEqual(r.json()["memory_enabled"], False)
+        p = client.get("/api/profile").json()
+        self.assertEqual(p["memory_enabled"], False)
+        client.post("/api/profile/memory", json={"enabled": True})
+        p = client.get("/api/profile").json()
+        self.assertEqual(p["memory_enabled"], True)
 
 
 if __name__ == "__main__":

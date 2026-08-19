@@ -2,6 +2,7 @@
 
 规则版先落地（离线可用、无 key 也能跑）；LLM 版后续增强。
 """
+
 import re
 from collections import Counter
 
@@ -119,3 +120,100 @@ def analyze_profile(projects: list) -> dict:
         bias_warnings.append("暂无明显写作 bias，类型覆盖良好")
     summary = f"累计完成 {len(projects)} 个项目，类型覆盖 {'、'.join(modes.keys()) if modes else '无'}；常见弱点 {len(weaknesses)} 项。"
     return {"weaknesses": weaknesses, "bias_warnings": bias_warnings, "summary": summary}
+
+
+# ── 助手长期记忆：对话偏好提炼 ──
+# 强信号词：其后内容大概率是偏好陈述
+_STRONG_PREF = ("我喜欢", "我偏好", "我习惯", "我偏爱", "我更倾向", "更倾向", "偏好", "倾向于")
+# 弱信号词：需同时出现偏好主题词才纳入
+_WEAK_PREF = ("多用", "多写", "少用", "避免", "不要", "禁用", "尽量", "希望", "想要", "喜欢")
+_PREF_TOPIC = (
+    "短句",
+    "长句",
+    "正式",
+    "活泼",
+    "简洁",
+    "严谨",
+    "口语",
+    "书面",
+    "风格",
+    "文风",
+    "语气",
+    "官腔",
+    "套话",
+    "数据",
+    "细节",
+    "引语",
+    "排比",
+    "对仗",
+    "朴实",
+    "克制",
+)
+
+
+def _split_sentences(text: str) -> list:
+    return [s.strip() for s in re.split(r"[。！？!?；;\n]", text) if s.strip()]
+
+
+def extract_preferences_from_dialog(text: str) -> list:
+    """从对话消息中提炼写作偏好（规则版，供长期记忆）。
+
+    返回去重后的偏好列表（每条 3–30 字，可读的陈述句）。
+    """
+    prefs = []
+    for sent in _split_sentences(text):
+        s = sent.strip()
+        if not (3 <= len(s) <= 30):
+            continue
+        hit = None
+        for w in _STRONG_PREF:
+            if w in s:
+                hit = w
+                break
+        weak = None
+        for w in _WEAK_PREF:
+            if w in s:
+                weak = w
+                break
+        if hit:
+            # 强信号：截取信号词之后的内容；若信号词在句尾则整句
+            idx = s.find(hit)
+            cand = s[idx + len(hit) :].strip("，,、。：: ")
+            if cand:
+                prefs.append(cand if len(cand) >= 3 else s)
+        elif weak and any(t in s for t in _PREF_TOPIC):
+            cand = s
+            for pre in ("请", "麻烦", "帮我"):
+                if cand.startswith(pre):
+                    cand = cand[len(pre) :].lstrip("，,、。：: ")
+                    break
+            prefs.append(cand)
+    # 去重 + 过滤真命令式（"请多用 X"属礼貌式偏好，保留）
+    seen = set()
+    out = []
+    for p in prefs:
+        if p in seen or p.startswith(("帮我", "能不能", "可以", "麻烦")):
+            continue
+        seen.add(p)
+        out.append(p)
+    return out[:5]
+
+
+def enhance_profile_summary(analysis: dict, llm=None) -> dict:
+    """GLM 增强画像解读：把规则生成的 summary 改写为更人性化的教练口吻（失败则保留规则版）。"""
+    if not llm or not llm.available:
+        return analysis
+    try:
+        data = llm.chat_json(
+            "你是资深写作教练。根据画像要点，写一段 60–120 字的中文点评：真诚、具体、可执行，"
+            '像一位了解对方的老师，不空洞说教，不堆砌套话。只输出 JSON：{"comment": "..."}',
+            f"画像要点：\n{analysis['summary']}\n弱点：{'、'.join(analysis['weaknesses']) or '暂无'}\n"
+            f"bias：{'、'.join(analysis['bias_warnings']) or '暂无'}",
+            temperature=0.6,
+        )
+        if data and data.get("comment"):
+            analysis["summary"] = data["comment"]
+            analysis["enhanced"] = True
+    except Exception:
+        pass
+    return analysis

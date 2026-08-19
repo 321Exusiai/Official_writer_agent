@@ -1,4 +1,5 @@
 """辅助智能体路由：对话 + 工具清单（GLM-4-Flash 驱动，无 Key 时规则降级）。"""
+
 from fastapi import APIRouter
 from pydantic import BaseModel
 
@@ -28,3 +29,10 @@ def chat(body: ChatBody):
 @router.get("/assistant/tools")
 def tools():
     return {"tools": get_tools_info(), "available": bool(get_assistant_client().available)}
+
+
+@router.get("/assistant/actions")
+def get_actions(project_id: str = ""):
+    agent = _get_agent()
+    return {"actions": agent.get_contextual_actions(project_id)}
+

@@ -3,6 +3,7 @@
 存储结构 data/llm_config.json：
     {"configs": [LLMConfig...], "active_index": N, "assistant": AssistantConfig}
 """
+
 import json
 import os
 from pathlib import Path
@@ -12,6 +13,7 @@ from pydantic import BaseModel
 
 from ..core.llm import LLMClient
 from ..domain.schemas import AssistantConfig, LLMConfig
+from ..storage import crypto
 
 router = APIRouter(tags=["config"])
 _CONFIG_PATH = Path(__file__).resolve().parent.parent / "data" / "llm_config.json"
@@ -27,24 +29,71 @@ PROVIDER_TEMPLATES = {
 
 
 def load_config_set():
-    """返回 (configs: list[dict], active_index: int)。"""
+    """返回 (configs: list[dict], active_index: int)。
+
+    读取时先做 schema 迁移，再解密 key（内存为明文，供 LLMClient 使用）。
+    """
     if _CONFIG_PATH.exists():
         try:
             data = json.loads(_CONFIG_PATH.read_text(encoding="utf-8"))
-            configs = data.get("configs", [])
-            idx = int(data.get("active_index", 0))
+            from ..storage.schema import CURRENT_CONFIG_VERSION, migrate_config
+
+            migrated = migrate_config(data)
+            configs = migrated.get("configs", [])
+            idx = int(migrated.get("active_index", 0))
             if configs:
-                return configs, min(max(idx, 0), len(configs) - 1)
+                # 旧版（含明文 key）→ 立即加密落盘，杜绝明文滞留
+                if int(data.get("schema_version", 0)) < CURRENT_CONFIG_VERSION:
+                    _migrate_persist(migrated)
+                return _decrypt_configs(configs), min(max(idx, 0), len(configs) - 1)
         except Exception:
             pass
-    return [LLMConfig(name="DeepSeek", provider="deepseek",
-                      api_base="https://api.deepseek.com/v1", model="deepseek-chat").model_dump()], 0
+    return [
+        LLMConfig(
+            name="DeepSeek", provider="deepseek", api_base="https://api.deepseek.com/v1", model="deepseek-chat"
+        ).model_dump()
+    ], 0
+
+
+def _migrate_persist(data: dict):
+    """把迁移后的配置（明文 key）加密落盘。"""
+    try:
+        configs = data.get("configs", [])
+        save_config_set(configs, int(data.get("active_index", 0)), data.get("assistant"))
+    except Exception:
+        pass
+
+
+def _decrypt_configs(configs: list) -> list:
+    """解密一批配置的 api_key / search_api_key（密文→明文）。"""
+    out = []
+    for c in configs:
+        d = dict(c)
+        for k in ("api_key", "search_api_key"):
+            if d.get(k):
+                d[k] = crypto.decrypt(d[k])
+        out.append(d)
+    return out
+
+
+def _encrypt_configs(configs: list) -> list:
+    """加密一批配置的 api_key / search_api_key（明文→密文，幂等）。"""
+    out = []
+    for c in configs:
+        d = dict(c)
+        for k in ("api_key", "search_api_key"):
+            if d.get(k):
+                d[k] = crypto.ensure_encrypted(d[k])
+        out.append(d)
+    return out
 
 
 def save_config_set(configs: list, active_index: int, assistant: dict = None):
-    payload = {"configs": configs, "active_index": active_index}
+    payload = {"schema_version": 2, "configs": _encrypt_configs(configs), "active_index": active_index}
     if assistant is not None:
-        payload["assistant"] = assistant
+        payload["assistant"] = dict(assistant)
+        if payload["assistant"].get("api_key"):
+            payload["assistant"]["api_key"] = crypto.ensure_encrypted(payload["assistant"]["api_key"])
     _CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
     tmp = _CONFIG_PATH.with_suffix(".json.tmp")
     tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -52,12 +101,18 @@ def save_config_set(configs: list, active_index: int, assistant: dict = None):
 
 
 def load_assistant_config() -> AssistantConfig:
-    """读取辅助轨道配置（免费 GLM-4-Flash）。"""
+    """读取辅助轨道配置（免费 GLM-4-Flash），key 解密为明文。"""
     if _CONFIG_PATH.exists():
         try:
             data = json.loads(_CONFIG_PATH.read_text(encoding="utf-8"))
+            from ..storage.schema import migrate_config
+
+            data = migrate_config(data)
             a = data.get("assistant")
             if a:
+                a = dict(a)
+                if a.get("api_key"):
+                    a["api_key"] = crypto.decrypt(a["api_key"])
                 return AssistantConfig(**a)
         except Exception:
             pass

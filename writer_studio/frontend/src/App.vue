@@ -118,20 +118,23 @@
         </div>
       </div>
       <div class="theme-switch">
+        <button class="zen-toggle-btn" :class="{ on: zenMode }" @click="zenMode = !zenMode" title="一键收起侧栏，进入沉浸式专注写作">
+          {{ zenMode ? '🧘 退出专注' : '🧘 专注写作' }}
+        </button>
         <button v-for="t in themes" :key="t.id" class="theme-btn" :class="{ on: theme.theme === t.id }" @click="theme.setTheme(t.id)">
           {{ t.label }}
         </button>
       </div>
     </header>
 
-    <!-- 三栏 -->
-    <div class="layout">
-      <aside class="pane">
+    <!-- 三栏 / 专注写作模式 -->
+    <div class="layout" :class="{ 'zen-layout': zenMode }">
+      <aside v-show="!zenMode" class="pane">
         <h2 class="pane-title">项目</h2>
         <ProjectBrowser />
       </aside>
 
-      <main class="pane workspace">
+      <main class="pane workspace" :class="{ 'zen-workspace': zenMode }">
         <div v-if="!projectStore.active">
           <ProfilePanel />
         </div>
@@ -150,7 +153,7 @@
         </template>
       </main>
 
-      <aside class="pane">
+      <aside v-show="!zenMode" class="pane">
         <div class="pane-tabs">
           <button class="pane-tab" :class="{ on: rightTab === 'assistant' }" @click="rightTab = 'assistant'">助手</button>
           <button class="pane-tab" :class="{ on: rightTab === 'process' }" @click="rightTab = 'process'">过程</button>
@@ -166,6 +169,7 @@
       </aside>
     </div>
     <FavoritesPanel ref="favPanel" />
+    <OnboardingOverlay />
   </div>
 </template>
 
@@ -183,6 +187,7 @@ import MySpace from './components/profile/MySpace.vue'
 import ProfilePanel from './components/profile/ProfilePanel.vue'
 import FavoritesPanel from './components/profile/FavoritesPanel.vue'
 import AssistantPanel from './components/assistant/AssistantPanel.vue'
+import OnboardingOverlay from './components/onboarding/OnboardingOverlay.vue'
 import Button from './components/ui/Button.vue'
 import { api } from './api/client'
 
@@ -192,6 +197,7 @@ const workView = ref('write')
 const searchQ = ref('')
 const searchOpen = ref(false)
 const searchResults = ref({ projects: [], favorites: [] })
+const zenMode = ref(false)
 
 async function doSearch() {
   const q = searchQ.value.trim()
@@ -279,6 +285,14 @@ onBeforeUnmount(() => {
   display: flex; gap: 4px; background: var(--glass-highlight);
   border: 1px solid var(--glass-border); border-radius: 12px; padding: 3px;
 }
+.zen-toggle-btn {
+  border: none; background: none; color: var(--color-ink-body);
+  padding: 6px 12px; border-radius: 9px; font-size: 12px; font-weight: 700;
+  cursor: pointer; font-family: var(--font-ui); transition: all 0.2s;
+  border-right: 1px solid var(--glass-border); margin-right: 2px;
+}
+.zen-toggle-btn:hover { color: var(--color-accent); }
+.zen-toggle-btn.on { background: var(--color-primary); color: #fff; }
 .theme-btn {
   border: none; background: none; color: var(--color-ink-muted);
   padding: 6px 12px; border-radius: 9px; font-size: 12px; font-weight: 600;
@@ -303,8 +317,33 @@ onBeforeUnmount(() => {
 .pane-tab { flex: 1; border: none; background: none; color: var(--color-ink-muted); padding: 6px 0; border-radius: 7px; font-size: 13px; font-weight: 600; cursor: pointer; font-family: var(--font-ui); }
 .pane-tab.on { background: var(--color-accent); color: #1D1D1F; }
 :root[data-theme="apple"] .pane-tab.on { color: #fff; }
-.workspace { display: flex; flex-direction: column; gap: 16px; }
+.workspace { display: flex; flex-direction: column; gap: 16px; transition: all 0.3s ease; }
 .ws-head { display: flex; justify-content: space-between; align-items: center; }
 .ws-actions { display: flex; gap: 8px; }
 .ws-title { font-size: 18px; font-weight: 700; }
+
+/* ── 专注写作模式 ── */
+.zen-layout {
+  display: flex; justify-content: center; width: 100%;
+}
+.zen-workspace {
+  width: 100%; max-width: 980px; margin: 0 auto;
+}
+
+/* ── 窄屏适配 ── */
+@media (max-width: 768px) {
+  .title-bar { flex-wrap: wrap; gap: 10px; padding: 12px 16px; }
+  .brand { order: 1; }
+  .theme-switch { order: 2; margin-left: auto; }
+  .theme-btn { padding: 6px 8px; font-size: 11px; }
+  .global-search { flex: 1 1 100%; order: 3; }
+  .search-drop { width: calc(100vw - 48px); left: 0; right: 0; }
+  .ws-head { flex-wrap: wrap; gap: 8px; }
+  .pane-tabs { overflow-x: auto; }
+  .pane-tab { flex: 0 0 auto; padding: 6px 14px; }
+}
+@media (max-width: 480px) {
+  .pane { padding: 12px; border-radius: 16px; }
+  .layout { padding: 10px; gap: 10px; }
+}
 </style>

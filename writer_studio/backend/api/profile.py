@@ -1,4 +1,5 @@
 """用户专属数据库路由：画像 / 收藏 / 参考文本解读 / 智能分析。"""
+
 import json
 import os
 import time
@@ -7,8 +8,8 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from ..core import importer, profile
-from ..domain.schemas import ReferenceArticle, UserProfile
+from ..core import profile
+from ..domain.schemas import UserProfile
 from .projects import store
 
 router = APIRouter(tags=["profile"])
@@ -18,22 +19,35 @@ _PROFILE_PATH = Path(__file__).resolve().parent.parent / "data" / "profile.json"
 def load_profile() -> UserProfile:
     if _PROFILE_PATH.exists():
         try:
-            return UserProfile(**json.loads(_PROFILE_PATH.read_text(encoding="utf-8")))
+            raw = json.loads(_PROFILE_PATH.read_text(encoding="utf-8"))
+            from ..storage.schema import migrate_profile
+
+            raw = migrate_profile(raw)
+            raw.pop("schema_version", None)
+            return UserProfile(**raw)
         except Exception:
             pass
     return UserProfile(created_at=time.strftime("%Y-%m-%d %H:%M:%S"))
 
 
 def save_profile(p: UserProfile):
+    from ..storage.schema import CURRENT_PROFILE_VERSION
+
     _PROFILE_PATH.parent.mkdir(parents=True, exist_ok=True)
     p.updated_at = time.strftime("%Y-%m-%d %H:%M:%S")
+    payload = p.model_dump()
+    payload["schema_version"] = CURRENT_PROFILE_VERSION
     tmp = _PROFILE_PATH.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(p.model_dump(), ensure_ascii=False, indent=2), encoding="utf-8")
+    tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     os.replace(tmp, _PROFILE_PATH)
 
 
 class PrefBody(BaseModel):
     preferences: list = []
+
+
+class MemoryBody(BaseModel):
+    enabled: bool = True
 
 
 class FavoriteBody(BaseModel):
@@ -59,19 +73,35 @@ def get_profile():
     return p
 
 
+def _analysis(projects: list) -> dict:
+    """规则分析 + 可选的 GLM 人性化增强（辅助轨道可用时）。"""
+    analysis = profile.analyze_profile(projects)
+    try:
+        from .config import get_assistant_client
+
+        profile.enhance_profile_summary(analysis, get_assistant_client())
+    except Exception:
+        pass
+    return analysis
+
+
 @router.get("/profile/overview")
 def get_overview():
     """用户画像 + 基于项目的智能分析。"""
     p = load_profile()
     projects = store.list_projects()
-    analysis = profile.analyze_profile(projects)
+    analysis = _analysis(projects)
     return {
         "profile": p,
         "analysis": analysis,
         "projects": [
-            {"id": pr.id, "name": pr.name, "status": pr.status.value,
-             "style_requirements": pr.style_requirements,
-             "questionnaire_summary": pr.questionnaire_summary}
+            {
+                "id": pr.id,
+                "name": pr.name,
+                "status": pr.status.value,
+                "style_requirements": pr.style_requirements,
+                "questionnaire_summary": pr.questionnaire_summary,
+            }
             for pr in projects
         ],
     }
@@ -83,6 +113,15 @@ def update_preferences(body: PrefBody):
     p.preferences = body.preferences
     save_profile(p)
     return p
+
+
+@router.post("/profile/memory")
+def toggle_memory(body: MemoryBody):
+    """助手长期记忆开关：开启后自动从对话提炼写作偏好写入画像。"""
+    p = load_profile()
+    p.memory_enabled = body.enabled
+    save_profile(p)
+    return {"memory_enabled": p.memory_enabled}
 
 
 @router.post("/profile/favorites")
@@ -120,4 +159,4 @@ def get_favorites(project_id: str = ""):
 @router.post("/profile/analyze")
 def run_analysis():
     projects = store.list_projects()
-    return profile.analyze_profile(projects)
+    return _analysis(projects)

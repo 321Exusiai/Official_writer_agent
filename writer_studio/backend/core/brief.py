@@ -3,6 +3,7 @@
 决策树两级：root（4 选 1）→ 分支（叶子带 mode/subtype）。
 问卷题目来自统一注册表 modes（含 why_ask/hint 教学说明）。
 """
+
 from ..domain.registry import Registry
 
 ROUTING_TREE = {
@@ -57,14 +58,29 @@ ROUTING_TREE = {
 
 # 问题 id → Brief 字段映射（模式问卷答案写回简报）
 FIELD_MAP = {
-    "sn_vision": "strategic_anchor", "sn_logic": "deep_meaning", "sn_people": "key_materials",
-    "sn_value": "differentiator", "sn_direction": "purpose",
-    "or_problem": "purpose", "or_cause": "key_materials", "or_solution": "differentiator", "or_method": "deep_meaning",
-    "ad_basis": "strategic_anchor", "ad_core": "purpose", "ad_route": "primary_audience", "ad_doc_type": "deep_meaning",
-    "info_5w1h": "purpose", "info_lead": "deep_meaning", "info_quotes": "key_materials",
-    "info_value": "differentiator", "info_plan": "strategic_anchor",
-    "ye_vibe": "deep_meaning", "ye_identity": "differentiator", "ye_interaction": "key_materials",
-    "ye_cta": "purpose", "ye_value": "strategic_anchor",
+    "sn_vision": "strategic_anchor",
+    "sn_logic": "deep_meaning",
+    "sn_people": "key_materials",
+    "sn_value": "differentiator",
+    "sn_direction": "purpose",
+    "or_problem": "purpose",
+    "or_cause": "key_materials",
+    "or_solution": "differentiator",
+    "or_method": "deep_meaning",
+    "ad_basis": "strategic_anchor",
+    "ad_core": "purpose",
+    "ad_route": "primary_audience",
+    "ad_doc_type": "deep_meaning",
+    "info_5w1h": "purpose",
+    "info_lead": "deep_meaning",
+    "info_quotes": "key_materials",
+    "info_value": "differentiator",
+    "info_plan": "strategic_anchor",
+    "ye_vibe": "deep_meaning",
+    "ye_identity": "differentiator",
+    "ye_interaction": "key_materials",
+    "ye_cta": "purpose",
+    "ye_value": "strategic_anchor",
 }
 
 
@@ -73,7 +89,10 @@ def routing_question(node: str = "root"):
     return {
         "node": node,
         "question": n["question"],
-        "options": [{"index": i, "label": o["label"], "description": o.get("description", "")} for i, o in enumerate(n["options"])],
+        "options": [
+            {"index": i, "label": o["label"], "description": o.get("description", "")}
+            for i, o in enumerate(n["options"])
+        ],
     }
 
 

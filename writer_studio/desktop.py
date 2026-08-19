@@ -7,6 +7,7 @@
     pip install pywebview
     python desktop.py
 """
+
 import threading
 
 import uvicorn
@@ -19,10 +20,12 @@ def _run_server():
 def main():
     threading.Thread(target=_run_server, daemon=True).start()
     import webview
+
     webview.create_window(
         "公文写作工作室",
         "http://127.0.0.1:8000",
-        width=1440, height=900,
+        width=1440,
+        height=900,
         min_size=(1100, 700),
     )
     webview.start()

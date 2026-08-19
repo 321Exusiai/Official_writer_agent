@@ -80,6 +80,18 @@
       </div>
       <p v-if="assistantMsg" class="msg" :class="{ ok: assistantOk }">{{ assistantMsg }}</p>
     </div>
+
+    <!-- 备份与恢复 -->
+    <div class="ios-card edit-box backup-box">
+      <h4 class="edit-title">💾 备份与恢复</h4>
+      <p class="hint-text">一键导出全部数据（项目、画像、参考文本、配置与密钥），换机或误操作后可完整恢复。</p>
+      <div class="actions">
+        <Button variant="secondary" @click="exportBackup">导出备份</Button>
+        <Button variant="secondary" @click="pickBackup">导入备份</Button>
+        <input ref="fileInput" type="file" accept=".json" style="display:none" @change="importBackup" />
+      </div>
+      <p v-if="backupMsg" class="msg" :class="{ ok: backupOk }">{{ backupMsg }}</p>
+    </div>
   </div>
 </template>
 
@@ -99,6 +111,9 @@ const msgOk = ref(false)
 const assistant = ref({ enabled: false, provider: 'zhipu', api_base: 'https://open.bigmodel.cn/api/paas/v4', api_key: '', model: 'glm-4-flash', temperature: 0.3, max_tokens: 2000 })
 const assistantMsg = ref('')
 const assistantOk = ref(false)
+const fileInput = ref(null)
+const backupMsg = ref('')
+const backupOk = ref(false)
 
 function emptyForm() {
   return { name: '', provider: 'openai', api_base: '', api_key: '', model: '', temperature: 0.7, max_tokens: 8000, enabled: false, search_provider: 'tavily', search_api_key: '' }
@@ -186,6 +201,44 @@ async function test() {
   }
 }
 
+async function exportBackup() {
+  try {
+    const data = await api.get('/backup/export')
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
+    const a = document.createElement('a')
+    a.href = URL.createObjectURL(blob)
+    a.download = `writer_studio_backup_${(data.exported_at || '').replace(/[-: ]/g, '')}.json`
+    a.click()
+    URL.revokeObjectURL(a.href)
+    backupMsg.value = '备份已导出（含项目、画像、配置与密钥）'
+    backupOk.value = true
+  } catch (e) {
+    backupMsg.value = '导出失败：' + e.message
+    backupOk.value = false
+  }
+}
+
+function pickBackup() {
+  if (fileInput.value) fileInput.value.click()
+}
+
+async function importBackup(e) {
+  const file = e.target.files && e.target.files[0]
+  e.target.value = ''
+  if (!file) return
+  if (!window.confirm('导入备份将覆盖当前全部数据（项目、画像、配置）。确定继续？')) return
+  try {
+    const text = await file.text()
+    const data = JSON.parse(text)
+    const r = await api.post('/backup/import', { backup: data })
+    backupMsg.value = `已恢复 ${r.files.length} 个数据文件`
+    backupOk.value = true
+  } catch (err) {
+    backupMsg.value = '导入失败：' + err.message
+    backupOk.value = false
+  }
+}
+
 onMounted(load)
 </script>
 
@@ -218,6 +271,7 @@ onMounted(load)
 .mini-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 .edit-box { display: flex; flex-direction: column; gap: 8px; }
 .assistant-box { margin-top: 4px; border-color: var(--color-accent-focus); }
+.backup-box { margin-top: 4px; }
 .edit-title { font-size: 14px; font-weight: 700; }
 .config-row { display: flex; align-items: center; gap: 10px; }
 .config-label { font-size: 13px; color: var(--color-ink-muted); width: 80px; flex-shrink: 0; }

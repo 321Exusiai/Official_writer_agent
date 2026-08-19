@@ -1,4 +1,5 @@
 """多 API 配置管理测试。"""
+
 import os
 import tempfile
 import unittest
@@ -6,7 +7,6 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from writer_studio.backend import api
 from writer_studio.backend.api import config as cfg
 from writer_studio.backend.main import app
 
@@ -36,10 +36,17 @@ class TestConfig(unittest.TestCase):
         self.assertIn("templates", d)
 
     def test_save_new_and_switch(self):
-        r = client.post("/api/config/save", json={
-            "name": "测试", "provider": "deepseek", "api_base": "http://x/v1",
-            "api_key": "k", "model": "m", "enabled": True,
-        })
+        r = client.post(
+            "/api/config/save",
+            json={
+                "name": "测试",
+                "provider": "deepseek",
+                "api_base": "http://x/v1",
+                "api_key": "k",
+                "model": "m",
+                "enabled": True,
+            },
+        )
         self.assertEqual(r.json()["saved"], True)
         d = client.get("/api/config").json()
         idx = len(d["configs"]) - 1
@@ -48,9 +55,15 @@ class TestConfig(unittest.TestCase):
         self.assertEqual(r.json()["active_index"], idx)
 
     def test_masked_key(self):
-        client.post("/api/config/save", json={
-            "name": "带key", "api_key": "sk-12345678", "model": "m", "enabled": True,
-        })
+        client.post(
+            "/api/config/save",
+            json={
+                "name": "带key",
+                "api_key": "sk-12345678",
+                "model": "m",
+                "enabled": True,
+            },
+        )
         d = client.get("/api/config").json()
         masked = [c for c in d["configs"] if c["name"] == "带key"][0]
         self.assertTrue(masked["api_key"].startswith("••••"))

@@ -1,4 +1,5 @@
 """领域模型基础测试（unittest，零第三方依赖）。"""
+
 import unittest
 
 from writer_studio.backend.domain.schemas import (

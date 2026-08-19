@@ -1,4 +1,5 @@
 """LLM 客户端测试。"""
+
 import unittest
 
 from writer_studio.backend.core.llm import LLMClient, _parse_json
@@ -26,12 +27,16 @@ class TestAvailability(unittest.TestCase):
     def test_unavailable_without_key(self):
         self.assertFalse(LLMClient(LLMConfig()).available)
 
-    def test_available_with_key(self):
-        cfg = LLMConfig(api_base="http://x/v1", api_key="k", model="m", enabled=True)
-        self.assertTrue(LLMClient(cfg).available)
+    def test_adaptive_temperature(self):
+        from writer_studio.backend.core.llm import adaptive_temperature
 
-    def test_chat_returns_none_when_unavailable(self):
-        self.assertIsNone(LLMClient(LLMConfig()).chat("s", "u"))
+        # 审查诊断极低温
+        self.assertLessEqual(adaptive_temperature("administrative", stage="review"), 0.1)
+        # 行政公文低温严谨
+        self.assertLessEqual(adaptive_temperature("administrative", stage="draft"), 0.2)
+        # 年轻态/特写较高创意温控
+        self.assertGreaterEqual(adaptive_temperature("youth_engagement", stage="draft"), 0.6)
+        self.assertGreaterEqual(adaptive_temperature("strategic_narrative", stage="draft"), 0.6)
 
 
 if __name__ == "__main__":

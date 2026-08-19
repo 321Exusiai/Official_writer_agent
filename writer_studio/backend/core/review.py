@@ -7,6 +7,7 @@
 
 规则诊断用真实正则引擎（re.search），修复原版"子串匹配导致正则永不命中"的问题。
 """
+
 import re
 
 from ..domain.registry import Registry
@@ -36,8 +37,7 @@ def score(findings) -> float:
 def is_passed(results) -> bool:
     """全部轮次：无 critical 且分数 ≥ 阈值。"""
     return all(
-        (not any(f.severity == ReviewSeverity.CRITICAL for f in r.findings))
-        and r.score >= PASS_THRESHOLD
+        (not any(f.severity == ReviewSeverity.CRITICAL for f in r.findings)) and r.score >= PASS_THRESHOLD
         for r in results
     )
 
@@ -51,16 +51,54 @@ def diagnose(text: str, mode: str) -> list:
         if err["mode"] != "all" and err["mode"] != mode:
             continue
         if re.search(err["pattern"], text):
-            findings.append(ReviewFinding(
-                round_name="规则诊断",
-                severity=ReviewSeverity(err["severity"]),
-                issue=err["name"],
-                suggestion=err["prescription"],
-                error_key=eid,
-                source="rule",
-                dimension=err.get("dimension", ""),
-            ))
+            findings.append(
+                ReviewFinding(
+                    round_name="规则诊断",
+                    severity=ReviewSeverity(err["severity"]),
+                    issue=err["name"],
+                    suggestion=err["prescription"],
+                    error_key=eid,
+                    source="rule",
+                    dimension=err.get("dimension", ""),
+                )
+            )
     return findings
+
+
+_PUNCT_SPACE = "，。、；：！？… \t"
+
+
+def apply_fix(text: str, error_key: str):
+    """规则修复：按 errors.json 的 fix 定义修复第一处命中。
+
+    返回 (new_text, applied)。delete 类会清理删除点残留的标点/空白粘连；
+    replace 类做一次正则替换。无 fix 定义或未命中 → (原文本, False)。
+    """
+    err = Registry.by_id("errors", error_key)
+    if not err or "fix" not in err:
+        return text, False
+    fix = err["fix"]
+    pattern = fix.get("pattern", "")
+    if fix.get("action") == "delete":
+        m = re.search(pattern, text)
+        if not m:
+            return text, False
+        start, end = m.span()
+        new = text[:start] + text[end:]
+        pos = start
+        while pos < len(new) and new[pos] in _PUNCT_SPACE:
+            pos += 1
+        if pos > start:
+            before_ok = start == 0 or new[start - 1] in _PUNCT_SPACE or new[start - 1].isspace()
+            if before_ok:
+                new = new[:start] + new[pos:]
+            elif new[start] == " ":
+                new = new[:start] + new[start + 1 :]
+        return new, new != text
+    if fix.get("action") == "replace":
+        new, n = re.subn(pattern, fix.get("replacement", ""), text, count=1)
+        return new, n > 0
+    return text, False
 
 
 def compute_dimension_scores(findings: list) -> list:
@@ -87,14 +125,16 @@ def check_subject_ratio(text: str) -> list:
         return []
     ratio = we / (we + they)
     if ratio < 0.6:
-        return [ReviewFinding(
-            round_name="规则诊断",
-            severity=ReviewSeverity.MAJOR,
-            issue="主体性不足",
-            suggestion=f"镜头应始终对准'我们'（当前主体词频占比 {ratio:.0%}，偏低），减少对'对方'的着墨",
-            error_key="subject_ratio_low",
-            source="rule",
-        )]
+        return [
+            ReviewFinding(
+                round_name="规则诊断",
+                severity=ReviewSeverity.MAJOR,
+                issue="主体性不足",
+                suggestion=f"镜头应始终对准'我们'（当前主体词频占比 {ratio:.0%}，偏低），减少对'对方'的着墨",
+                error_key="subject_ratio_low",
+                source="rule",
+            )
+        ]
     return []
 
 
@@ -107,23 +147,27 @@ def check_admin_format(text: str) -> list:
     # 标题须同时含"关于"（事由标志）与文种词；正文过渡句（"现将…通知如下"）不算标题
     has_title = first_line and ("关于" in first_line) and any(dt in first_line for dt in ADMIN_TITLE_TYPES)
     if not has_title:
-        findings.append(ReviewFinding(
-            round_name="规则诊断",
-            severity=ReviewSeverity.CRITICAL,
-            issue="标题三要素缺失",
-            suggestion="标题应为：发文机关+事由+文种（如'XX学院关于XX的通知'）",
-            error_key="title_3elements_missing",
-            source="rule",
-        ))
+        findings.append(
+            ReviewFinding(
+                round_name="规则诊断",
+                severity=ReviewSeverity.CRITICAL,
+                issue="标题三要素缺失",
+                suggestion="标题应为：发文机关+事由+文种（如'XX学院关于XX的通知'）",
+                error_key="title_3elements_missing",
+                source="rule",
+            )
+        )
     if not any(c in text for c in ADMIN_CLOSINGS):
-        findings.append(ReviewFinding(
-            round_name="规则诊断",
-            severity=ReviewSeverity.MAJOR,
-            issue="结尾用语缺失",
-            suggestion="应使用规范公文结尾用语（如'特此通知''妥否，请批示''此复'）",
-            error_key="closing_missing",
-            source="rule",
-        ))
+        findings.append(
+            ReviewFinding(
+                round_name="规则诊断",
+                severity=ReviewSeverity.MAJOR,
+                issue="结尾用语缺失",
+                suggestion="应使用规范公文结尾用语（如'特此通知''妥否，请批示''此复'）",
+                error_key="closing_missing",
+                source="rule",
+            )
+        )
     return findings
 
 
@@ -139,6 +183,5 @@ def review(text: str, mode: str, round_name: str = "审查") -> ReviewResult:
         findings=findings,
         score=score(findings),
         dimension_scores=compute_dimension_scores(findings),
-        passed=score(findings) >= PASS_THRESHOLD
-        and not any(f.severity == ReviewSeverity.CRITICAL for f in findings),
+        passed=score(findings) >= PASS_THRESHOLD and not any(f.severity == ReviewSeverity.CRITICAL for f in findings),
     )

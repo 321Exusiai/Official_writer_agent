@@ -31,6 +31,14 @@ export const useProjectStore = defineStore('project', {
       this.projects = this.projects.filter((p) => p.id !== id)
       if (this.active && this.active.id === id) this.active = null
     },
-    select(p) { this.active = p },
+    async select(p) {
+      // 列表返回精简摘要；选中时拉取全量详情（含草稿/参考/审查历史）
+      this.active = p
+      try {
+        this.active = await api.get(`/projects/${p.id}`)
+      } catch (e) {
+        this.active = p
+      }
+    },
   },
 })

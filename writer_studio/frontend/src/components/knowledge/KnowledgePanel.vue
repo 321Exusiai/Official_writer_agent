@@ -62,6 +62,40 @@
         </div>
       </div>
     </div>
+
+    <!-- 单位专有知识库（动态扩充） -->
+    <div v-else-if="tab === 'custom'" class="k-list">
+      <div class="custom-add-box">
+        <input v-model="newCustom.title" class="ios-input" placeholder="条目标题（如：本厅2026数字化转型工作要点）" />
+        <textarea v-model="newCustom.content" class="ios-input" rows="3" placeholder="政策表述/领导讲话/规范要求正文…" />
+        <div class="add-row">
+          <select v-model="newCustom.category" class="ios-input cat-select">
+            <option value="policy">单位政策</option>
+            <option value="speech">领导讲话</option>
+            <option value="rule">工作规范</option>
+          </select>
+          <input v-model="newCustom.source" class="ios-input" placeholder="出处/文件号" />
+          <button class="add-btn" :disabled="!newCustom.title || !newCustom.content" @click="addCustomItem">➕ 添加到单位库</button>
+        </div>
+      </div>
+      <div v-for="c in customItems" :key="c.id" class="k-item">
+        <div class="k-title flex-between">
+          <span>{{ c.title }}<span class="k-meta">{{ c.category }} · {{ c.source || '单位专有' }}</span></span>
+          <button class="del-btn" @click.stop="deleteCustomItem(c.id)">删除</button>
+        </div>
+        <div class="k-text mt-1">{{ c.content }}</div>
+      </div>
+      <div v-if="!customItems.length" class="hint-text">暂无单位专有知识，上方输入即可沉淀</div>
+    </div>
+
+    <!-- 公文排版模板库 -->
+    <div v-else-if="tab === 'templates'" class="k-list">
+      <div v-for="t in templates" :key="t.id" class="k-item">
+        <div class="k-title">{{ t.name }}<span class="k-meta">{{ t.is_builtin ? '国家标准' : '自定义模板' }}</span></div>
+        <div class="k-text">字体：{{ t.body_font }} {{ t.body_font_size }}pt · 行距：{{ t.line_spacing_pt }}pt · 缩进：{{ t.indent_chars }}字符</div>
+        <div v-if="t.header_text" class="k-meta text-red">红头标头：{{ t.header_text }}（{{ t.doc_code || '发文字号' }}）</div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -76,6 +110,8 @@ const tabs = [
   { id: 'exemplars', label: '范文' },
   { id: 'terminology', label: '术语' },
   { id: 'policy', label: '政策讲话' },
+  { id: 'custom', label: '🏢 单位专有库' },
+  { id: 'templates', label: '📄 排版模板' },
   { id: 'transitions', label: '过渡句' },
   { id: 'formulaic', label: '格式化' },
 ]
@@ -105,6 +141,41 @@ const filteredTerms = computed(() => {
   return Object.fromEntries(Object.entries(terms.value).filter(([k]) => k.includes(kw)))
 })
 
+const customItems = ref([])
+const templates = ref([])
+const newCustom = ref({
+  title: '',
+  content: '',
+  category: 'policy',
+  source: '',
+})
+
+async function loadCustom() {
+  try {
+    customItems.value = await api.get('/knowledge/custom')
+  } catch { /* ignore */ }
+}
+
+async function loadTemplates() {
+  try {
+    templates.value = await api.get('/knowledge/templates')
+  } catch { /* ignore */ }
+}
+
+async function addCustomItem() {
+  if (!newCustom.value.title || !newCustom.value.content) return
+  await api.post('/knowledge/custom', newCustom.value)
+  newCustom.value.title = ''
+  newCustom.value.content = ''
+  newCustom.value.source = ''
+  await loadCustom()
+}
+
+async function deleteCustomItem(id) {
+  await api.delete(`/knowledge/custom/${id}`)
+  await loadCustom()
+}
+
 function toggle(id) { open.value = open.value === id ? '' : id }
 
 onMounted(async () => {
@@ -113,16 +184,19 @@ onMounted(async () => {
   transitions.value = await api.get('/knowledge/transitions')
   formulaic.value = await api.get('/knowledge/formulaic')
   policies.value = await api.get('/knowledge/policy')
+  await loadCustom()
+  await loadTemplates()
 })
 </script>
 
 <style scoped>
 .knowledge-panel { display: flex; flex-direction: column; gap: 10px; }
-.k-tabs { display: flex; gap: 4px; }
+.k-tabs { display: flex; gap: 4px; flex-wrap: wrap; }
 .k-tab {
-  flex: 1; border: 1px solid var(--glass-border); background: none;
-  color: var(--color-ink-muted); padding: 5px 0; border-radius: 8px;
-  font-size: 12px; font-weight: 600; cursor: pointer; font-family: var(--font-ui);
+  flex: 1; min-width: 65px; border: 1px solid var(--glass-border); background: none;
+  color: var(--color-ink-muted); padding: 5px 4px; border-radius: 8px;
+  font-size: 11px; font-weight: 600; cursor: pointer; font-family: var(--font-ui);
+  text-align: center;
 }
 .k-tab.on { background: var(--color-accent); color: #1D1D1F; border-color: transparent; }
 .k-list { display: flex; flex-direction: column; gap: 8px; max-height: 60vh; overflow-y: auto; }
@@ -139,19 +213,24 @@ onMounted(async () => {
 .k-text { color: var(--color-ink-body); font-size: 12px; line-height: 1.6; }
 .hint-text { color: var(--color-ink-muted); font-size: 12px; }
 .hint-text.ok { color: #4ADE80; }
-.import-btn {
-  border: 1px dashed var(--glass-border); background: var(--glass-highlight);
-  color: var(--color-ink-body); padding: 8px; border-radius: 12px;
-  font-size: 13px; font-weight: 600; cursor: pointer; font-family: var(--font-ui);
-  transition: border-color 0.2s;
+
+.custom-add-box {
+  display: flex; flex-direction: column; gap: 6px; padding: 10px;
+  border-radius: 12px; background: var(--glass-highlight); border: 1px dashed var(--color-accent);
 }
-.import-btn:hover { border-color: var(--color-accent); }
-.import-box { display: flex; flex-direction: column; gap: 8px; }
-.import-row { display: flex; gap: 8px; align-items: center; }
-.import-divider { text-align: center; color: var(--color-ink-muted); font-size: 11px; }
-.ref-del {
-  margin-top: 8px; border: none; background: var(--color-danger-soft);
-  color: var(--color-danger); padding: 4px 10px; border-radius: 8px;
-  font-size: 12px; cursor: pointer; font-family: var(--font-ui);
+.add-row { display: flex; gap: 6px; align-items: center; }
+.cat-select { width: 90px; }
+.add-btn {
+  padding: 6px 12px; border-radius: 8px; font-size: 12px; font-weight: 700;
+  background: var(--color-accent); color: #1D1D1F; border: none; cursor: pointer;
+  white-space: nowrap;
 }
+.add-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.flex-between { display: flex; justify-content: space-between; align-items: center; }
+.del-btn {
+  border: none; background: rgba(255, 107, 94, 0.15); color: #dc2626;
+  padding: 2px 8px; border-radius: 6px; font-size: 11px; cursor: pointer;
+}
+.text-red { color: #da291c; }
+.mt-1 { margin-top: 4px; }
 </style>

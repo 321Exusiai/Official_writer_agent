@@ -3,6 +3,7 @@
 每个容器 JSON 统一顶层结构 ``{"id": {...}}``，加载时执行完整性校验，
 缺失或违反约束直接抛错（杜绝"空转"）。
 """
+
 import json
 from pathlib import Path
 
@@ -69,9 +70,7 @@ class Registry:
             for key in VOCAB_KEYS:
                 vals = pool.get(key)
                 if not isinstance(vals, list) or len(vals) < MIN_VOCAB:
-                    raise RegistryError(
-                        f"styles.{sid}.vocabulary_pool.{key} 必须为 ≥{MIN_VOCAB} 条的列表"
-                    )
+                    raise RegistryError(f"styles.{sid}.vocabulary_pool.{key} 必须为 ≥{MIN_VOCAB} 条的列表")
 
     @classmethod
     def _validate_doctypes(cls, data):

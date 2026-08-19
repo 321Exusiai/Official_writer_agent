@@ -38,5 +38,15 @@
   "tigao_zhanwei": {"text": "提高政治站位、强化责任担当、增强本领能力", "category": "expression", "topic": "作风", "source": "公文规范用语", "usage": "表态类"},
   "shenru_yixian": {"text": "深入一线、靠前指挥、现场办公", "category": "expression", "topic": "作风", "source": "公文规范用语", "usage": "作风建设"},
   "qingjuzhili": {"text": "清单化管理、项目化推进、销号式落实", "category": "expression", "topic": "管理", "source": "公文规范用语", "usage": "任务管理"},
-  "zhuada_xiao": {"text": "抓大不放小、抓重点带一般、抓当前谋长远", "category": "expression", "topic": "方法论", "source": "公文规范用语", "usage": "统筹方法"}
+  "zhuada_xiao": {"text": "抓大不放小、抓重点带一般、抓当前谋长远", "category": "expression", "topic": "方法论", "source": "公文规范用语", "usage": "统筹方法"},
+  "yindizhiyi_xinshengchanli": {"text": "健全因地制宜发展新质生产力体制机制，推动技术革命性突破、生产要素创新性配置、产业深度转型升级", "category": "policy", "topic": "新质生产力", "source": "党的二十届三中全会《决定》", "usage": "全面深化改革与产业升级点题"},
+  "shiti_jingji_genji": {"text": "坚持把发展经济的着力点放在实体经济上，健全促进实体经济和数字经济深度融合制度", "category": "policy", "topic": "实体经济", "source": "党的二十届三中全会《决定》", "usage": "经济与产业类公文"},
+  "chanyelian_renxing": {"text": "健全提升产业链供应链韧性和安全水平制度，抓紧打造自主可控的产业链供应链", "category": "policy", "topic": "产业链安全", "source": "党的二十届三中全会《决定》", "usage": "制造业与产业链布局"},
+  "tongchou_anquan": {"text": "统筹高质量发展和高水平安全，强化底线思维和极限思维，防范化解重点领域风险", "category": "policy", "topic": "安全底线", "source": "党中央决策部署", "usage": "安全生产与风险防范公文"},
+  "tongyi_dashi_chang": {"text": "加快建设全国统一大市场，破除地方保护和市场分割，打通制约经济循环的关键堵点", "category": "policy", "topic": "统一大市场", "source": "党中央决策部署", "usage": "市场准入与营商环境类"},
+  "qigexiangzhe": {"text": "着力加强党对宣传思想文化工作的领导，着力建设具有强大凝聚力和引领力的社会主义意识形态，着力提升新闻舆论传播力、引导力、影响力、公信力", "category": "policy", "topic": "宣传思想", "source": "全国宣传思想文化工作会议", "usage": "宣传文化与意识形态类"},
+  "zhengzhi_sili": {"text": "不断掌握新知识、熟悉新领域、开拓新视野，切实增强脚力、眼力、脑力、笔力", "category": "quote", "topic": "宣传四力", "source": "习近平总书记重要指示", "usage": "新闻宣传与调研作风类"},
+  "shidu_xiao": {"text": "紧紧围绕党和国家工作大局，牢牢把握时度效，增强新闻舆论工作的针对性和实效性", "category": "expression", "topic": "时度效", "source": "党的新闻舆论工作座谈会", "usage": "舆论引导与媒体发布类"},
+  "gaoshuiping_kaifang": {"text": "坚持以开放促改革，建设更高水平开放型经济新体制，稳步扩大制度型开放", "category": "policy", "topic": "高水平开放", "source": "党的二十届三中全会《决定》", "usage": "对外开放与经贸合作类"},
+  "dandang_youwei": {"text": "求真务实、敢作善为，以钉钉子精神抓好各项改革任务落地见效", "category": "expression", "topic": "抓落实", "source": "党的二十届三中全会《决定》", "usage": "改革攻坚与部署收尾"}
 }

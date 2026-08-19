@@ -14,7 +14,14 @@
       </div>
     </div>
 
-    <div v-if="!filtered.length" class="empty-state">
+    <div v-if="store.loading" class="skeleton-row browser-skel">
+      <div class="skeleton sk-line w80"></div>
+      <div class="skeleton sk-line w60"></div>
+      <div class="skeleton sk-line w80"></div>
+      <div class="skeleton sk-line w40"></div>
+    </div>
+
+    <div v-else-if="!filtered.length" class="empty-state">
       <div style="font-size: 40px">📂</div>
       <div>还没有项目，点击「＋ 新建」开始写作</div>
     </div>
@@ -80,6 +87,7 @@ onMounted(() => store.fetch())
 
 <style scoped>
 .browser-toolbar { display: flex; gap: 8px; margin-bottom: 12px; }
+.browser-skel { padding: 8px 4px; }
 .create-box { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; }
 .create-actions { display: flex; gap: 8px; }
 .browser-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
