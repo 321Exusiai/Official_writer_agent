@@ -66,7 +66,7 @@ class LLMClient:
     @property
     def available(self) -> bool:
         c = self.config
-        return bool(c.enabled and c.api_key and c.api_base and c.model)
+        return bool(c.enabled and c.api_key and not c.api_key.startswith("••••") and c.api_base and c.model)
 
     def chat(self, system, user, temperature=None, max_tokens=None):
         """返回 LLM 文本；未配置/失败返回 None（调用方降级）。"""
