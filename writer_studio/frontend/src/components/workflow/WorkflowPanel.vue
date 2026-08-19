@@ -90,10 +90,10 @@
       </div>
     </div>
 
-    <!-- 写作/审查 -->
+    <!-- 写作/审查/自愈阶段 -->
     <div v-else-if="cur.state === 'reviewing' || cur.state === 'reviewed' || cur.draft || (projectStore.active && projectStore.active.draft)" class="animate-enter">
       <div class="panel-header-row">
-        <h3 class="step-title">文稿生成</h3>
+        <h3 class="step-title">文稿生成与智能审查</h3>
         <div class="view-switchers">
           <button class="view-tab" :class="{ on: viewMode === 'edit' }" @click="viewMode = 'edit'">📝 编辑视图</button>
           <button class="view-tab" :class="{ on: viewMode === 'diff' }" @click="viewMode = 'diff'">🔍 Diff 对比</button>
@@ -173,59 +173,22 @@
         </div>
       </div>
 
-      <div class="actions">
-        <Button variant="primary" @click="runReview">对文稿执行智能审查</Button>
+      <!-- 操作动作栏 -->
+      <div class="actions" style="margin-top: 12px;">
+        <Button variant="primary" @click="runReview">🔍 对文稿执行智能审查</Button>
+        <Button
+          v-if="cur.review && (cur.review.score < 85 || (cur.review.findings && cur.review.findings.length))"
+          variant="primary"
+          :disabled="isHealing"
+          @click="triggerAutoHeal"
+        >{{ isHealing ? '⚡ 正在自主自愈中…' : '⚡ 一键自愈 (85分+)' }}</Button>
         <Button variant="secondary" @click="toggleRevisions">🕒 时光机版本 ({{ revisions.length }})</Button>
         <Button variant="secondary" @click="triggerRedTeam">👔 模拟领导审签/红蓝军测试</Button>
+        <Button @click="finalize">确认无误，完成交付</Button>
       </div>
 
-      <!-- 红蓝军审签压力测试卡片 -->
-      <GlassCard v-if="redTeamResult" class="red-team-card">
-        <div class="rt-head">
-          <span class="rt-title">👔 分管领导审签与舆情红蓝军压力测试报告</span>
-          <span class="rt-badge" :class="'rt-' + redTeamResult.verdict">{{ redTeamResult.verdict || '通过' }}</span>
-        </div>
-        <div class="rt-body">
-          <div class="rt-critique"><b>领导审签挑刺：</b>{{ redTeamResult.superior_critique }}</div>
-          <div class="rt-risks">
-            <b>舆情风险排查：</b>
-            <ul>
-              <li v-for="(r, i) in redTeamResult.pr_risk_points" :key="i">{{ r }}</li>
-            </ul>
-          </div>
-          <div v-if="redTeamResult.actionable_fixes" class="rt-fixes">
-            <b>整改建议：</b>{{ redTeamResult.actionable_fixes.join('；') }}
-          </div>
-        </div>
-      </GlassCard>
-
-      <!-- 时光机版本快照抽屉 -->
-      <GlassCard v-if="showRevisions" class="revisions-drawer">
-        <div class="rev-title">🕒 时光机历史版本快照</div>
-        <div v-if="!revisions.length" class="hint-text">暂无历史快照</div>
-        <div v-for="r in revisions" :key="r.id" class="rev-item">
-          <div class="rev-info">
-            <span class="rev-time">{{ r.timestamp }}</span>
-            <span v-if="r.score" class="rev-score">{{ r.score }}分</span>
-            <span class="rev-summary">{{ r.summary }}</span>
-          </div>
-          <button class="fix-btn" @click="restoreRev(r.id)">恢复此版本</button>
-        </div>
-      </GlassCard>
-    </div>
-
-    <!-- 审查结果 -->
-    <div v-else-if="cur.state === 'reviewed' && cur.review" class="animate-enter">
-      <div class="panel-header-row">
-        <h3 class="step-title">审查诊断与自愈</h3>
-        <div class="view-switchers">
-          <button class="view-tab" :class="{ on: viewMode === 'edit' }" @click="viewMode = 'edit'">📝 编辑视图</button>
-          <button class="view-tab" :class="{ on: viewMode === 'diff' }" @click="viewMode = 'diff'">🔍 Diff 对比</button>
-          <button class="view-tab" :class="{ on: viewMode === 'preview' }" @click="viewMode = 'preview'">🖨️ 公文排版预览</button>
-        </div>
-      </div>
-
-      <GlassCard>
+      <!-- 审查诊断卡片 -->
+      <GlassCard v-if="cur.review" style="margin-top: 14px;">
         <div class="score-row">
           <span class="score" :class="{ low: cur.review.score < 70 }">{{ cur.review.score }}</span>
           <span class="score-label">分 · {{ cur.review.passed ? '通过' : '未通过' }}</span>
@@ -268,20 +231,8 @@
         <div v-if="fixMsg" class="fix-msg" :class="{ error: fixErr }">{{ fixMsg }}</div>
       </GlassCard>
 
-      <div class="actions">
-        <Button
-          v-if="cur.review.score < 85 || (cur.review.findings && cur.review.findings.length)"
-          variant="primary"
-          :disabled="isHealing"
-          @click="triggerAutoHeal"
-        >{{ isHealing ? '⚡ 正在自主自愈中…' : '⚡ 一键自愈 (85分+)' }}</Button>
-        <Button variant="secondary" @click="toggleRevisions">🕒 时光机历史 ({{ revisions.length }})</Button>
-        <Button variant="secondary" @click="triggerRedTeam">👔 模拟领导审签/红蓝军测试</Button>
-        <Button @click="finalize">确认无误，完成交付</Button>
-      </div>
-
       <!-- 红蓝军审签压力测试卡片 -->
-      <GlassCard v-if="redTeamResult" class="red-team-card">
+      <GlassCard v-if="redTeamResult" class="red-team-card" style="margin-top: 14px;">
         <div class="rt-head">
           <span class="rt-title">👔 分管领导审签与舆情红蓝军压力测试报告</span>
           <span class="rt-badge" :class="'rt-' + redTeamResult.verdict">{{ redTeamResult.verdict || '通过' }}</span>
@@ -301,7 +252,7 @@
       </GlassCard>
 
       <!-- 时光机版本快照抽屉 -->
-      <GlassCard v-if="showRevisions" class="revisions-drawer">
+      <GlassCard v-if="showRevisions" class="revisions-drawer" style="margin-top: 14px;">
         <div class="rev-title">🕒 时光机历史版本快照</div>
         <div v-if="!revisions.length" class="hint-text">暂无历史快照</div>
         <div v-for="r in revisions" :key="r.id" class="rev-item">
@@ -333,13 +284,14 @@
       </div>
     </div>
 
+    <!-- 空状态 / 启动引导 -->
     <div v-else class="empty-state animate-enter">
       <div style="font-size: 48px; margin-bottom: 8px;">✍️</div>
       <div style="font-size: 18px; font-weight: 700; margin-bottom: 6px;">
-        {{ projectStore.active ? projectStore.active.name : '尚未选择项目' }}
+        {{ projectStore.active ? projectStore.active.name : '公文写作工作室' }}
       </div>
       <p class="hint-text" style="max-width: 440px; margin-bottom: 18px; line-height: 1.6;">
-        {{ projectStore.active ? '点击下方按钮，启动多角色协商、大纲规划与 AI 起草工作流' : '请先在左侧项目列表选择或新建一个公文项目' }}
+        {{ projectStore.active ? (projectStore.active.description || '项目已建立。点击下方按钮启动场景路由、需求问卷与多角色智能协商起草流程。') : '请先在左侧项目列表选择或新建一个公文项目' }}
       </p>
       <Button v-if="projectStore.active" variant="primary" @click="startProjectWorkflow">🚀 启动公文起草工作流</Button>
     </div>
@@ -577,16 +529,19 @@ watch(() => projectStore.active, (p) => {
     draftEdit.value = p.draft || ''
     redTeamResult.value = p.red_team_result || null
     loadRevisions()
+    loadTemplates()
     const s = store.ensure(p.id)
-    if (p.draft && s.state === 'idle') {
+    if (p.draft) {
       s.draft = p.draft
-      s.state = 'reviewing'
+      if (!s.state || s.state === 'idle') s.state = 'reviewing'
       if (p.review_results && p.review_results.length) {
         s.review = p.review_results[p.review_results.length - 1]
       }
-      if (p.plan) {
-        s.plan = p.plan
-      }
+      if (p.plan) s.plan = p.plan
+    } else if (p.plan) {
+      s.plan = p.plan
+      if (!s.state || s.state === 'idle') s.state = 'waiting_approval'
+      loadPlanOptions()
     }
   }
 }, { immediate: true })
