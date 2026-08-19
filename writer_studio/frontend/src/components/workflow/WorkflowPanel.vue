@@ -299,7 +299,7 @@
 </template>
 
 <script setup>
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
 import { useWorkflowStore } from '../../stores/workflow'
 import { useProjectStore } from '../../stores/project'
 import { api } from '../../api/client'
