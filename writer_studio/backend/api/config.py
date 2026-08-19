@@ -89,6 +89,13 @@ def _encrypt_configs(configs: list) -> list:
 
 
 def save_config_set(configs: list, active_index: int, assistant: dict = None):
+    # 若未传入 assistant，自动读取原有 assistant 配置，防止被覆盖清空
+    if assistant is None:
+        try:
+            assistant = load_assistant_config().model_dump()
+        except Exception:
+            assistant = None
+
     payload = {"schema_version": 2, "configs": _encrypt_configs(configs), "active_index": active_index}
     if assistant is not None:
         payload["assistant"] = dict(assistant)
@@ -190,7 +197,7 @@ def save_assistant(body: AssistantBody):
     """保存辅助轨道配置（免费 GLM-4-Flash）。"""
     cfg = load_assistant_config()
     payload = body.model_dump()
-    if payload["api_key"].startswith("••••"):
+    if not payload.get("api_key") or payload["api_key"].startswith("••••"):
         payload["api_key"] = cfg.api_key
     assistant = AssistantConfig(**payload)
     configs, idx = load_config_set()
@@ -209,9 +216,9 @@ def save_config(body: SaveConfigBody):
         target = next((i for i, c in enumerate(configs) if c.get("name") == body.name), -1)
     if 0 <= target < len(configs):
         old = configs[target]
-        if payload["api_key"].startswith("••••"):
+        if not payload.get("api_key") or payload["api_key"].startswith("••••"):
             payload["api_key"] = old.get("api_key", "")
-        if payload["search_api_key"].startswith("••••"):
+        if not payload.get("search_api_key") or payload["search_api_key"].startswith("••••"):
             payload["search_api_key"] = old.get("search_api_key", "")
         configs[target] = payload
     else:
@@ -245,7 +252,16 @@ def switch_config(body: IndexBody):
 
 @router.post("/config/test")
 def test_config(body: ConfigBody):
-    client = LLMClient(LLMConfig(**body.model_dump()))
+    data = body.model_dump()
+    if not data.get("api_key") or data["api_key"].startswith("••••"):
+        configs, idx = load_config_set()
+        match = next((c for c in configs if c.get("name") == body.name or c.get("api_base") == body.api_base), None)
+        if match and match.get("api_key"):
+            data["api_key"] = match["api_key"]
+        elif configs and configs[idx].get("api_key"):
+            data["api_key"] = configs[idx]["api_key"]
+
+    client = LLMClient(LLMConfig(**data))
     if not client.available:
         return {"ok": False, "message": "配置不完整：需 api_base、api_key、model 且 enabled=True"}
     raw = client.chat("你是助手。", "请只回复两个字：正常", max_tokens=10)

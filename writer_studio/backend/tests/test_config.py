@@ -68,6 +68,32 @@ class TestConfig(unittest.TestCase):
         masked = [c for c in d["configs"] if c["name"] == "带key"][0]
         self.assertTrue(masked["api_key"].startswith("••••"))
 
+        # 测试二次编辑时传入空串或掩码，原 key 仍被完好保留
+        client.post(
+            "/api/config/save",
+            json={
+                "name": "带key",
+                "api_key": "",  # 留空保留原值
+                "model": "m-updated",
+                "enabled": True,
+            },
+        )
+        cfg_real = cfg.get_active_config()
+        configs, _ = cfg.load_config_set()
+        item = [c for c in configs if c["name"] == "带key"][0]
+        self.assertEqual(item["api_key"], "sk-12345678")
+
+    def test_save_main_preserves_assistant(self):
+        # 1. 保存辅助配置
+        client.post("/api/config/assistant", json={"enabled": True, "api_key": "glm-secret-key", "model": "glm-4-flash"})
+        self.assertEqual(cfg.load_assistant_config().api_key, "glm-secret-key")
+
+        # 2. 保存主配置
+        client.post("/api/config/save", json={"name": "新主配置", "api_key": "main-key", "model": "m1"})
+
+        # 3. 验证辅助配置的 key 未被冲掉
+        self.assertEqual(cfg.load_assistant_config().api_key, "glm-secret-key")
+
     def test_delete_keeps_at_least_one(self):
         r = client.post("/api/config/delete", json={"index": 0})
         self.assertEqual(r.json()["deleted"], False)  # 仅一个配置，禁止删除
