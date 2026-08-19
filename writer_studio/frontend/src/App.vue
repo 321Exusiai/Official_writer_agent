@@ -152,12 +152,14 @@
 
       <aside class="pane">
         <div class="pane-tabs">
+          <button class="pane-tab" :class="{ on: rightTab === 'assistant' }" @click="rightTab = 'assistant'">助手</button>
           <button class="pane-tab" :class="{ on: rightTab === 'process' }" @click="rightTab = 'process'">过程</button>
           <button class="pane-tab" :class="{ on: rightTab === 'mine' }" @click="rightTab = 'mine'">我的</button>
           <button class="pane-tab" :class="{ on: rightTab === 'knowledge' }" @click="rightTab = 'knowledge'">知识库</button>
           <button class="pane-tab" :class="{ on: rightTab === 'config' }" @click="rightTab = 'config'">设置</button>
         </div>
-        <ProcessPanel v-if="rightTab === 'process'" />
+        <AssistantPanel v-if="rightTab === 'assistant'" />
+        <ProcessPanel v-else-if="rightTab === 'process'" />
         <MySpace v-else-if="rightTab === 'mine'" />
         <KnowledgePanel v-else-if="rightTab === 'knowledge'" />
         <ConfigPanel v-else />
@@ -180,6 +182,7 @@ import KnowledgePanel from './components/knowledge/KnowledgePanel.vue'
 import MySpace from './components/profile/MySpace.vue'
 import ProfilePanel from './components/profile/ProfilePanel.vue'
 import FavoritesPanel from './components/profile/FavoritesPanel.vue'
+import AssistantPanel from './components/assistant/AssistantPanel.vue'
 import Button from './components/ui/Button.vue'
 import { api } from './api/client'
 

@@ -5,7 +5,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from .api import config, events, knowledge, profile, projects, workflow
+from .api import assistant, config, events, knowledge, profile, projects, workflow
 
 app = FastAPI(title="公文写作工作室", version="0.1.0")
 
@@ -22,6 +22,7 @@ app.include_router(events.router, prefix="/api")
 app.include_router(config.router, prefix="/api")
 app.include_router(knowledge.router, prefix="/api")
 app.include_router(profile.router, prefix="/api")
+app.include_router(assistant.router, prefix="/api")
 
 
 @app.get("/api/health")

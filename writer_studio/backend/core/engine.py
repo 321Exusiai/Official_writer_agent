@@ -243,21 +243,20 @@ class WorkflowEngine:
     def _consult(self) -> dict:
         """多角色协商 + 集中决策，返回 decision。
 
-        双轨制：协商/决策是短输出轻任务，优先用辅助轨道（GLM-4-Flash），
-        未启用则回退主模型，都不可用则走规则降级。
+        写作核心流程（协商/决策）一律用主模型（外部 API）——小模型不参与写作环节，
+        仅作为独立「辅助智能体」处理写作之外的事务。
         """
         from . import agents
-        helper = self.assistant_llm if (self.assistant_llm and self.assistant_llm.available) else self.llm
         context = {
             "brief": self.brief.model_dump(),
             "plan": self.plan.model_dump(),
             "style_match": style.check_style_doc_match(self.plan.media_style, self.plan.doc_type),
             "user_memory": "",
         }
-        responses = agents.consult(helper, "写作方案评审", context)
+        responses = agents.consult(self.llm, "写作方案评审", context)
         for rid, r in responses.items():
             self._emit("consult", "writing", r.model_dump())
-        decision = agents.decide(helper, "写作方案最终决策", responses)
+        decision = agents.decide(self.llm, "写作方案最终决策", responses)
         self._emit("decision", "writing", decision)
         return decision
 
