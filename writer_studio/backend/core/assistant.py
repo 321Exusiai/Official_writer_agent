@@ -11,11 +11,29 @@ from ..domain.registry import Registry
 from . import profile as profile_core
 from . import retrieval
 
-SYSTEM_PROMPT = """你是「公文写作工作室」的内置辅助智能体（Assistant Agent）。
+SYSTEM_PROMPT = """你是「公文写作工作室」的内置辅助智能体（Assistant Agent），针对公文写作场景特化。
 
 【你的职责】
 回答用户关于本系统与公文写作的问答，并通过工具帮用户处理写作流程之外的事务：
 资料整理与解读、用户画像分析、收藏夹管理、全局搜索、知识库查询、项目概览、导出等。
+
+【工作方式：ReAct 多轮循环】
+严格按"思考 → 行动 → 观察"循环工作：
+1. 思考（Think）：先想清楚用户要什么、需要哪些信息、第一步调用哪个工具。
+2. 行动（Act）：调用工具获取信息或执行操作。一次回答里可以【连续调用多个工具】，
+   让工具结果互相衔接（例如：先 search_knowledge 找到范文 → 再 analyze_reference 解读 → 再 add_favorite 收藏）。
+3. 观察（Observe）：根据工具返回的结果继续思考；信息不足就再调工具，直到能给出完整、准确的回答。
+4. 最后综合所有工具结果，给出清晰的中文回答。
+
+【多工具协作原则】
+- 复杂任务拆成多步，按依赖顺序调用工具，不要一次问用户要所有信息。
+- 工具结果要综合：多个工具的结果拼成完整答案（如"画像+项目+收藏"三合一）。
+- 一个工具的结果可以作为下一个工具的参数依据。
+
+【上下文注意机制】
+- 充分利用会话历史：用户之前提过的偏好、项目名、结论，后续保持一致。
+- 若提供了"当前项目"上下文，回答时优先结合它。
+- 只依据工具结果和会话历史作答；工具没返回的内容，明确说"没有这方面的数据"。
 
 【能力边界 · 必须遵守】
 1. 你【不参与】文章写作、多角色协商、审查等核心写作流程——这些由主写作引擎完成。
@@ -30,9 +48,10 @@ SYSTEM_PROMPT = """你是「公文写作工作室」的内置辅助智能体（A
 4. 工具执行失败时如实报告失败原因。
 
 【回答风格】
-简洁、专业、直接。需要工具就调用工具，把工具结果整理成清晰的中文回答。
+简洁、专业、直接。需要工具就调用工具，把多个工具结果整理成清晰的中文回答；
+结构化的信息（列表、项目、得分）用要点呈现。
 
-【可用工具】由系统在每次请求时注入。"""
+【可用工具】由系统在每次请求时注入。每个工具都注明了用途与适用场景。"""
 
 
 def _tool(name: str, description: str, props: dict, required: list) -> dict:
@@ -47,28 +66,28 @@ def _tool(name: str, description: str, props: dict, required: list) -> dict:
 
 
 TOOLS: List[dict] = [
-    _tool("search_knowledge", "检索内置知识库（范文/术语/政策讲话/过渡句/格式化用语）", {
+    _tool("search_knowledge", "检索内置知识库（范文/术语/政策讲话/过渡句/格式化用语）。适用：用户想了解某个主题的规范表述、找范文参考、查政策用语。可配合 analyze_reference 解读检索到的内容。", {
         "keyword": {"type": "string", "description": "检索关键词，如'新质生产力'、'研学通讯'"},
         "kind": {"type": "string", "description": "term|policy|exemplar|transition|formulaic，缺省全查"},
     }, ["keyword"]),
-    _tool("explain_term", "解释一个公文/政策术语的定义、用法与常见误用", {
+    _tool("explain_term", "解释一个公文/政策术语的定义、出处、用法与常见误用。适用：用户问'XX是什么意思/怎么用'。比 search_knowledge 更聚焦单术语。", {
         "term": {"type": "string"},
     }, ["term"]),
-    _tool("search_global", "全局搜索：跨项目匹配名称/草稿/参考文本/收藏，以及综合收藏夹", {
+    _tool("search_global", "全局搜索：跨项目匹配名称/草稿/参考文本/收藏，以及综合收藏夹。适用：用户问'哪里提到过 XX''我有收藏过 XX 吗'。可配合 get_project_summary 深入某个命中项目。", {
         "query": {"type": "string"},
     }, ["query"]),
-    _tool("analyze_profile", "分析用户画像：写作弱点与潜在 bias 预警", {}, []),
-    _tool("list_favorites", "查看综合收藏夹的词汇与句子", {}, []),
-    _tool("add_favorite", "把词汇或句子收藏到综合收藏夹或指定项目", {
+    _tool("analyze_profile", "分析用户画像：写作弱点与潜在 bias 预警。适用：用户问'我有什么问题''我的写作风格如何'。可与 list_projects 一起给出全景。", {}, []),
+    _tool("list_favorites", "查看综合收藏夹的词汇与句子。适用：用户问'我收藏了什么'。", {}, []),
+    _tool("add_favorite", "把词汇或句子收藏到综合收藏夹或指定项目。适用：用户在对话中提到想收藏的好词好句，或要求'把这句话收藏起来'。可配合 analyze_reference 提取的词汇。", {
         "kind": {"type": "string", "description": "term|phrase"},
         "value": {"type": "string"},
         "project_id": {"type": "string", "description": "留空=综合收藏夹"},
     }, ["kind", "value"]),
-    _tool("analyze_reference", "解读一段参考文本：提取值得借鉴的句子、高频词汇、句式特征", {
+    _tool("analyze_reference", "解读一段参考文本：提取值得借鉴的句子、高频词汇、句式特征。适用：用户粘贴文章/段落，希望学习其写法。可配合 add_favorite 把提炼的好词好句收藏。", {
         "text": {"type": "string"},
     }, ["text"]),
-    _tool("list_projects", "列出所有项目及基本状态", {}, []),
-    _tool("get_project_summary", "查看指定项目的问卷总结/风格要求/工作要求/参考文本数量", {
+    _tool("list_projects", "列出所有项目及基本状态（参考数/审查次数）。适用：用户问'有哪些项目''我的进度'。可配合 get_project_summary 查看单个项目。", {}, []),
+    _tool("get_project_summary", "查看指定项目的问卷总结/风格要求/工作要求/参考文本数量。适用：用户问'某个项目怎么样''那个项目的要求是什么'。", {
         "project_id": {"type": "string"},
     }, ["project_id"]),
     _tool("export_project_md", "把指定项目的终稿整理为 Markdown（含版本列表与审查摘要）", {
@@ -244,31 +263,69 @@ class AssistantAgent:
         return "\n".join(lines)
 
     # ── 对话 ──
-    def chat(self, message: str, history: list = None) -> dict:
+    def chat(self, message: str, history: list = None, project_id: str = "") -> dict:
         """处理一条用户消息，返回 {"reply", "mode", "tool_calls"}。
 
         mode: llm（GLM 驱动）| rule（无 GLM 时规则降级）
+        project_id: 当前活动项目（注入上下文，供助手结合项目作答）
         """
         history = history or []
+        # 快捷命令（确定性，不经 LLM）
+        quick = self._handle_quick_command(message)
+        if quick is not None:
+            return {"reply": quick, "mode": "rule", "tool_calls": []}
         if not self.available:
             return {"reply": self._rule_reply(message), "mode": "rule", "tool_calls": []}
-        messages = [{"role": "system", "content": SYSTEM_PROMPT}]
-        for h in history[-8:]:
+        messages = [{"role": "system", "content": self._build_system_prompt(project_id)}]
+        for h in history[-10:]:
             messages.append(h)
         messages.append({"role": "user", "content": message})
         tool_calls = []
-        # 直接构造带工具的消息调用
         raw = self._run_tools(messages, tool_calls)
         if raw is None:
             return {"reply": self._rule_reply(message), "mode": "rule", "tool_calls": tool_calls}
         return {"reply": raw, "mode": "llm", "tool_calls": tool_calls}
 
+    def _build_system_prompt(self, project_id: str = "") -> str:
+        """系统提示词 + 当前项目上下文（上下文注意机制）。"""
+        prompt = SYSTEM_PROMPT
+        if project_id:
+            summary = self._exec_get_project_summary({"project_id": project_id})
+            if summary and "不存在" not in summary:
+                prompt += f"\n\n【当前项目上下文】\n{summary}\n（回答与该项目相关的问题时优先结合以上信息。）"
+        return prompt
+
+    def _handle_quick_command(self, message: str):
+        """快捷命令（斜杠规则）：/画像 /项目 /收藏 /搜索 <q> /资料 <q> /术语 <t> /导出 <pid>。"""
+        m = message.strip()
+        if m.startswith("/"):
+            cmd, _, rest = m[1:].partition(" ")
+            rest = rest.strip()
+            if cmd in ("画像", "分析", "profile"):
+                return self._exec_analyze_profile({})
+            if cmd in ("项目", "projects", "列表"):
+                return self._exec_list_projects({})
+            if cmd in ("收藏", "favorites"):
+                return self._exec_list_favorites({})
+            if cmd in ("搜索", "search") and rest:
+                return self._exec_search_global({"query": rest})
+            if cmd in ("资料", "知识", "kb") and rest:
+                return self._exec_search_knowledge({"keyword": rest})
+            if cmd in ("术语", "term") and rest:
+                return self._exec_explain_term({"term": rest})
+            if cmd in ("导出", "export") and rest:
+                return self._exec_export_project_md({"project_id": rest})
+            if cmd in ("帮助", "help", "?"):
+                return ("快捷命令：\n/画像 查看画像分析\n/项目 项目列表\n/收藏 综合收藏夹\n"
+                        "/搜索 <关键词> 全局搜索\n/资料 <关键词> 知识库检索\n/术语 <词> 术语解释\n/导出 <项目id> 导出 Markdown")
+        return None
+
     def _run_tools(self, messages: list, tool_calls: list):
-        """工具循环：GLM 自主决定调用工具，直到输出最终回答。"""
+        """ReAct 工具循环：GLM 自主决定调用工具（可多工具串联），直到输出最终回答（上限 6 轮）。"""
         url = self.llm.config.api_base.rstrip("/") + "/chat/completions"
         import json
         import httpx
-        for _ in range(4):
+        for _ in range(6):
             payload = {
                 "model": self.llm.config.model,
                 "messages": messages,

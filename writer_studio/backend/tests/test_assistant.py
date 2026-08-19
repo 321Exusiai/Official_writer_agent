@@ -38,6 +38,18 @@ class TestAssistant(unittest.TestCase):
         r = self.agent.chat("有哪些项目？")
         self.assertEqual(r["mode"], "rule")
 
+    def test_quick_command_profile(self):
+        r = self.agent.chat("/画像")
+        self.assertIn("画像分析", r["reply"])
+
+    def test_quick_command_projects(self):
+        r = self.agent.chat("/项目")
+        self.assertIsInstance(r["reply"], str)
+
+    def test_quick_command_help(self):
+        r = self.agent.chat("/帮助")
+        self.assertIn("快捷命令", r["reply"])
+
     def test_api_rule_chat(self):
         r = client.post("/api/assistant/chat", json={"message": "你好", "history": []})
         self.assertEqual(r.status_code, 200)

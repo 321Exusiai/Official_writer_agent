@@ -11,6 +11,7 @@ router = APIRouter(tags=["assistant"])
 class ChatBody(BaseModel):
     message: str
     history: list = []  # [{role, content}]
+    project_id: str = ""  # 当前活动项目（注入上下文）
 
 
 def _get_agent() -> AssistantAgent:
@@ -20,7 +21,7 @@ def _get_agent() -> AssistantAgent:
 @router.post("/assistant/chat")
 def chat(body: ChatBody):
     agent = _get_agent()
-    result = agent.chat(body.message, body.history)
+    result = agent.chat(body.message, body.history, body.project_id)
     return result
 
 
