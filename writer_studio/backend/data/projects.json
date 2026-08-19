@@ -1,10 +1,10 @@
 {
   "schema_version": 2,
   "projects": {
-    "proj_c88dc47d": {
-      "id": "proj_c88dc47d",
-      "name": "A",
-      "description": "",
+    "proj_2117b1e3": {
+      "id": "proj_2117b1e3",
+      "name": "团支部",
+      "description": "我是武汉大学人工智能学院自强班团支部宣传委员，在此项目下进行工作",
       "status": "draft",
       "mode_value": "",
       "writing_mode": "",
@@ -12,33 +12,27 @@
       "media_style": "",
       "style_intensity": 1.0,
       "brief": {
-        "writing_mode": "strategic_narrative",
-        "subtype": "feature",
-        "purpose": "1",
+        "writing_mode": "",
+        "subtype": "",
+        "purpose": "",
         "primary_audience": "",
         "secondary_audiences": [],
-        "deep_meaning": "1",
-        "strategic_anchor": "1",
+        "deep_meaning": "",
+        "strategic_anchor": "",
         "opportunity_context": "",
-        "key_materials": "1",
-        "differentiator": "1",
+        "key_materials": "",
+        "differentiator": "",
         "length_hint": null,
         "style_intensity": 1.0,
-        "raw_answers": {
-          "sn_vision": "1",
-          "sn_logic": "1",
-          "sn_people": "1",
-          "sn_value": "1",
-          "sn_direction": "1"
-        }
+        "raw_answers": {}
       },
       "plan": {
-        "doc_type": "feature",
-        "media_style": "people_daily",
+        "doc_type": "",
+        "media_style": "",
         "audience_focus": "external",
-        "estimated_length": "1500-3000字",
-        "structure_outline": "总—分—总递进式：开篇定位→分站展开→总结升华",
-        "writing_mode": "strategic_narrative"
+        "estimated_length": "",
+        "structure_outline": "",
+        "writing_mode": ""
       },
       "draft": "",
       "final_draft": "",
@@ -57,8 +51,8 @@
       "work_requirements": "",
       "scratchpad": [],
       "questionnaire_summary": "",
-      "created_at": "2026-08-18 13:52:10",
-      "updated_at": "2026-08-18 14:11:06"
+      "created_at": "2026-08-19 15:35:02",
+      "updated_at": "2026-08-19 15:35:02"
     }
   }
 }

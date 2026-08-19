@@ -333,9 +333,15 @@
       </div>
     </div>
 
-    <div v-else class="empty-state">
-      <div style="font-size: 40px">🚀</div>
-      <div>点击「开始写作」启动工作流</div>
+    <div v-else class="empty-state animate-enter">
+      <div style="font-size: 48px; margin-bottom: 8px;">✍️</div>
+      <div style="font-size: 18px; font-weight: 700; margin-bottom: 6px;">
+        {{ projectStore.active ? projectStore.active.name : '尚未选择项目' }}
+      </div>
+      <p class="hint-text" style="max-width: 440px; margin-bottom: 18px; line-height: 1.6;">
+        {{ projectStore.active ? '点击下方按钮，启动多角色协商、大纲规划与 AI 起草工作流' : '请先在左侧项目列表选择或新建一个公文项目' }}
+      </p>
+      <Button v-if="projectStore.active" variant="primary" @click="startProjectWorkflow">🚀 启动公文起草工作流</Button>
     </div>
   </div>
 </template>
@@ -559,11 +565,29 @@ function printDoc() {
   window.print()
 }
 
+async function startProjectWorkflow() {
+  const pidVal = projectStore.active && projectStore.active.id
+  if (!pidVal) return
+  await store.start(pidVal)
+  store.attachEvents(pidVal)
+}
+
 watch(() => projectStore.active, (p) => {
   if (p) {
     draftEdit.value = p.draft || ''
     redTeamResult.value = p.red_team_result || null
     loadRevisions()
+    const s = store.ensure(p.id)
+    if (p.draft && s.state === 'idle') {
+      s.draft = p.draft
+      s.state = 'reviewing'
+      if (p.review_results && p.review_results.length) {
+        s.review = p.review_results[p.review_results.length - 1]
+      }
+      if (p.plan) {
+        s.plan = p.plan
+      }
+    }
   }
 }, { immediate: true })
 

@@ -229,17 +229,19 @@ const themes = [
 ]
 
 async function startWorkflow() {
+  workView.value = 'write'
   const pid = projectStore.active && projectStore.active.id
   if (!pid) return
   await workflow.start(pid)
   workflow.attachEvents(pid)
 }
 
-// 切换项目时：隔离工作流状态 + 订阅该项目 SSE
+// 切换项目时：默认切回写作视图 + 隔离工作流状态 + 订阅该项目 SSE
 watch(
   () => projectStore.active && projectStore.active.id,
   (pid) => {
     if (pid) {
+      workView.value = 'write'
       workflow.setActive(pid)
       workflow.attachEvents(pid)
     }
