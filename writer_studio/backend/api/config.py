@@ -168,6 +168,7 @@ class IndexBody(BaseModel):
 
 
 class AssistantBody(BaseModel):
+    name: str = "智谱 GLM-4-Flash"
     enabled: bool = False
     provider: str = "zhipu"
     api_base: str = "https://open.bigmodel.cn/api/paas/v4"
@@ -194,7 +195,7 @@ def get_configs():
 
 @router.post("/config/assistant")
 def save_assistant(body: AssistantBody):
-    """保存辅助轨道配置（免费 GLM-4-Flash）。"""
+    """保存辅助轨道配置。"""
     cfg = load_assistant_config()
     payload = body.model_dump()
     if not payload.get("api_key") or payload["api_key"].startswith("••••"):
@@ -203,6 +204,22 @@ def save_assistant(body: AssistantBody):
     configs, idx = load_config_set()
     save_config_set(configs, idx, assistant.model_dump())
     return {"saved": True, "enabled": assistant.enabled, "model": assistant.model}
+
+
+@router.post("/config/assistant/test")
+def test_assistant_config(body: AssistantBody):
+    """测试辅助轨道模型连接。"""
+    data = body.model_dump()
+    if not data.get("api_key") or data["api_key"].startswith("••••"):
+        cfg = load_assistant_config()
+        if cfg.api_key:
+            data["api_key"] = cfg.api_key
+
+    client = LLMClient(LLMConfig(**data))
+    if not client.available:
+        return {"ok": False, "message": "辅助配置不完整：需 api_base、api_key、model 且 enabled=True"}
+    raw = client.chat("你是辅助小帮手。", "请只回复两个字：正常", max_tokens=10)
+    return {"ok": raw is not None, "message": "辅助模型连接成功" if raw is not None else "辅助模型连接失败，请检查地址与密钥"}
 
 
 @router.post("/config/save")

@@ -65,18 +65,53 @@
       <p v-if="msg" class="msg" :class="{ ok: msgOk }">{{ msg }}</p>
     </div>
 
-    <!-- 辅助轨道（免费 GLM-4-Flash） -->
+    <!-- 辅助轨道（Copilot / 随叫随到助手） -->
     <div class="ios-card edit-box assistant-box">
-      <h4 class="edit-title">⚙️ 辅助轨道 · GLM-4-Flash（免费）</h4>
-      <p class="hint-text">免费模型当"随叫随到的小帮手"：整理资料库、分析用户画像、多角色协商、工具决策等内部轻任务；<b>写文章与深度审查仍走上方主 API</b>。</p>
+      <div class="assistant-head">
+        <h4 class="edit-title">⚙️ 辅助轨道 API 配置</h4>
+        <select class="ios-input tpl-select-mini" v-model="assistantTplKey" @change="applyAssistantTemplate">
+          <option value="">快捷模板…</option>
+          <option value="zhipu">智谱 GLM-4-Flash（免费推荐）</option>
+          <option value="deepseek">DeepSeek Chat</option>
+          <option value="qwen">通义千问 Turbo</option>
+          <option value="openai">OpenAI GPT-4o-mini</option>
+          <option value="ollama">本地 Ollama (qwen2.5)</option>
+        </select>
+      </div>
+      <p class="hint-text">负责资料整理、全局搜索、画像分析、备忘录置顶、国标速查等随叫随到轻任务；<b>文章起草与深度审查走上方主 API</b>。</p>
+      
+      <input class="ios-input" v-model="assistant.name" placeholder="辅助配置名称（如 智谱 GLM-4-Flash）" />
+      <div class="config-row">
+        <label class="config-label">供应商</label>
+        <select class="ios-input" v-model="assistant.provider">
+          <option value="zhipu">智谱 GLM</option>
+          <option value="deepseek">DeepSeek</option>
+          <option value="qwen">通义千问</option>
+          <option value="openai">OpenAI</option>
+          <option value="ollama">本地 Ollama</option>
+        </select>
+      </div>
+      <input class="ios-input" v-model="assistant.api_base" placeholder="API Base URL（如 https://open.bigmodel.cn/api/paas/v4）" />
+      <input class="ios-input" v-model="assistant.api_key" type="password" placeholder="API Key（留空保留原值）" />
+      <input class="ios-input" v-model="assistant.model" placeholder="模型名（如 glm-4-flash / deepseek-chat）" />
+      
+      <div class="config-row">
+        <label class="config-label">温度</label>
+        <input class="ios-input" v-model.number="assistant.temperature" type="number" step="0.1" min="0" max="2" />
+      </div>
+      <div class="config-row">
+        <label class="config-label">最大 Token</label>
+        <input class="ios-input" v-model.number="assistant.max_tokens" type="number" step="500" min="500" max="16000" />
+      </div>
+
       <label class="toggle-row">
         <input type="checkbox" v-model="assistant.enabled" />
         <span>启用辅助轨道</span>
       </label>
-      <input class="ios-input" v-model="assistant.api_key" type="password" placeholder="智谱 GLM API Key（免费额度）" />
-      <input class="ios-input" v-model="assistant.model" placeholder="模型名（默认 glm-4-flash）" />
+
       <div class="actions">
-        <Button variant="secondary" @click="saveAssistant">保存辅助配置</Button>
+        <Button @click="saveAssistant">保存辅助配置</Button>
+        <Button variant="secondary" @click="testAssistant">测试连接</Button>
       </div>
       <p v-if="assistantMsg" class="msg" :class="{ ok: assistantOk }">{{ assistantMsg }}</p>
     </div>
@@ -104,16 +139,34 @@ const configs = ref([])
 const activeIndex = ref(-1)
 const templates = ref({})
 const tplKey = ref('')
+const assistantTplKey = ref('')
 const editingIndex = ref(-2) // -2 不编辑 / -1 新建 / >=0 编辑第 i 个
 const form = ref(emptyForm())
 const msg = ref('')
 const msgOk = ref(false)
-const assistant = ref({ enabled: false, provider: 'zhipu', api_base: 'https://open.bigmodel.cn/api/paas/v4', api_key: '', model: 'glm-4-flash', temperature: 0.3, max_tokens: 2000 })
+const assistant = ref({
+  name: '智谱 GLM-4-Flash',
+  enabled: false,
+  provider: 'zhipu',
+  api_base: 'https://open.bigmodel.cn/api/paas/v4',
+  api_key: '',
+  model: 'glm-4-flash',
+  temperature: 0.3,
+  max_tokens: 2000,
+})
 const assistantMsg = ref('')
 const assistantOk = ref(false)
 const fileInput = ref(null)
 const backupMsg = ref('')
 const backupOk = ref(false)
+
+const ASSISTANT_PRESETS = {
+  zhipu: { name: '智谱 GLM-4-Flash (免费)', provider: 'zhipu', api_base: 'https://open.bigmodel.cn/api/paas/v4', model: 'glm-4-flash', temperature: 0.3, max_tokens: 2000 },
+  deepseek: { name: 'DeepSeek Chat', provider: 'deepseek', api_base: 'https://api.deepseek.com/v1', model: 'deepseek-chat', temperature: 0.3, max_tokens: 2000 },
+  qwen: { name: '通义千问 Turbo', provider: 'qwen', api_base: 'https://dashscope.aliyuncs.com/compatible-mode/v1', model: 'qwen-turbo', temperature: 0.3, max_tokens: 2000 },
+  openai: { name: 'OpenAI GPT-4o-mini', provider: 'openai', api_base: 'https://api.openai.com/v1', model: 'gpt-4o-mini', temperature: 0.3, max_tokens: 2000 },
+  ollama: { name: '本地 Ollama (qwen2.5)', provider: 'ollama', api_base: 'http://localhost:11434/v1', model: 'qwen2.5:7b', temperature: 0.3, max_tokens: 2000 },
+}
 
 function emptyForm() {
   return { name: '', provider: 'openai', api_base: '', api_key: '', model: '', temperature: 0.7, max_tokens: 8000, enabled: false, search_provider: 'tavily', search_api_key: '' }
@@ -131,13 +184,37 @@ async function load() {
   if (d.assistant) assistant.value = { ...assistant.value, ...d.assistant }
 }
 
+function applyAssistantTemplate() {
+  if (!assistantTplKey.value) return
+  const t = ASSISTANT_PRESETS[assistantTplKey.value]
+  if (!t) return
+  const curKey = assistant.value.api_key
+  const curEnabled = assistant.value.enabled
+  assistant.value = { ...assistant.value, ...t, api_key: curKey, enabled: curEnabled }
+  assistantTplKey.value = ''
+}
+
 async function saveAssistant() {
   try {
     await api.post('/config/assistant', assistant.value)
     assistantMsg.value = '辅助轨道配置已保存'
     assistantOk.value = true
+    await load()
   } catch (e) {
     assistantMsg.value = '保存失败：' + e.message
+    assistantOk.value = false
+  }
+}
+
+async function testAssistant() {
+  assistantMsg.value = '测试连接中…'
+  assistantOk.value = false
+  try {
+    const r = await api.post('/config/assistant/test', assistant.value)
+    assistantMsg.value = r.message
+    assistantOk.value = r.ok
+  } catch (e) {
+    assistantMsg.value = '测试失败：' + e.message
     assistantOk.value = false
   }
 }
@@ -166,7 +243,7 @@ function applyTemplate() {
 
 async function save() {
   try {
-    const r = await api.post('/config/save', { ...form.value, index: editingIndex.value })
+    await api.post('/config/save', { ...form.value, index: editingIndex.value })
     msg.value = '已保存'
     msgOk.value = true
     editingIndex.value = -2
@@ -248,6 +325,8 @@ onMounted(load)
 .hint-text { color: var(--color-ink-muted); font-size: 12px; line-height: 1.6; }
 .toolbar { display: flex; gap: 8px; }
 .tpl-select { flex: 1; }
+.tpl-select-mini { width: 170px; font-size: 12px; padding: 4px 8px; }
+.assistant-head { display: flex; justify-content: space-between; align-items: center; }
 .cfg-list { display: flex; flex-direction: column; gap: 8px; }
 .cfg-card {
   padding: 12px; border-radius: 14px; cursor: pointer;

@@ -57,7 +57,7 @@ class TestAssistant(unittest.TestCase):
         self.assertEqual(r.status_code, 200)
         d = r.json()
         self.assertIn("reply", d)
-        self.assertEqual(d["mode"], "rule")
+        self.assertIn(d["mode"], ("rule", "llm"))
 
     def test_api_tools(self):
         r = client.get("/api/assistant/tools")

@@ -231,8 +231,9 @@ class LLMConfig(BaseModel):
 
 
 class AssistantConfig(BaseModel):
-    """辅助轨道配置（免费 GLM-4-Flash）：内部轻任务，随叫随到的小帮手。"""
+    """辅助轨道配置：内部轻任务、问答、资料整理、多工具决策等随叫随到的小帮手。"""
 
+    name: str = "智谱 GLM"
     enabled: bool = False
     provider: str = "zhipu"
     api_base: str = "https://open.bigmodel.cn/api/paas/v4"
@@ -240,3 +241,4 @@ class AssistantConfig(BaseModel):
     model: str = "glm-4-flash"
     temperature: float = 0.3
     max_tokens: int = 2000
+
