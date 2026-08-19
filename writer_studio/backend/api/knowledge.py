@@ -109,3 +109,17 @@ def add_template(config: TemplateConfig):
     """新增/更新公文排版模板。"""
     return TemplateStore.add_template(config)
 
+
+@router.get("/knowledge/overview")
+def get_knowledge_overview():
+    """获取全库知识体量概览。"""
+    return {
+        "exemplars_count": len(Registry.load("exemplars")),
+        "terminology_count": len(Registry.load("terminology")),
+        "transitions_count": len(Registry.load("transitions")),
+        "formulaic_count": len(Registry.load("formulaic")),
+        "policy_count": len(Registry.load("policy")),
+        "custom_count": len(CustomKnowledgeStore.load_all()),
+        "templates_count": len(TemplateStore.load_all()),
+    }
+

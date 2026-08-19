@@ -14,23 +14,23 @@
 
     <!-- 总览 -->
     <div v-else-if="analysis" class="pp-overview">
-      <span class="ov-item">📁 {{ projects.length }} 个项目</span>
-      <span class="ov-item">⚠️ {{ analysis.weaknesses.length }} 项弱点</span>
-      <span class="ov-item">🧭 {{ analysis.bias_warnings.length }} 条 bias 预警</span>
-      <span class="ov-item">⭐ {{ profile.favorite_terms.length + profile.favorite_phrases.length }} 条收藏</span>
+      <span class="ov-item">📁 {{ (projects || []).length }} 个项目</span>
+      <span class="ov-item">⚠️ {{ ((analysis && analysis.weaknesses) || []).length }} 项弱点</span>
+      <span class="ov-item">🧭 {{ ((analysis && analysis.bias_warnings) || []).length }} 条 bias 预警</span>
+      <span class="ov-item">⭐ {{ ((profile && profile.favorite_terms) || []).length + ((profile && profile.favorite_phrases) || []).length }} 条收藏</span>
     </div>
 
     <div class="pp-grid">
       <!-- 偏好 -->
       <div class="ios-card pp-card">
         <div class="pp-label">写作偏好</div>
-        <label class="mem-toggle" :class="{ on: profile.memory_enabled }">
+        <label class="mem-toggle" :class="{ on: profile && profile.memory_enabled }">
           <input type="checkbox" v-model="profile.memory_enabled" @change="toggleMemory" />
           <span class="mem-switch"></span>
           <span class="mem-text">助手长期记忆：自动从对话提炼偏好</span>
         </label>
         <div class="chip-row">
-          <span v-for="(pref, i) in profile.preferences" :key="i" class="chip">{{ pref }}</span>
+          <span v-for="(pref, i) in (profile && profile.preferences) || []" :key="i" class="chip">{{ pref }}</span>
           <button v-if="!addingPref" class="mini-add" @click="addingPref = true">＋</button>
         </div>
         <div v-if="addingPref" class="inline-add">
@@ -42,11 +42,11 @@
       <!-- 弱点与 bias -->
       <div class="ios-card pp-card">
         <div class="pp-label">弱点与 bias（AI 分析）</div>
-        <div v-if="!analysis" class="hint-text">完成写作后会基于审查历史自动分析</div>
+        <div v-if="!analysis || !((analysis.weaknesses && analysis.weaknesses.length) || (analysis.bias_warnings && analysis.bias_warnings.length))" class="hint-text">完成写作后会基于审查历史自动分析</div>
         <template v-else>
-          <div v-for="(w, i) in analysis.weaknesses" :key="'w' + i" class="analysis-line">⚠️ {{ w }}</div>
-          <div v-for="(b, i) in analysis.bias_warnings" :key="'b' + i" class="analysis-line">🧭 {{ b }}</div>
-          <div class="analysis-sum">{{ analysis.summary }}</div>
+          <div v-for="(w, i) in (analysis.weaknesses || [])" :key="'w' + i" class="analysis-line">⚠️ {{ w }}</div>
+          <div v-for="(b, i) in (analysis.bias_warnings || [])" :key="'b' + i" class="analysis-line">🧭 {{ b }}</div>
+          <div v-if="analysis.summary" class="analysis-sum">{{ analysis.summary }}</div>
         </template>
       </div>
 
@@ -54,10 +54,10 @@
       <div class="ios-card pp-card">
         <div class="pp-label">综合收藏夹 <span class="hint-text">（Ctrl+Shift+K 随时收藏）</span></div>
         <div class="chip-row">
-          <span v-for="(t, i) in profile.favorite_terms" :key="'t' + i" class="chip chip-term">{{ t }}
+          <span v-for="(t, i) in (profile && profile.favorite_terms) || []" :key="'t' + i" class="chip chip-term">{{ t }}
             <button class="chip-x" @click="removeFav('term', t)">×</button>
           </span>
-          <span v-for="(p, i) in profile.favorite_phrases" :key="'p' + i" class="chip chip-phrase">{{ p }}
+          <span v-for="(p, i) in (profile && profile.favorite_phrases) || []" :key="'p' + i" class="chip chip-phrase">{{ p }}
             <button class="chip-x" @click="removeFav('phrase', p)">×</button>
           </span>
         </div>

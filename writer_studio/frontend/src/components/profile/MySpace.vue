@@ -32,11 +32,11 @@
           <div class="sec-label">问卷总结</div>
           <pre class="ref-analysis">{{ currentProject.questionnaire_summary }}</pre>
         </div>
-        <div v-if="currentProject.favorite_terms.length || currentProject.favorite_phrases.length" class="q-summary">
+        <div v-if="((currentProject.favorite_terms || []).length) || ((currentProject.favorite_phrases || []).length)" class="q-summary">
           <div class="sec-label">项目收藏（含参考文本自动归纳）</div>
           <div class="chip-row">
-            <span v-for="(t, i) in currentProject.favorite_terms" :key="'t' + i" class="chip chip-term">{{ t }}</span>
-            <span v-for="(p, i) in currentProject.favorite_phrases" :key="'p' + i" class="chip chip-phrase">{{ p }}</span>
+            <span v-for="(t, i) in currentProject.favorite_terms || []" :key="'t' + i" class="chip chip-term">{{ t }}</span>
+            <span v-for="(p, i) in currentProject.favorite_phrases || []" :key="'p' + i" class="chip chip-phrase">{{ p }}</span>
           </div>
         </div>
       </GlassCard>

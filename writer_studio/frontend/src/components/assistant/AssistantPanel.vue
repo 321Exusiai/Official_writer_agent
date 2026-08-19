@@ -97,7 +97,7 @@
 </template>
 
 <script setup>
-import { ref, nextTick, onMounted } from 'vue'
+import { ref, nextTick, onMounted, watch } from 'vue'
 import { api } from '../../api/client'
 import { useProjectStore } from '../../stores/project'
 
