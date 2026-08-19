@@ -200,16 +200,40 @@ export const useWorkflowStore = defineStore('workflow', {
     },
     handleEvent(s, ev) {
       switch (ev.type) {
-        case 'routing': s.routing = ev.payload; s.state = 'routing'; break
-        case 'routing_complete': s.state = 'questioning'; break
-        case 'question': s.question = ev.payload; break
-        case 'plan': s.plan = ev.payload; s.state = 'waiting_approval'; break
-        case 'draft_ready': s.state = 'reviewing'; break
-        case 'multi_doc': s.versions = ev.payload.versions || []; break
-        case 'review_done': s.review = ev.payload; s.state = 'reviewed'; break
-        case 'finalize': s.state = 'completed'; break
-        case 'rollback': break
-        case 'error': s.error = ev.payload.message; break
+        case 'routing':
+          s.routing = ev.payload
+          s.state = 'routing'
+          break
+        case 'routing_complete':
+          s.state = 'questioning'
+          break
+        case 'question':
+          s.question = ev.payload
+          s.state = 'questioning'
+          break
+        case 'plan':
+          s.plan = ev.payload
+          s.state = 'waiting_approval'
+          break
+        case 'draft_ready':
+          s.draft = (ev.payload && ev.payload.draft) || ev.payload
+          s.state = 'reviewing'
+          break
+        case 'multi_doc':
+          s.versions = ev.payload.versions || []
+          break
+        case 'review_done':
+          s.review = ev.payload
+          s.state = 'reviewed'
+          break
+        case 'finalize':
+          s.state = 'completed'
+          break
+        case 'rollback':
+          break
+        case 'error':
+          s.error = ev.payload.message
+          break
       }
     },
   },

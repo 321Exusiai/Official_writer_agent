@@ -1,7 +1,7 @@
 <template>
   <div class="workflow-panel">
     <!-- 路由阶段 -->
-    <div v-if="cur.state === 'routing' && cur.routing" class="animate-enter">
+    <div v-if="(cur.state === 'routing' && cur.routing) || (cur.routing && !cur.draft && !cur.plan && !cur.question)" class="animate-enter">
       <h3 class="step-title">场景路由</h3>
       <p class="step-question">{{ cur.routing.question }}</p>
       <div class="option-list">
@@ -18,7 +18,7 @@
     </div>
 
     <!-- 问卷阶段 -->
-    <div v-else-if="cur.state === 'questioning' && cur.question" class="animate-enter">
+    <div v-else-if="(cur.state === 'questioning' && cur.question) || (cur.question && !cur.draft && !cur.plan)" class="animate-enter">
       <h3 class="step-title">需求问卷</h3>
       <div class="step-track" style="margin-bottom: 12px">
         <span class="step-badge step-current">
@@ -55,7 +55,7 @@
     </div>
 
     <!-- 方案确认（HITL-1） -->
-    <div v-else-if="cur.state === 'waiting_approval' && cur.plan" class="animate-enter">
+    <div v-else-if="(cur.state === 'waiting_approval' && cur.plan) || (cur.plan && !cur.draft && cur.state !== 'completed')" class="animate-enter">
       <h3 class="step-title">写作方案</h3>
       <GlassCard>
         <div class="plan-grid">
@@ -91,7 +91,7 @@
     </div>
 
     <!-- 写作/审查 -->
-    <div v-else-if="cur.state === 'reviewing'" class="animate-enter">
+    <div v-else-if="cur.state === 'reviewing' || cur.state === 'reviewed' || cur.draft || (projectStore.active && projectStore.active.draft)" class="animate-enter">
       <div class="panel-header-row">
         <h3 class="step-title">文稿生成</h3>
         <div class="view-switchers">
